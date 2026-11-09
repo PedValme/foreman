@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+node_modules/
+.local/
+.claude/settings.local.json
+.claude/worktrees/
+
+# Caché que deja el CLI de Codex cuando un agente lo corre en el repo
+.atl/
+
+# Binarios: viven en Drive, no en git (regla global de Pedro). Aquí se versiona la fuente (Markdown, HTML, scripts).
+*.pdf
+*.docx
+*.pptx
+*.xlsx
