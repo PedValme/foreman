@@ -52,15 +52,35 @@ class LineRules(unittest.TestCase):
         self.assertTrue(one('"api_' + 'key": "' + 'abcdef123456"'))  # quoted JSON key
         self.assertTrue(one("@unittest." + "skipIf(True, 'x')"))
         self.assertTrue(one("@pytest.mark." + "skipif(True, reason='x')"))
-        self.assertTrue(one('DATABASE_URL = "postgresql://' + 'user:pass1234@db.example.com/base"'))
+        self.assertTrue(one('DATABASE_URL = "postgresql://' + 'user:pass1234@db.internal.net/base"'))
         self.assertFalse(one('URL = "postgresql://app:app@localhost:5432/app"'))  # a local test database
         self.assertTrue(one('URL = "postgresql://' + 'app:realPass99@db/base"'))  # db is a real service name
 
+    def test_generic_values_that_are_not_secrets(self):
+        self.assertFalse(one('pass' + 'word = "' + 'field_name_here"'))                 # a plain identifier
+        self.assertFalse(one('api_' + 'key = "' + '123e4567-e89b-12d3-a456-426614174000"'))  # a UUID
+        self.assertFalse(one('tok' + 'en = "' + 'your-api-token"'))                     # placeholders
+        self.assertFalse(one('tok' + 'en = "' + '<api-token>"'))
+        self.assertFalse(one('sec' + 'ret = "' + 'CHANGEME123"'))
+        self.assertFalse(one('sec' + 'ret = "' + 'xxxxxxxxxxxx"'))
+        self.assertFalse(one('pass' + 'word = "' + 'scheme:value1234"'))                # contains ":"
+        self.assertFalse(one('URL = "postgresql://' + 'user:password@db.internal/app"'))  # literal user:password
+        self.assertFalse(one('URL = "postgresql://' + 'app:S3cret99@db.example.com/app"'))  # example host
+        self.assertTrue(one('pass' + 'word = "' + 'Tr0ub4dor-and-3"'))                  # a real-looking value
+
+    def test_real_formats_count_in_tests_but_guesses_do_not(self):
+        self.assertTrue(one("K = '" + GHP + "z" * 36 + "'", "tests/test_x.py"))
+        self.assertFalse(one('pass' + 'word = "' + 'Tr0ub4dor-and-3"', "tests/test_x.py"))
+        self.assertFalse(one('URL = "postgresql://' + 'app:realPass99@db/base"', "tests/test_x.py"))
+
     def test_env_files(self):
-        self.assertTrue(detector.detect("+++ b/.env\n@@ -0,0 +1 @@\n+DB_PASSWORD=" + "s3cr3tvalue\n"))
+        self.assertEqual([f.rule for f in detector.detect("+++ b/.env\n@@ -0,0 +1 @@\n+DB_PASS" + "WORD="
+                                                         + "s3cr3tvalue\n")], ["env-file"])
         # In a .env, lines without = are still searched for secrets.
         self.assertTrue(detector.detect("+++ b/.env\n@@ -0,0 +1 @@\n+# " + GHP + "c" * 36 + "\n"))
-        self.assertEqual([f.rule for f in detector.detect("+++ b/.env\n@@ -0,0 +1 @@\n+A=" + "value\n")], ["env-file"])
+        # Public values in a .env (Vite, Next) are not secrets.
+        self.assertFalse(detector.detect("+++ b/.env.development\n@@ -0,0 +1,2 @@\n+VITE_API_URL=https://api.x.dev\n"
+                                         "+NEXT_PUBLIC_SITE=demo\n"))
         self.assertFalse(detector.detect("+++ b/.env.example\n@@ -0,0 +1 @@\n+A=\n"))
 
     def test_yaml_and_config_files(self):
@@ -90,7 +110,7 @@ class LineRules(unittest.TestCase):
         # A secret added and removed inside the same push stays in the history: every commit is read.
         history = "+++ b/app/c.py\n@@ -0,0 +1 @@\n+K = '" + GHP + "d" * 36 + "'\n"
         self.assertEqual([f.rule for f in detector.detect("", history=history)], ["secret-history"])
-        self.assertTrue(detector.detect("", history="+++ b/.env\n@@ -0,0 +1 @@\n+DB_PASS=" + "value\n"))
+        self.assertTrue(detector.detect("", history="+++ b/.env\n@@ -0,0 +1 @@\n+DB_PASS" + "WORD=" + "realvalue123\n"))
         # The combined diff of a merge (--cc) has one prefix column per parent.
         self.assertTrue(detector.detect("", history="+++ b/c.yml\n@@@ -1,1 -1,1 +1,2 @@@\n++pass" + "word: "
                                         + "PrivateValue123\n"))
@@ -144,6 +164,78 @@ class LineRules(unittest.TestCase):
         self.assertEqual(len(detector.detect("", ["tests/test_x.py"])), 1)
 
 
+class SkipMarkers(unittest.TestCase):
+    MARKERS = (
+        "it." + "skip('x', () => {})", "test." + "only('x', () => {})", "describe." + "skip.each([1])('x', f)",
+        "it." + "concurrent.skip('x', f)", "test." + "only.each`a`('x', f)", "x" + "test('x', f)",
+        "x" + "it('x', f)", "self." + "skipTest('later')", "this." + "skip()", "t." + "Skip(\"flaky\")",
+        "t." + "Skipf(\"%s\", x)", "t." + "SkipNow()", "#[" + "ignore]", "@" + "Disabled", "@" + "Ignore",
+        "@pytest.mark." + "xfail", "pytest." + "xfail('x')", "@unittest." + "expectedFailure",
+    )
+    CONDITIONAL = ("@pytest.mark." + "skipif(sys.platform == 'win32', reason='posix')",
+                   "@unittest." + "skipIf(True, 'x')", "@unittest." + "skipUnless(HAS_GPU, 'gpu')",
+                   "it." + "skipIf(isWindows)('x', f)")
+
+    def test_markers_switch_tests_off(self):
+        for marker in self.MARKERS:
+            self.assertEqual(detector.has_skip_marker(marker), "skip", marker)
+        for marker in self.CONDITIONAL:
+            self.assertEqual(detector.has_skip_marker(marker), "conditional", marker)
+        for text in ("skipTests = 3", "@JsonIgnore", "def skip(self):", "items.skip(2)"):
+            self.assertIsNone(detector.has_skip_marker(text), text)
+
+    def test_documentation_only_names_markers(self):
+        self.assertEqual(one("Use " + "this." + "skip() or @" + "Disabled sparingly.", "README.md"), [])
+        self.assertTrue(one("this." + "skip()", "tests/a.test.js"))
+
+    def test_conditional_skip_is_fine_in_a_new_test_file_only(self):
+        diff = "+++ b/tests/test_posix.py\n@@ -0,0 +1 @@\n+" + self.CONDITIONAL[0] + "\n"
+        self.assertEqual(detector.detect(diff, new_files=["tests/test_posix.py"]), [])
+        self.assertEqual([f.rule for f in detector.detect(diff)], ["test-skipped"])
+
+
+class CheckWeakened(unittest.TestCase):
+    def test_well_known_places(self):
+        cases = ((".github/workflows/ci.yml", "        run: pytest || true"),
+                 (".github/workflows/ci.yaml", "    continue-on-error: true"),
+                 ("pytest.ini", "addopts = --deselect tests/test_a.py::test_b"),
+                 ("pyproject.toml", 'addopts = "--ignore=tests/slow"'),
+                 ("setup.cfg", "addopts = --ignore-glob=tests/*_e2e.py"),
+                 ("jest.config.js", "  testPathIgnorePatterns: ['/tests/auth/'],"),
+                 ("vitest.config.ts", "    exclude: ['tests/flaky/**'],"))
+        for path, line in cases:
+            self.assertEqual([f.rule for f in one(line, path)], ["check-weakened"], path)
+
+    def test_elsewhere_it_is_not_a_finding(self):
+        for path, line in (("scripts/deploy.sh", "rm -f x || true"), ("docs/ci.md", "continue-on-error: true"),
+                           (".github/workflows/ci.yml", "    continue-on-error: false"),
+                           ("vite.config.ts", "  optimizeDeps: { exclude: ['x'] },"),
+                           ("src/app.py", "args = ['--ignore=x']")):
+            self.assertEqual(one(line, path), [], path)
+
+
+class DeletedTestFiles(unittest.TestCase):
+    def test_only_test_code_counts(self):
+        for path in ("tests/test_a.py", "src/a.test.ts", "pkg/a_test.go", "spec/models/user_spec.rb"):
+            self.assertEqual([f.rule for f in detector.detect("", deleted=[path])], ["test-deleted"], path)
+        for path in ("tests/__snapshots__/a.test.ts.snap", "tests/fixtures/user.py", "tests/data.json",
+                     "tests/testdata/input.txt", "tests/README.md"):
+            self.assertEqual(detector.detect("", deleted=[path]), [], path)
+
+
+class Fingerprints(unittest.TestCase):
+    def test_bound_to_rule_file_and_content_not_line_number(self):
+        a = one("x = 1  # " + GHP + "q" * 36)[0]
+        moved = detector.detect("+++ b/app/c.py\n@@ -0,0 +7 @@\n+x = 1  # " + GHP + "q" * 36 + "\n")[0]
+        other = one("x = 2  # " + GHP + "q" * 36)[0]
+        self.assertEqual(a.fingerprint, moved.fingerprint)
+        self.assertNotEqual(a.fingerprint, other.fingerprint)
+        history = detector.detect("", history="+++ b/app/c.py\n@@ -0,0 +1 @@\n+x = 1  # " + GHP + "q" * 36 + "\n")[0]
+        self.assertEqual(history.rule, "secret-history")
+        self.assertEqual(history.fingerprint, a.fingerprint)  # the same exception covers commit and push
+        self.assertEqual(len(a.short_id), 8)
+
+
 class CheckEntryPoint(unittest.TestCase):
     """A change does not edit its own check: neither the command (it comes from the base) nor the files it runs."""
     FILES = {"scripts/check.sh", "package.json", "Makefile", "tests/run.py", "tools/check.py", "suite/__main__.py"}
@@ -185,12 +277,12 @@ class MadeUpValues(unittest.TestCase):
 
     def test_outside_tests_or_real_formats_still_block(self):
         self.assertTrue(detector.has_secret("+" + self.FAKE, "src/config.ts"))
-        self.assertTrue(detector.has_secret('+  sec' + 'ret: "' + 's3cr3t-for-real-99"', "tests/x.test.ts"))
-        self.assertTrue(detector.has_secret('+  pass' + 'word: "' + 'Test-Staging-2026!"', "e2e/config.ts"))
-        self.assertTrue(detector.has_secret('+  pass' + 'word: "' + 'fakebook2026pass"', "tests/x.test.ts"))
+        # In test files only real credential formats count (accepted trade-off: a real password typed into a test
+        # file as a plain string is not caught).
+        for value in ("s3cr3t-for-real-99", "Test-Staging-2026!", "fakebook2026pass"):
+            self.assertFalse(detector.has_secret('+  pass' + 'word: "' + value + '"', "tests/x.test.ts"), value)
+            self.assertTrue(detector.has_secret('+  pass' + 'word: "' + value + '"', "src/x.ts"), value)
         self.assertTrue(detector.has_secret('+  tok' + 'en: "synthetic"  # ' + GHP + "a" * 36, "tests/x.test.ts"))
-        self.assertTrue(detector.has_secret('+  a: "synthetic-1", pass' + 'word: "' + 'real-password-1"',
-                                            "tests/x.test.ts"))
 
     def test_current_credential_formats(self):
         for line, path in (("const k = '" + "AIza" + "Sy" + "A" * 33 + "';", "src/firebase.js"),
@@ -199,7 +291,7 @@ class MadeUpValues(unittest.TestCase):
                            ("//registry.npmjs.org/:_authToken=" + "npm_" + "a1" * 18, ".npmrc"),
                            ("url = 'https://hooks.slack.com/services/" + "T0ABC123/B0DEF456/" + "abcDEF123456ghiJKL7890'",
                             "app/notify.py"),
-                           ("export AWS_SECRET_ACCESS_" + "KEY=" + "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+                           ("export AWS_SECRET_ACCESS_" + "KEY=" + "wJalrXUtnFEMI/K7MDENG/bPxRfiCYREALKEY77",
                             "deploy/up.sh"),
                            ("ENV API_TOK" + "EN=" + "abc123def456ghi", "Dockerfile"),
                            ("const s = '" + "eyJ" + "hbGciOiJIUzI1NiJ9" + ".eyJ" + "zdWIiOiIxMjM0NTY3ODkwIn0"
@@ -304,6 +396,40 @@ class RealRanges(GitRepoCase):
         self.git("add", "-A")
         report = detector.scan_worktree(detector.Repo(self.root), staged_only=True)
         self.assertEqual([f.rule for f in report.findings], ["test-skipped"])
+
+    def test_package_json_counts_only_its_scripts(self):
+        self.write("package.json", json.dumps({"name": "a", "version": "1.0.0", "scripts": {"test": "jest"}}))
+        self.write(detector.CONFIG_FILE, json.dumps({"check": "npm test"}))
+        self.commit("base")
+        self.write("package.json", json.dumps({"name": "a", "version": "1.1.0", "scripts": {"test": "jest"}}))
+        report = detector.scan_worktree(detector.Repo(self.root))
+        self.assertEqual(report.findings, [])  # a version bump does not touch the check
+        self.write("package.json", json.dumps({"name": "a", "version": "1.1.0", "scripts": {"test": "exit 0"}}))
+        report = detector.scan_worktree(detector.Repo(self.root))
+        self.assertEqual([(f.rule, f.file) for f in report.findings], [("check-changed", "package.json")])
+        self.git("add", "-A")
+        self.commit("scripts")
+        base = self.git("rev-parse", "HEAD~1").strip()
+        self.assertEqual([f.rule for f in detector.scan_range(detector.Repo(self.root), base).findings],
+                         ["check-changed"])
+
+    def test_conditional_skip_in_new_and_existing_test_files(self):
+        self.write("tests/test_old.py", "def test_a():\n    assert True\n")
+        self.commit("base")
+        cond = "@pytest.mark." + "skipif(sys.platform == 'win32', reason='posix only')"
+        self.write("tests/test_new.py", cond + "\ndef test_b():\n    assert True\n")
+        self.assertEqual(detector.scan_worktree(detector.Repo(self.root)).findings, [])
+        self.git("add", "-A")
+        self.assertEqual(detector.scan_worktree(detector.Repo(self.root), staged_only=True).findings, [])
+        self.write("tests/test_old.py", cond + "\ndef test_a():\n    assert True\n")
+        fs = detector.scan_worktree(detector.Repo(self.root)).findings
+        self.assertEqual([(f.rule, f.file) for f in fs], [("test-skipped", "tests/test_old.py")])
+
+    def test_a_shared_deadline_in_the_past_is_a_timeout(self):
+        with self.assertRaises(detector.GitTimeout):
+            detector.Repo(self.root, deadline=time.monotonic() - 1).git("status")
+        with self.assertRaises(detector.GitTimeout):
+            detector.find_repo(self.root, deadline=time.monotonic() - 1)
 
     def test_branch_base_with_a_local_main_only(self):
         self.write("app.py", "x = 1\n")

@@ -20,8 +20,13 @@ class GitRepoCase(unittest.TestCase):
         for key, value in (("user.name", "Foreman Test"), ("user.email", "test@example.invalid"),
                            ("commit.gpgsign", "false"), ("core.hooksPath", hooks), ("core.autocrlf", "false")):
             self.git("config", key, value)
+        from foreman import grants
+        self._old_store = grants.STORE_DIR_OVERRIDE
+        grants.STORE_DIR_OVERRIDE = os.path.join(self.tmp, "store")
 
     def tearDown(self):
+        from foreman import grants
+        grants.STORE_DIR_OVERRIDE = self._old_store
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def git(self, *args, cwd=None):
