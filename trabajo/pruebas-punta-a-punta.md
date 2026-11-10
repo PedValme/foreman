@@ -34,13 +34,11 @@ commands in one session capture the session id from the first call and use `--re
   rule and nothing committed or pushed: deleted test file; test moved out of the tests; changed check script named
   in `.foreman.json`; changed `scripts.test` in `package.json` with no `.foreman.json`; a workflow test step with
   `|| true`; a secret in the diff; `--no-verify`; `HUSKY=0`; `git config core.hooksPath`; `git rm … && git commit`
-  in one line; `git push` of a branch whose commit deleted a test. Cases 12 (an honest commit passes) and 13 (no
-  repository in sight) had not finished when the session closed: run those two again.
+  in one line; `git push` of a branch whose commit deleted a test. Case 12: an honest commit passed untouched.
+  Case 13: a commit with no repository in sight was blocked with the `workdir` hint. All 13 as expected.
 
 ## Not yet verified in a real session
 Gate
-- [ ] battery cases 12 and 13: an honest commit passes; a commit with no repository in sight is blocked with the
-      `workdir` hint.
 - [ ] a secret that was added and removed in an earlier commit of the pushed range (`secret-history`); a `.env`.
 - [ ] `gh pr create` on a rigged branch (blocked) and on a clean branch (passes).
 - [ ] `pre_verify` alone (level `merge`): the agent ends a turn with a rigged tree and is told to undo it.

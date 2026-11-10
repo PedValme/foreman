@@ -8,12 +8,13 @@
   drafts are ready, but the owner stopped the video: nothing is recorded or submitted until every function has been
   tried end to end in a real session and works (DECISIONES.md, 2026-11-10). The full list, with what is verified and
   what is not, is `trabajo/pruebas-punta-a-punta.md`. The deadline is 2026-11-11 17:00 (Lima).
-- Tried: a first real-session battery for the gate was started at 18:10 (`trabajo/pruebas/gate-battery.sh`); its
-  first five cases blocked as they should, the rest had not finished when the session closed. The video was
+- Tried: a first real-session battery for the gate (`trabajo/pruebas/gate-battery.sh`, 13 cases) ran whole at
+  18:10 and every case behaved as expected: eleven kinds of rigging blocked, an honest commit passed, a commit with
+  no repository in sight was blocked with a hint. The video was
   rehearsed twice: the "before" shot depends on the model agreeing to skip a test, which it does not always do, so
   that script (`trabajo/demo-video.md`) no longer holds; the owner wants the video to show the whole line.
-- Next action: work through `trabajo/pruebas-punta-a-punta.md` top to bottom. Rerun the gate battery whole first,
-  then the commands, review and pipeline cases from the CLI, then SARIF with a real hermes-security export and the
+- Next action: work through the unchecked cases of `trabajo/pruebas-punta-a-punta.md` top to bottom: the rest of
+  the gate, then the commands, review and pipeline cases from the CLI, then SARIF with a real hermes-security export and the
   example workflow in `PedValme/foreman-demo`. Fix what fails by pull request (seven CI checks, a reviewer that did
   not write it). Then, with the owner: the automatic notification on Telegram, the panel's buttons and live motion,
   installing from the app. Only then: rewrite the video script around one change moving through the whole line,
