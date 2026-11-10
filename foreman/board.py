@@ -168,10 +168,14 @@ def _closed_numbers(prs: list, name_with_owner: str) -> dict:
 _PASSED = {"SUCCESS", "NEUTRAL", "SKIPPED"}
 
 
-def ci_summary(rollup) -> str:
-    """One phrase for a ``statusCheckRollup``: CI passing, failing (n of m), running, or no CI."""
+def ci_summary(rollup, conflicting: bool = False) -> str:
+    """One phrase for a ``statusCheckRollup``: CI passing, failing (n of m), running, no checks, or unknown when
+    GitHub's answer had no rollup at all. A pull request that conflicts gets no ``pull_request`` checks from GitHub
+    (there is no merge commit to test), which is said."""
+    if not isinstance(rollup, list):
+        return "CI unknown (checks not read)"
     passed = failed = pending = 0
-    for c in rollup or []:
+    for c in rollup:
         if not isinstance(c, dict):
             continue
         if c.get("__typename") == "StatusContext" or ("state" in c and "conclusion" not in c):
@@ -190,7 +194,7 @@ def ci_summary(rollup) -> str:
             failed += 1
     total = passed + failed + pending
     if not total:
-        return "no CI"
+        return "no CI checks (none run while it conflicts)" if conflicting else "no CI checks"
     if failed:
         return "CI failing (%d of %d)" % (failed, total)
     if pending:
@@ -203,9 +207,11 @@ def _pr_lines(pr: dict, name_with_owner: str) -> list:
     facts = [trim(pr.get("headRefName") or "?", 30)]
     if pr.get("isDraft"):
         facts.append("draft")
-    facts.append(ci_summary(pr.get("statusCheckRollup")))
-    if str(pr.get("mergeable") or "").upper() == "CONFLICTING":
+    conflicting = str(pr.get("mergeable") or "").upper() == "CONFLICTING"
+    if conflicting:
         facts.append("conflicts")
+    ci = ci_summary(pr.get("statusCheckRollup"))
+    facts.append("no CI checks" if conflicting and ci.startswith("no CI") else ci)
     closes = closing_refs(pr, name_with_owner)
     facts.append("closes " + ", ".join(closes) if closes else "closes no issue")
     return [head, "       " + trim(" · ".join(facts), WIDTH - 7)]
@@ -485,8 +491,9 @@ def pr_verdict(root: str, number: int) -> dict:
     v.update(title=view.get("title") or "", url=view.get("url") or "", name=name, state=view.get("state") or "",
              draft=bool(view.get("isDraft")), head=view.get("headRefName") or "", base=view.get("baseRefName") or "",
              head_oid=view.get("headRefOid") or "", closes=closing_refs(view, name),
-             ci=ci_summary(view.get("statusCheckRollup")),
+             mergeable=str(view.get("mergeable") or "UNKNOWN").upper(),
              conflicts=str(view.get("mergeable") or "").upper() == "CONFLICTING")
+    v["ci"] = ci_summary(view.get("statusCheckRollup"), conflicting=v["conflicts"])
     repo = Repo(root, budget=BOARD_BUDGET_SECONDS)
     oid = v["head_oid"]
     if not _OID.fullmatch(oid):
@@ -508,7 +515,7 @@ def pr_verdict(root: str, number: int) -> dict:
                 v["how"] = "local"
                 v["blockers"], v["marked"], v["allowed_by_user"] = _split(report.findings, root)
                 v["check"] = report.check
-                v["verdict"] = "BLOCKED" if v["blockers"] or v["marked"] else "MERGEABLE"
+                v["verdict"] = "BLOCKED" if v["blockers"] or v["marked"] else "CLEAN"
                 return v
         try:
             diff = gh(["pr", "diff", str(number), "--color", "never"], root, timeout=GH_DIFF_TIMEOUT)
@@ -550,7 +557,7 @@ def pr_verdict(root: str, number: int) -> dict:
         v["error"] = str(e)
         return v
     v["blockers"], v["marked"], v["allowed_by_user"] = _split(findings, root)
-    v["verdict"] = "BLOCKED" if v["blockers"] or v["marked"] else "MERGEABLE"
+    v["verdict"] = "BLOCKED" if v["blockers"] or v["marked"] else "CLEAN"
     return v
 
 
@@ -562,8 +569,6 @@ def branch_verdict(root: str, branch: str, keys: tuple = ()) -> dict:
     if not branch or branch == current:
         v = commands.verdict(root, *keys)
         v.update(kind="branch", name_branch=current, current=True)
-        if v.get("verdict") == "CLEAN":
-            v["verdict"] = "MERGEABLE"
         return v
     v = {"kind": "branch", "name_branch": branch, "repo": root, "current": False, "notes": [], "blockers": [],
          "marked": [], "allowed_by_user": [], "verdict": "UNKNOWN"}
@@ -587,7 +592,7 @@ def branch_verdict(root: str, branch: str, keys: tuple = ()) -> dict:
     count = repo.try_git("rev-list", "--count", "%s..%s" % (base, rev))
     v.update(base=label, commits_ahead=int(count) if count and count.isdigit() else None, check=report.check)
     v["blockers"], v["marked"], v["allowed_by_user"] = _split(report.findings, root)
-    v["verdict"] = "BLOCKED" if v["blockers"] or v["marked"] else "MERGEABLE"
+    v["verdict"] = "BLOCKED" if v["blockers"] or v["marked"] else "CLEAN"
     return v
 
 
@@ -627,29 +632,55 @@ def format_pr_verdict(v: dict) -> str:
         if v.get("missing"):
             lines.append("`/foreman verdict <branch>` still works on local branches.")
         return "\n".join(lines)
-    lines = ["Foreman verdict for PR #%d: %s" % (n, v["verdict"]), "  " + trim(v.get("title"), WIDTH - 2)]
+    open_pr = not v.get("state") or v["state"] == "OPEN"
+    hold = not_ready(v) if open_pr else []
+    head = "Foreman verdict for PR #%d: %s" % (n, v["verdict"])
+    if v["verdict"] == "CLEAN" and open_pr:
+        head += " — but not mergeable yet" if hold else " — ready to merge"
+    lines = [head, "  " + trim(v.get("title"), WIDTH - 2)]
     facts = ["%s -> %s" % (v.get("head") or "?", v.get("base") or "?")]
     if v.get("draft"):
         facts.append("draft")
-    facts.append(v.get("ci") or "no CI")
     if v.get("conflicts"):
         facts.append("conflicts")
     if v.get("state") and v["state"] != "OPEN":
         facts.append(v["state"].lower())
     lines.append("  " + trim(" · ".join(facts), WIDTH - 2))
+    ci = str(v.get("ci") or "CI unknown")
+    lines.append("  CI: %s" % (ci[3:] if ci.startswith("CI ") else ci))
     lines.append("  Closes: %s" % (", ".join(v.get("closes") or []) or "no issue"))
     lines += _reasons(v)
-    if v["verdict"] == "MERGEABLE":
+    if v["verdict"] == "CLEAN":
         lines.append("No skipped, deleted or moved tests, no change to the check, no secrets.")
+    if hold and v["verdict"] == "CLEAN":
+        lines.append("Not mergeable yet:")
+        lines += [wrap(h, "    ", "  - ") for h in hold]
     lines += [wrap(note, "  ", "Note: ") for note in v.get("notes") or []]
-    if v.get("state") and v["state"] != "OPEN":
+    if not open_pr:
         pass
-    elif v["verdict"] == "MERGEABLE":
+    elif v["verdict"] == "CLEAN" and not hold:
+        caution = "" if v.get("ci") == "CI passing" else " Look at the CI first (%s)." % v.get("ci")
         lines.append(wrap("`/foreman merge %d` (squash; add --merge or --rebase to change), or `/foreman reject %d "
-                          "<note>`." % (n, n), "  ", "Next: "))
+                          "<note>`.%s" % (n, n, caution), "  ", "Next: "))
+    elif v["verdict"] == "CLEAN":
+        lines.append(wrap("fix what is listed above, then `/foreman verdict %d` again." % n, "  ", "Next: "))
     else:
         lines.append(wrap("`/foreman reject %d [note]` posts these reasons on the pull request." % n, "  ", "Next: "))
     return "\n".join(lines)
+
+
+def not_ready(v: dict) -> list:
+    """Why GitHub cannot merge the pull request now, with what to do; [] when it can. Foreman's own CLEAN or
+    BLOCKED is separate: this is the pull request's state on GitHub."""
+    out = []
+    base = v.get("base") or "the base branch"
+    if v.get("draft"):
+        out.append("it is a draft: mark it ready for review (`gh pr ready %d`)." % v["number"])
+    if v.get("mergeable") == "CONFLICTING":
+        out.append("it conflicts with %s: update the branch (merge or rebase %s into it, resolve, push)." % (base, base))
+    elif v.get("mergeable") not in ("MERGEABLE",):
+        out.append("GitHub is still working out whether it can be merged: try again in a moment.")
+    return out
 
 
 def format_branch_verdict(v: dict, pr: Optional[dict] = None, gh_note: str = "") -> str:
@@ -669,7 +700,7 @@ def format_branch_verdict(v: dict, pr: Optional[dict] = None, gh_note: str = "")
     elif gh_note:
         lines.append("  " + gh_note)
     lines += _reasons(v)
-    if v["verdict"] == "MERGEABLE":
+    if v["verdict"] == "CLEAN":
         lines.append("No skipped, deleted or moved tests, no change to the check, no secrets.")
     return "\n".join(lines)
 
@@ -772,7 +803,7 @@ def cmd_board(args: str = "", keys: tuple = (), platform: Optional[str] = None) 
         if len(free) > MAX_ISSUES:
             lines.append("  ... and %d more (`/foreman issues`)" % (len(free) - MAX_ISSUES))
         if prs:
-            next_cmds.append(("/foreman verdict %s" % prs[0].get("number"), "mergeable or blocked, and why"))
+            next_cmds.append(("/foreman verdict %s" % prs[0].get("number"), "clean or blocked, and why"))
         if v.get("verdict") == "BLOCKED":
             next_cmds.append(("/foreman status", "why the current branch is blocked"))
         if free:
@@ -981,18 +1012,25 @@ def cmd_merge(args: str = "", keys: tuple = (), platform: Optional[str] = None) 
                 % (number, v["error"].rstrip(".")))
     if v.get("state") and v["state"] != "OPEN":
         return "Foreman: PR #%d is %s; there is nothing to merge." % (number, v["state"].lower())
-    if v["verdict"] != "MERGEABLE":
+    if v["verdict"] != "CLEAN":
         return "\n".join(["Foreman will not merge PR #%d: it is %s." % (number, v["verdict"])] + _reasons(v)
                          + ["Next: `/foreman reject %d [note]` posts these reasons on the pull request." % number])
+    hold = not_ready(v)
+    if hold:  # --yes never overrides this: GitHub's own state
+        return "\n".join(["Foreman will not merge PR #%d: Foreman finds it CLEAN, but it is not mergeable yet:"
+                          % number] + [wrap(h, "    ", "  - ") for h in hold]
+                         + ["Next: fix that, then `/foreman merge %d` again." % number])
     if not _OID.fullmatch(v.get("head_oid") or ""):
         return "Foreman will not merge PR #%d: GitHub did not give its head commit." % number
     # --match-head-commit: GitHub merges exactly the commit Foreman inspected, or nothing.
     command = "gh pr merge %d --%s --delete-branch --match-head-commit %s" % (number, method, v["head_oid"])
     if not yes:
         rerun = "/foreman merge %d%s --yes" % (number, "" if method == "squash" else " --" + method)
-        question = "Merge PR #%d (%s, %s) into %s?\n%s\nCloses: %s · %s" % (
-            number, v["head_oid"][:7], method, v.get("base") or "its base", trim(v.get("title"), WIDTH),
-            ", ".join(v.get("closes") or []) or "no issue", v.get("ci") or "no CI")
+        ci = v.get("ci") or "CI unknown"
+        warn = "" if ci == "CI passing" else "WARNING: %s.\n" % ci
+        question = "%sMerge PR #%d (%s, %s) into %s?\n%s\nCloses: %s · %s" % (
+            warn, number, v["head_oid"][:7], method, v.get("base") or "its base", trim(v.get("title"), WIDTH),
+            ", ".join(v.get("closes") or []) or "no issue", ci)
         answer = _confirm(question, [("merge", "Merge", "run `%s`" % command), ("cancel", "Cancel", "merge nothing")])
         if answer == "cancel":
             return "Foreman: cancelled; PR #%d was not merged." % number
@@ -1000,7 +1038,7 @@ def cmd_merge(args: str = "", keys: tuple = (), platform: Optional[str] = None) 
             return _no_answer("PR #%d was not merged" % number, rerun)
     state, detail = _terminal(command, root)
     where = " in %s" % v["name"] if v.get("name") else ""
-    lines = ["Foreman verdict for PR #%d: MERGEABLE (%s)." % (number, v.get("ci") or "no CI"),
+    lines = ["Foreman verdict for PR #%d: CLEAN (%s)." % (number, v.get("ci") or "CI unknown"),
              _outcome_text(state, detail, "merged PR #%d (%s)%s" % (number, method, where), command)]
     return "\n".join(lines)
 
@@ -1098,7 +1136,7 @@ def cmd_reject(args: str = "", keys: tuple = (), platform: Optional[str] = None)
     if v.get("error") and not note:
         return ("Foreman cannot compute a verdict for PR #%d (%s). To reject it anyway, say why: `/foreman reject "
                 "%d <note>`." % (number, v["error"].rstrip("."), number))
-    if v.get("verdict") == "MERGEABLE" and not note:
+    if v.get("verdict") == "CLEAN" and not note:
         return ("Foreman found no blockers in PR #%d. To reject it, say why: `/foreman reject %d <note>`."
                 % (number, number))
     name = v.get("name") or ""
@@ -1165,8 +1203,8 @@ SUBCOMMANDS: dict = {
     "use": (cmd_use, "[path|n]  pin the repository for this session"),
     "prs": (cmd_prs, "open PRs: head, CI, the issues each one closes"),
     "issues": (cmd_issues, "open issues and the PR that closes each"),
-    "verdict": (cmd_verdict, "[pr|branch]  MERGEABLE or BLOCKED, with reasons"),
-    "merge": (cmd_merge, "<pr> [--merge|--rebase] [--yes]  if MERGEABLE, after you confirm"),
+    "verdict": (cmd_verdict, "[pr|branch]  CLEAN or BLOCKED, with reasons"),
+    "merge": (cmd_merge, "<pr> [--merge|--rebase] [--yes]  if CLEAN and ready, after you confirm"),
     "reject": (cmd_reject, "<pr> [--close [--yes]] [note]  post the reasons on the PR"),
     "status": (cmd_status, "[path]  this repository: CLEAN or BLOCKED, with reasons"),
 }

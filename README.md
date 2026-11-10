@@ -63,8 +63,8 @@ approvals off, Hermes lets them through without a person.**
 /foreman                     the board: branch vs base, open pull requests, the issues they close
 /foreman use [path|n]        pin the repository for this session (no argument: pick one)
 /foreman prs | issues        focused views of the open pull requests or issues
-/foreman verdict [pr|branch] MERGEABLE or BLOCKED, each reason as [rule] file:line and its fix
-/foreman merge <pr> [--merge|--rebase] [--yes]   merge it, only if MERGEABLE and you confirm
+/foreman verdict [pr|branch] CLEAN or BLOCKED, each reason as [rule] file:line and its fix
+/foreman merge <pr> [--merge|--rebase] [--yes]   merge it, only if CLEAN, ready and you confirm
 /foreman reject <pr> [--close [--yes]] [note]    post the reasons as one comment on the pull request
 /foreman status [path]       verdict for the current repository: CLEAN or BLOCKED, with reasons
 /foreman allow [id]          list or allow findings the agent marked
@@ -88,7 +88,7 @@ Issues no open PR closes (1):
   #9    Crash on empty input  [bug]
 
 Next:
-  /foreman verdict 7       mergeable or blocked, and why
+  /foreman verdict 7       clean or blocked, and why
   /foreman issues          every open issue and its PR
 ```
 
@@ -101,11 +101,34 @@ repository as described in *Known limits*.
 check on it, history included. Otherwise it reads GitHub's diff (`gh pr diff`) without touching your working tree;
 a secret added and removed again in an earlier commit is then not seen, and the output says so.
 
-**Merge and reject.** `/foreman merge <pr>` refuses when the verdict is BLOCKED or cannot be computed. When it is
-MERGEABLE, Foreman asks you with Hermes's picker: *Merge PR #7 (abc1234, squash) into main?*, with the title, the
-linked issues and the CI state, and only **Merge** goes on. Where Hermes cannot ask (a cron job, a chat without
-choices) or nobody answers in time, nothing is merged and Foreman prints the command to confirm by typing it:
-`/foreman merge 7 --yes`. `--yes` skips the question, never the verdict. The merge runs `gh pr merge <pr> --squash
+Foreman's verdict is about rigging: **CLEAN** or **BLOCKED**. Whether GitHub can merge the pull request now is a
+separate fact, and the verdict says both:
+
+```
+Foreman verdict for PR #4: CLEAN — but not mergeable yet
+  SARIF source and CI mode
+  claude/sarif-ci -> main · conflicts
+  CI: no CI checks (none run while it conflicts)
+  Closes: no issue
+No skipped, deleted or moved tests, no change to the check, no secrets.
+Not mergeable yet:
+  - it conflicts with main: update the branch (merge or rebase main into it,
+    resolve, push).
+Next: fix what is listed above, then `/foreman verdict 4` again.
+```
+
+A pull request is ready to merge when Foreman finds it CLEAN, GitHub reports no conflict, and it is not a draft.
+CI is shown but does not decide: failing, running or absent CI makes the hint cautious and is the first line of the
+merge question. "no CI checks" means GitHub reported none (it runs no `pull_request` checks while a pull request
+conflicts); "CI unknown" means Foreman could not read them.
+
+**Merge and reject.** `/foreman merge <pr>` refuses when the verdict is BLOCKED or cannot be computed, and when the
+pull request conflicts, is a draft, or GitHub is still computing whether it can merge (it says what to do; `--yes`
+does not override any of these). When it is ready, Foreman asks you with Hermes's picker: *Merge PR #7 (abc1234,
+squash) into main?*, with the title, the linked issues and the CI state (a warning first when CI is not passing),
+and only **Merge** goes on. Where Hermes cannot ask (a cron job, a chat without choices) or nobody answers in time,
+nothing is merged and Foreman prints the command to confirm by typing it: `/foreman merge 7 --yes`. `--yes` skips
+the question, never the verdict. The merge runs `gh pr merge <pr> --squash
 --delete-branch --match-head-commit <sha>` (so only the commit it inspected is merged) through Hermes's own terminal
 tool, never from its own subprocess.
 `/foreman reject <pr>` posts one Markdown comment with the reasons (and a saved model review, if there is one, and
