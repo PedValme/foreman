@@ -41,6 +41,9 @@ SHOTS = [
     ("05-long-text-reduced-dark", "s=5&step=0&theme=dark&w=400&motion=reduce", 1000, 800),
     ("05-corrupt-file-light", "s=5&step=1&theme=light&w=400", 1000, 700),
     ("05-backend-off-dark", "s=5&step=2&theme=dark&w=400", 1000, 700),
+    # What the real app showed: a review that failed at merge (no bounce), then the backend failing ("reconnecting").
+    ("07-failed-review-no-bounce-light", "s=6&step=0&theme=light&w=400", 1000, 900),
+    ("07-reconnecting-dark", "s=6&step=0&go=1&delay=1500&theme=dark&w=400", 1000, 900, 2200),
     # Mid-animation: the snapshot changes at 1.5 s and the shot is taken about 0.3 s later.
     ("06-motion-bounce-midway-light", "s=3&step=1&go=2&delay=1500&theme=light&w=400", 1000, 700, 1850),
     ("06-motion-to-owner-midway-dark", "s=3&step=3&go=4&delay=1500&theme=dark&w=400", 1000, 700, 1800),
