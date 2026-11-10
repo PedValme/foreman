@@ -4,7 +4,7 @@ import json
 import os
 import unittest
 
-from foreman import board, commands, detector, gate, grants
+from foreman import board, commands, detector, gate, grants, pipeline
 from tests_support import GitRepoCase
 
 SKIP = "@pytest.mark." + "skip"
@@ -101,13 +101,16 @@ class BoardCase(GitRepoCase):
         self.write("tests/test_x.py", "import pytest\ndef test_x(): assert True\n")
         self.commit("base")
         self.gh = FakeGh()
-        self._old = (board.GH_RUNNER, board._CTX)
+        self._old = (board.GH_RUNNER, board._CTX, pipeline.SETTINGS_OVERRIDE)
         board.GH_RUNNER = self.gh
         board.bind(FakeCtx())
         board.pin(self.root, KEYS)
+        # These tests cover merge without the second model (auto_review: off, the behaviour before the pipeline);
+        # tests/test_pipeline.py covers the default level, merge.
+        pipeline.SETTINGS_OVERRIDE = {"auto_review": "off"}
 
     def tearDown(self):
-        board.GH_RUNNER, board._CTX = self._old
+        board.GH_RUNNER, board._CTX, pipeline.SETTINGS_OVERRIDE = self._old
         super().tearDown()
 
     def run_cmd(self, text):

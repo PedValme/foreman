@@ -15,6 +15,8 @@ from typing import Callable, Optional
 from . import detector, grants, review
 from .detector import MARKER, GitError, Repo
 from .gate import HOW, NO_REPOSITORY_HERE, RECORDED, locate
+from .verdicts import CLEAN, INCOMPLETE, NEEDS_OK, verdict_of
+from . import verdicts
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +74,7 @@ def verdict(path: Optional[str] = None, *keys: str, platform: Optional[str] = No
         ahead = int(count) if count and count.isdigit() else None
     dirty = repo.try_git("status", "--porcelain")
     return {
-        "verdict": "BLOCKED" if blockers or marked else ("NEEDS_APPROVAL" if errors else "CLEAN"),
+        "verdict": verdict_of(blockers, errors, marked),
         "repo": root,
         "chosen_from": how,
         "branch": repo.branch(),
@@ -86,7 +88,20 @@ def verdict(path: Optional[str] = None, *keys: str, platform: Optional[str] = No
         "allowed_by_user": [f.to_dict() for f in granted],
         "errors": errors,
         "notes": [f.to_dict() for f in notes],
+        "no_tests": not has_tests(repo),
     }
+
+
+NO_TESTS = ("No tests found here: the gate can only catch secrets and hook bypasses; the second-model review is the "
+            "main check.")
+
+
+def has_tests(repo: Repo) -> bool:
+    """True when the repository has at least one test file, tracked or untracked (True when git cannot tell)."""
+    out = repo.try_git("ls-files", "--cached", "--others", "--exclude-standard")
+    if out is None:
+        return True
+    return any(detector.is_test_path(p) for p in out.splitlines())
 
 
 def _format_finding(d: dict, with_id: bool = False) -> str:
@@ -126,8 +141,14 @@ def format_verdict(v: dict) -> str:
         shown = "; ".join("%s: %s" % (n["location"], n["message"]) for n in v["notes"][:2])
         lines.append("SARIF: %d note(s), not blocking: %s%s" % (len(v["notes"]), shown,
                                                                  " (+%d more)" % (len(v["notes"]) - 2) if len(v["notes"]) > 2 else ""))
-    if v["verdict"] == "CLEAN":
+    if v["verdict"] == CLEAN:
         lines.append("No skipped, deleted or moved tests, no change to the check, no secrets.")
+    elif v["verdict"] == INCOMPLETE:
+        lines.append("INCOMPLETE is not a pass: fix what could not be inspected, then check again.")
+    elif v["verdict"] == NEEDS_OK:
+        lines.append("Only findings the agent marked are left: `/foreman allow <id>` if you agree with each one.")
+    if v.get("no_tests"):
+        lines.append(NO_TESTS)
     return "\n".join(lines)
 
 
@@ -154,6 +175,12 @@ def cmd_allow(args: str, keys: tuple = (), platform: Optional[str] = None) -> st
     ok, entry = grants.grant(short_id)
     if not ok:
         return "Foreman: %s Run `/foreman allow` to list what is waiting." % entry
+    try:
+        from . import pipeline
+        pipeline.event_in_repo(entry.get("repo") or "", "You allowed %s [%s] %s" % (
+            entry.get("id", short_id), entry.get("rule", "?"), entry.get("location", "?")))
+    except Exception:
+        logger.warning("foreman: cannot record the grant on the pipeline", exc_info=True)
     return "Foreman: allowed %s [%s] %s for 24 hours. %s" % (entry.get("id", short_id), entry.get("rule", "?"),
                                                             entry.get("location", "?"), _covers(entry.get("rule", "")))
 
@@ -177,6 +204,7 @@ def _covers(rule: str) -> str:
 def cmd_help(args: str = "", keys: tuple = (), platform: Optional[str] = None) -> str:
     lines = ["Foreman: a green check the agent did not rig.", "", "Usage: /foreman <subcommand>"]
     lines += ["  %-14s %s" % (name, doc) for name, (_fn, doc) in SUBCOMMANDS.items()]
+    lines += ["", "Verdicts:", verdicts.table()]
     lines += ["",
               "Foreman blocks git commit, git push, gh pr create and gh pr merge when the change skips, deletes or "
               "moves tests, edits or weakens what the check runs, bypasses hooks or carries a secret.",
@@ -188,7 +216,7 @@ def cmd_help(args: str = "", keys: tuple = (), platform: Optional[str] = None) -
 
 
 SUBCOMMANDS: dict = {
-    "status": (cmd_status, "[path]  verdict for the current repository: CLEAN or BLOCKED, with reasons"),
+    "status": (cmd_status, "[path]  this repository's verdict (CLEAN, BLOCKED, INCOMPLETE, NEEDS YOUR OK)"),
     "allow": (cmd_allow, "[id]  list findings the agent marked, or allow one of them (you only)"),
     **review.SUBCOMMANDS,
     "help": (cmd_help, "this help"),
@@ -227,8 +255,11 @@ TOOL_SCHEMA = {
     "description": (
         "Foreman's deterministic verdict for a git repository: whether the current branch (against its base) and "
         "the uncommitted changes skip, isolate, delete or move tests, change or weaken what the check runs, or add "
-        "secrets. Returns JSON with verdict CLEAN or BLOCKED, and each finding's file, line, rule and how to fix "
-        "it. Call it before committing or opening a pull request."),
+        "secrets. Returns JSON with verdict CLEAN (nothing found, everything inspected), BLOCKED (a blocker: fix "
+        "it), INCOMPLETE (something it was told to inspect could not be, such as an unreadable SARIF report: not a "
+        "pass) or NEEDS YOUR OK (only findings marked foreman:allow, waiting for the user's /foreman allow; you "
+        "cannot allow them), and each finding's file, line, rule and how to fix it. Call it before committing or "
+        "opening a pull request."),
     "parameters": {
         "type": "object",
         "properties": {

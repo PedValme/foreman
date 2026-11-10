@@ -63,12 +63,13 @@ approvals off, Hermes lets them through without a person.**
 /foreman                     the board: branch vs base, open pull requests, the issues they close
 /foreman use [path|n]        pin the repository for this session (no argument: pick one)
 /foreman prs | issues        focused views of the open pull requests or issues
-/foreman verdict [pr|branch] CLEAN or BLOCKED, each reason as [rule] file:line and its fix
-/foreman merge <pr> [--merge|--rebase] [--yes]   merge it, only if CLEAN, ready and you confirm
+/foreman verdict [pr|branch] the verdict (table below), each reason as [rule] file:line and its fix
+/foreman merge <pr> [--merge|--rebase] [--yes]   merge it, only if CLEAN, ready, reviewed and you confirm
 /foreman reject <pr> [--close [--yes]] [note]    post the reasons as one comment on the pull request
-/foreman status [path]       verdict for the current repository: CLEAN or BLOCKED, with reasons
+/foreman status [path]       the verdict for the current repository, with reasons
 /foreman allow [id]          list or allow findings the agent marked
-/foreman review [pr|branch]  a second model reviews the diff (see below)
+/foreman review [pr|branch] [--fresh]  a second model reviews the diff (see below)
+/foreman pipeline [pr|branch] a change's stages: gate, review, bounces, owner, merge
 /foreman notify [on [target]|off|test]   tell you on your phone when a PR waits for you (off by default)
 /foreman help
 ```
@@ -102,8 +103,17 @@ repository as described in *Known limits*.
 check on it, history included. Otherwise it reads GitHub's diff (`gh pr diff`) without touching your working tree;
 a secret added and removed again in an earlier commit is then not seen, and the output says so.
 
-Foreman's verdict is about rigging: **CLEAN** or **BLOCKED**. Whether GitHub can merge the pull request now is a
-separate fact, and the verdict says both:
+Foreman's verdict is about rigging, with one vocabulary everywhere (status, board, verdict, merge, review, the
+`foreman_check` tool, the pipeline and CI):
+
+| Verdict | Meaning | Merge |
+|---|---|---|
+| **CLEAN** | nothing found, and everything Foreman was told to inspect was inspected | allowed, after you confirm |
+| **BLOCKED** | a skipped, deleted or moved test, a change to the check, a secret, a blocking SARIF result | refused |
+| **INCOMPLETE** | something it was told to inspect could not be (an unreadable SARIF report, a git error, the time budget) | refused |
+| **NEEDS YOUR OK** | only findings the agent marked `foreman:allow`, waiting for `/foreman allow <id>` | refused until you allow them |
+
+Whether GitHub can merge the pull request now is a separate fact, and the verdict says both:
 
 ```
 Foreman verdict for PR #4: CLEAN — but not mergeable yet
@@ -198,7 +208,7 @@ see it and a change cannot point it elsewhere (editing these keys, or a tracked 
   gates" and does not block.
 - **Missing or unreadable report**: if the base's `.foreman.json` names it, Foreman cannot say the change is clean:
   the hooks ask for approval ("could not read the SARIF report <path> named in .foreman.json"), `/foreman status`
-  says `NEEDS_APPROVAL`, and CI exits 2; the same for `--sarif`. A report with zero results is a valid clean scan.
+  says `INCOMPLETE` (and so do the board, `/foreman verdict` and `/foreman merge`, which refuses), and CI exits 2; the same for `--sarif`. A report with zero results is a valid clean scan.
   Reports over 20 MB are not read.
 - **The agent cannot edit the report**: `write_file` and `patch` on a path listed under `sarif` in the base's
   `.foreman.json` are blocked (regenerate it with the scanner), and a command that redirects output into it before a
@@ -238,9 +248,9 @@ change introduces.
 /foreman review my-feat  a local branch against its base
 ```
 
-- **On demand only.** It runs when you type the command, never inside a hook, and the agent has no tool that runs
-  it. Each run is one model call and **costs tokens** on your provider (up to about 30k tokens of diff plus the
-  answer).
+- **When it runs.** When you type the command, and as *The pipeline* below sets it (`auto_review`); never inside a
+  hook. Each run is one model call and **costs tokens** on your provider (up to about 30k tokens of diff plus the
+  answer); the same diff is never reviewed twice unless you type `/foreman review --fresh`.
 - **What leaves your machine:** the diff (bounded, see below), the branch or pull request title and commit subjects,
   and the detector's findings go to the model provider you configured in Hermes, through Hermes (`ctx.llm`; Foreman
   never sees your keys). Nothing else is sent, and Foreman makes no network call of its own (`gh` talks to GitHub
@@ -282,6 +292,49 @@ change introduces.
   The same-model check compares with the main model in your config; a model you switched to inside the session is
   not visible to plugins. For a pull request number the detector sees only the PR's diff (`check-changed` and
   `secret-history` need the branch checked out: run `/foreman status` there).
+
+## The pipeline
+
+Each change (a pull request, or a branch before it has one) moves along a small line:
+**write -> gate -> second-model review -> bounce back to the agent -> ready -> you approve -> merge.**
+`/foreman` shows one line per change, and `/foreman pipeline [<pr>|<branch>]` its stages and last events:
+
+```
+Pipeline (1 change):
+  #6  bounced
+    gate ok > review FAIL (2 blocking) > bounced 1/3 > owner - > merge -
+```
+
+The setting `auto_review` decides when the second model reviews (and so when it spends tokens):
+
+| `auto_review` | When the model is called | What happens |
+|---|---|---|
+| `merge` (default) | when you run `/foreman merge <pr>` and the pull request's exact diff has no stored review | verified BLOCKING findings refuse the merge (`--yes` does not override); notes go in the merge question; if the review could not run, the question says so first and you decide |
+| `finish` | inside the agent's coding turn, through its `foreman_review` tool, once per new diff | the change is sent back with each BLOCKING and HIGH finding (file:line, why, fix) until the review is clean or the bounce limit is hit |
+| `off` | only when you type `/foreman review` | merge works as without the reviewer |
+
+- **No re-rolling.** A review is stored with a hash of the exact diff and the reviewer; the same diff returns the
+  stored result and never calls the model again. Only a changed diff, or your `/foreman review --fresh`, runs it again.
+  The agent's `foreman_review` tool calls a model only with `finish`; at other levels it returns the stored review or
+  tells the agent to ask you. It is advisory: it never grants, merges, approves or unblocks anything.
+- **The bounce limit.** `max_bounces` (default 3, never more than Hermes's own `agent.max_verify_nudges`) bounds how
+  many times a change goes back to the agent; then Foreman stops, marks it as needing you, and calls the reviewer no
+  more for it. The end-of-turn hook only reads stored reviews: the model runs in the tool, never in a hook.
+- **A person always merges.** No level merges anything: `/foreman merge` asks you (or takes your typed `--yes`), and
+  where nobody can be asked, nothing merges.
+- **Where it lives.** `pipeline.json` in Foreman's data directory (one entry per change, at most 200, with its last
+  50 events), next to `pipeline-meta.json` (which notifications were sent, which diffs were counted).
+- **Repositories without tests.** The board and `/foreman status` say it once: the gate can then catch only secrets
+  and hook bypasses, and the second-model review is the main check.
+
+```yaml
+plugins:
+  entries:
+    foreman:
+      settings:
+        auto_review: merge   # merge | finish | off
+        max_bounces: 3
+```
 
 ## Desktop panel
 
@@ -381,7 +434,9 @@ Requires Hermes Agent >= 0.22.6 and git on the PATH.
 - **Writes in its Hermes plugin data directory** only: `foreman-grants.json` (the findings waiting for you and the
   exceptions you allowed: rule, file, line, message; no file contents), `foreman-board.json` (the repository pinned
   per session and the last ten you used: paths only), `reviews/*.json` (the last `/foreman review` of each target;
-  its findings quote lines of the diff, and `/foreman reject` includes them), and, for a moment, the text of a
+  its findings quote lines of the diff, and `/foreman reject` includes them; `reviews/cache/` keeps up to 300 of
+  them by diff), `pipeline.json` and `pipeline-meta.json` (each change's stages and events: repository, branch, pull
+  request number and title, short finding summaries), and, for a moment, the text of a
   `/foreman reject` comment in `outbox/` (deleted once `gh pr comment` has read it), and, with notifications on,
   `foreman-notify.json` and, for a moment, a message in `notify/`. Foreman blocks the agent's
   `write_file`, `patch` and terminal commands that name these files or directories. This guard is best effort: it
@@ -398,18 +453,20 @@ Requires Hermes Agent >= 0.22.6 and git on the PATH.
 - Reads the working directory the terminal tool recorded for the session, through a Hermes internal
   (`tools.terminal_tool.get_session_cwd`), guarded, with Hermes's documented `resolve_agent_cwd()` as fallback.
   `/foreman use` also lists the directories directly inside the session's directories to find git repositories.
-- **Model calls only when you run `/foreman review`**: one call through Hermes (`ctx.llm`) with the diff, the
-  title and the detector's findings; it spends tokens on your provider. For a pull request number it runs `gh pr
+- **Model calls only when you run `/foreman review`, or as `auto_review` sets it** (`/foreman merge` with `merge`,
+  the default; the agent's `foreman_review` tool with `finish`; see *The pipeline*), at most once per exact diff:
+  one call through Hermes (`ctx.llm`) with the diff, the title and the detector's findings; it spends tokens on your
+  provider. For a pull request number it runs `gh pr
   view` and `gh pr diff` (read-only). To pick the reviewer it reads, through Hermes's config reader, your main model
   and the provider and model names of the first fallback entry; nothing else of your config.
 - **Notifications, only after you turn them on** (`/foreman notify on <target>`): one `hermes send` per pull request
   event, through Hermes's terminal tool, to the target you chose (see *Notifications*). It records the last 30 sends
   (kind, pull request id, target, outcome) in `foreman-notify.json` in its data directory.
-- **No network calls of its own** (only the `gh` commands above, `/foreman review`'s model call, when you ask, and
-  the notifications you turned on, sent by Hermes), no telemetry, no credentials, no background processes.
-- It registers two hooks (`pre_tool_call`, `pre_verify`), one slash command (`/foreman`) and one tool
-  (`foreman_check`), and declares two capabilities, `llm.model_override` and `llm.provider_override`, used only by
-  `/foreman review` to run on a model other than your active one.
+- **No network calls of its own** (only the `gh` commands above, the review's model call, and the notifications you
+  turned on, sent by Hermes), no telemetry, no credentials, no background processes.
+- It registers two hooks (`pre_tool_call`, `pre_verify`), one slash command (`/foreman`) and two tools
+  (`foreman_check`, `foreman_review`), and declares two capabilities, `llm.model_override` and
+  `llm.provider_override`, used only by the second-model review to run on a model other than your active one.
 
 ## Known limits
 
