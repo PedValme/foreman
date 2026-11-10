@@ -393,9 +393,9 @@ _HUNK = re.compile(r"^(@{2,}) (.*?) @{2,}")
 _CHECK_EVERY = 2000  # lines between two looks at the clock
 
 
-def _check_deadline(deadline: Optional[float]) -> None:
+def _check_deadline(deadline: Optional[float], what: str = "the diff") -> None:
     if deadline is not None and time.monotonic() > deadline:
-        raise GitTimeout("time budget exhausted while reading the diff")
+        raise GitTimeout("time budget exhausted while reading %s" % what)
 
 
 def _iter_new_side(diff: str, deadline: Optional[float] = None):
@@ -814,7 +814,8 @@ def sarif_scope_of(config: dict) -> str:
 
 
 def sarif_findings(repo: Repo, base_rev: Optional[str], explicit=(), threshold: Optional[float] = None,
-                   newest: Optional[float] = None, scope: Optional[str] = None, changed=None) -> tuple:
+                   newest: Optional[float] = None, scope: Optional[str] = None, changed=None,
+                   stale_margin: float = 0.0) -> tuple:
     """(blockers, notes, errors) from SARIF reports: the ``sarif`` / ``sarif_threshold`` / ``sarif_scope`` keys of
     .foreman.json at the base (files read from the working tree, relative to the repository), plus ``explicit`` paths.
     With the scope ``changed`` (the default) only results in ``changed`` files, or new or updated ones, can block.
@@ -840,12 +841,13 @@ def sarif_findings(repo: Repo, base_rev: Optional[str], explicit=(), threshold: 
                                         "ignoring sarif_threshold, using %s: %s" % (threshold, e)))
     scope = scope or sarif_scope_of(config)
     scoped = None if scope == "all" else (changed if changed is not None else ())
-    _check_deadline(repo.deadline)
+    _check_deadline(repo.deadline, "the SARIF report")
     blockers, seen = [], set()
     for paths, where in ((named, " named in " + CONFIG_FILE), (given, "")):
         paths = [p for p in dict.fromkeys(paths) if p not in seen]
         seen.update(paths)
-        result = sarif.collect(paths, repo.root, threshold, newest, scoped, repo.deadline, unreadable="error")
+        result = sarif.collect(paths, repo.root, threshold, newest, scoped, repo.deadline, unreadable="error",
+                               stale_margin=stale_margin)
         blockers += result.blockers
         notes += result.notes
         errors += ["could not read the SARIF report %s%s: %s" % (label, where, reason)
@@ -870,9 +872,20 @@ def sarif_paths_at_base(repo: Repo) -> list:
     return _config_sarif_paths(config_at(repo, base or ("HEAD" if repo.has_head() else None)))
 
 
-def _commit_time(repo: Repo, *revs: str) -> Optional[float]:
-    out = repo.try_git("log", "-1", "--format=%ct", *revs)
-    return float(out) if out and out.isdigit() else None
+STALE_MARGIN_WORKTREE = 2.0   # seconds a changed file may be newer than the report (clock and write granularity)
+STALE_MARGIN_RANGE = 120.0    # seconds the head commit may be newer than the report: scan, then commit
+
+
+def _head_change_time(repo: Repo, head: str, reports) -> Optional[float]:
+    """Committer time of ``head``, only when that commit touches files other than the reports themselves (a commit
+    that only adds the report does not make it stale)."""
+    out = repo.try_git("log", "-1", "--format=%ct", head)
+    if not (out and out.isdigit()):
+        return None
+    files = repo.try_git("diff-tree", "--root", "--no-commit-id", "--name-only", "-r", "-m", "--first-parent", head)
+    others = [f for f in (files or "").splitlines() if f.strip()
+              and os.path.normcase(os.path.abspath(os.path.join(repo.root, *f.split("/")))) not in reports]
+    return float(out) if others else None
 
 
 def _versions(repo: Repo, rev: Optional[str] = None, staged: bool = False) -> Callable[[str], str]:
@@ -917,8 +930,9 @@ def scan_range(repo: Repo, base: Optional[str], head: str = "HEAD", check: Optio
                       version_of=version_of, deadline=repo.deadline)
     check = check_command_at(repo, base, check)
     findings += _check_findings(repo, base, check, paths, allowed_paths, lambda p: repo.show(head, p), version_of)
-    blockers, notes, errors = sarif_findings(repo, base, sarif, sarif_threshold, _commit_time(repo, rev_range),
-                                             sarif_scope, paths)
+    reports = {os.path.normcase(os.path.abspath(p)) for p in _sarif_paths(repo, base, sarif)}
+    blockers, notes, errors = sarif_findings(repo, base, sarif, sarif_threshold, _head_change_time(repo, head, reports),
+                                             sarif_scope, paths, STALE_MARGIN_RANGE)
     report = Report(repo.root, scope, base, base_label, repo.try_git("rev-parse", head), check, findings + blockers)
     report.notes, report.errors = notes, errors
     return report
@@ -975,9 +989,9 @@ def scan_worktree(repo: Repo, staged_only: bool = False, include_untracked: bool
     else:
         new_text = lambda p: _read_text(os.path.join(repo.root, *p.split("/")))
     findings += _check_findings(repo, head_rev, check, paths, allowed_paths, new_text, version_of)
-    # The newest change is the last commit or the newest edited file, whichever is later (the reports themselves
-    # do not count: an untracked report is not a change it gates).
-    newest = _commit_time(repo, "HEAD") if has_head else None
+    # Stale means code changed after the scan: the newest changed file (the reports themselves do not count: an
+    # untracked report is not a change it gates) against the report's mtime.
+    newest = None
     reports = {os.path.normcase(os.path.abspath(p)) for p in _sarif_paths(repo, head_rev, sarif)}
     for p in paths:
         full = os.path.join(repo.root, *p.split("/"))
@@ -986,7 +1000,8 @@ def scan_worktree(repo: Repo, staged_only: bool = False, include_untracked: bool
                 newest = max(newest or 0, os.path.getmtime(full))
         except OSError:
             pass  # deleted
-    blockers, notes, errors = sarif_findings(repo, head_rev, sarif, sarif_threshold, newest, sarif_scope, paths)
+    blockers, notes, errors = sarif_findings(repo, head_rev, sarif, sarif_threshold, newest, sarif_scope, paths,
+                                             STALE_MARGIN_WORKTREE)
     report = Report(repo.root, scope, repo.try_git("rev-parse", "HEAD") if has_head else None, "HEAD",
                     None, check, findings + blockers)
     report.notes, report.errors = notes, errors

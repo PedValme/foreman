@@ -187,12 +187,14 @@ see it and a change cannot point it elsewhere (editing these keys, or a tracked 
 - **Threshold**: results at or above it block; the rest are listed as notes. `error` (7.0, the default), `warning`
   (4.0) or a number 0-10, with `--sarif-threshold` or `sarif_threshold`.
 - **Scope**: by default only results located in files the change touches, or with `baselineState` `new` or
-  `updated`, can block; every other result (old debt, results with no location) is a note, so existing findings do
+  `updated`, can block; every other result (old debt) is a note; a result with no location cannot be scoped to a file and always blocks, so existing findings do
   not stop every commit. `"sarif_scope": "all"` in `.foreman.json`, or `--sarif-scope all`, lets every result block.
 - **Never blocks, not even listed**: suppressed results (accepted or without status), `baselineState: "absent"`, and
   results whose `kind` is present and not `fail`.
-- **Staleness**: a report older than the newest commit (or edited file) it gates adds the note "SARIF report is older
-  than the changes it gates"; it does not block.
+- **Staleness** means code changed after the scan: in the working tree, a changed (or untracked) file more than 2
+  seconds newer than the report; in a push, pull request or CI range, a head commit more than 120 seconds newer than
+  the report that touches files other than the report. It adds the note "SARIF report is older than the changes it
+  gates" and does not block.
 - **Missing or unreadable report**: if the base's `.foreman.json` names it, Foreman cannot say the change is clean:
   the hooks ask for approval ("could not read the SARIF report <path> named in .foreman.json"), `/foreman status`
   says `NEEDS_APPROVAL`, and CI exits 2; the same for `--sarif`. A report with zero results is a valid clean scan.
@@ -328,6 +330,8 @@ Requires Hermes Agent >= 0.22.6 and git on the PATH.
 
 ## Known limits
 
+- A SARIF report replaced by a separate command (for example `cp empty.sarif results.sarif`) is not noticed:
+  generate it in a CI step the agent cannot edit.
 - It sees the tree as it is **before** the gated command runs; that is why it asks for the gated command on its own.
 - Commits made by an interpreter (a Python or Node script calling git, Hermes's `execute_code`), by git aliases or
   by other tools are not inspected at that moment; the next `git push` or `gh pr create` still sees what they
