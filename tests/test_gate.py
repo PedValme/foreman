@@ -558,7 +558,7 @@ class SlashCommandAndTool(GitRepoCase):
         self.assertIn("Foreman: BLOCKED", out)
         self.assertIn("tests/test_a.py:1", out)
         self.assertIn("/foreman", commands.handle_slash("help"))
-        self.assertIn("Unknown subcommand", commands.handle_slash("review"))
+        self.assertIn("Unknown subcommand", commands.handle_slash("frobnicate"))  # `review` is a subcommand now
         with mock.patch.object(commands, "locate", return_value=(self.root, gate.RECORDED)):
             self.assertIn("Foreman: BLOCKED", commands.handle_slash(""))
 
