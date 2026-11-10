@@ -26,9 +26,11 @@ the owner confirms it. An option the owner turned down is a decision too and sta
 - 2026-11-09 · A false-positive marker never passes alone: it escalates to the user's approval. A merge runs through
   the agent's terminal tool and Hermes's native approval; without `gh` the plugin still works on local git · agent's
   proposal (catalog rules 11 and 12), Pedro: «ok entonces?» answered as accepted with the rest of the list.
-- 2026-11-09 · Test on Linux, macOS and Windows with GitHub Actions, and also on Pedro's own Hermes instance over
-  SSH; the YOLO-mode behaviour is tested when we reach it · Pedro: «lo probamos cuanfo lleguemos, usalo por ssh» and
-  «tambien … probar como te decia en mi instancia de hermes».
+- 2026-11-09 · Test on Linux, macOS and Windows with GitHub Actions, and also on Pedro's own Hermes instance;
+  the YOLO-mode behaviour is tested when we reach it · Pedro: «lo probamos cuanfo lleguemos» and «tambien … probar
+  como te decia en mi instancia de hermes».
+- 2026-11-10 · DECISIONES.md and ESTADO.md stay public in this repository; how the owner's machines are reached is
+  kept out of it · Pedro: «déjalos públicos, limpia lo del ssh y sigue».
 - 2026-11-09 · Demo video: the agent writes the script and the recording instructions (orientation, camera, tool)
   according to the rules and does the editing; Pedro records and publishes on X · Pedro: «guion e indicaciones de
   grabacion … tu haces la edicion!».

@@ -24,7 +24,7 @@ Read the index below, then ESTADO.md, its "Next session" first (where the last s
     fábrica is private and unlicensed.
 - Operation: see "This repository".
 - Known pitfalls: the Hermes on the Windows development PC has no model provider, so a real session can only run
-  on `glorieto`; `hermes plugins install --ref` needs the full 40-character commit; with a gateway running, a slash
+  on the owner's Hermes machine; `hermes plugins install --ref` needs the full 40-character commit; with a gateway running, a slash
   command runs inside the gateway process, whose directory is the Hermes home, not the user's.
 
 ## Where things are: one document per question
@@ -92,12 +92,12 @@ step before your reply:
 - Deploy, migrate, delete data or run anything on production without the owner's explicit approval for that action.
 
 ## Remote hosts
-None but those listed here, each with its role (production, staging or client): `glorieto`, the owner's own Hermes
-instance and the only machine with a model provider configured (role: production, it is his live agent). The owner
-approved its use for testing this plugin (DECISIONES.md, 2026-11-09). A host with no role is production. Every ssh,
-deploy or command on a production or client host needs the owner's approval, reading included. On it, the plugin is
-installed only into the dedicated profile `foremandev`, never the default one; the Hermes home there is itself a
-git repository: never commit in it.
+One: the owner's own Hermes machine, the only one with a model provider configured (role: production, it is his
+live agent). This repository is public, so how to reach it is not written here: it is in the owner's private
+environment (DECISIONES.md, 2026-11-10). The owner approved its use for testing this plugin (DECISIONES.md,
+2026-11-09). A host with no role is production. Every connection, deploy or command on a production or client host
+needs the owner's approval, reading included. On it, the plugin is installed only into the dedicated profile
+`foremandev`, never the default one; the Hermes home there is itself a git repository: never commit in it.
 
 ## How a change reaches `main`
 If `.fabrica.json` has an `integracion` field, it says how (a value you do not know: ask the owner). Otherwise: a
