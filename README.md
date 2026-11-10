@@ -61,6 +61,7 @@ approvals off, Hermes lets them through without a person.**
 ```
 /foreman status [path]   verdict for the current repository: CLEAN or BLOCKED, with reasons
 /foreman allow [id]      list or allow findings the agent marked
+/foreman review [<pr-number>|<branch>]   a second model reviews the diff (see below)
 /foreman help
 ```
 
@@ -83,6 +84,65 @@ python -m foreman.detector <base> [<head>] [--check "<command>"] [--json]
 Exits 1 when there is a blocker. Findings marked `foreman:allow` do not fail the run; they are listed for the
 reviewer.
 
+## Second-model review
+
+`/foreman review` asks a model **other than the one that wrote the code** to read the diff and look for what the
+detector cannot see: emptied tests, removed or loosened assertions, tests rewritten to assert the bug,
+commented-out tests, mocks that replace the code under test, checks made non-blocking, swallowed errors,
+hardcoded expected values, secrets, destructive or irreversible changes, auth and permission changes, and bugs the
+change introduces.
+
+```
+/foreman review          the current branch against its base, plus uncommitted changes
+/foreman review 42       pull request #42 (read-only `gh pr diff`; needs the GitHub CLI)
+/foreman review my-feat  a local branch against its base
+```
+
+- **On demand only.** It runs when you type the command, never inside a hook, and the agent has no tool that runs
+  it. Each run is one model call and **costs tokens** on your provider (up to about 30k tokens of diff plus the
+  answer).
+- **What leaves your machine:** the diff (bounded, see below), the branch or pull request title and commit subjects,
+  and the detector's findings go to the model provider you configured in Hermes, through Hermes (`ctx.llm`; Foreman
+  never sees your keys). Nothing else is sent, and Foreman makes no network call of its own (`gh` talks to GitHub
+  for a pull request number).
+- **Which model:** the `reviewer_model` setting (Desktop: Settings → Plugins → foreman; or `config.yaml`, below);
+  without it, the first model of your Hermes fallback chain (`fallback_providers`); without one, your active model.
+  Choosing a model needs the `llm.model_override` capability (and `llm.provider_override` when it lives on another
+  provider), which Hermes asks you to grant when you enable the plugin. Without the grant the review runs on your
+  active model. The output always names the model that reviewed, and says so when it is the same one that wrote the
+  code: *"Reviewed by the same model that wrote the code — set `reviewer_model` for an independent review."*
+
+  ```yaml
+  plugins:
+    entries:
+      foreman:
+        settings:
+          reviewer_model: anthropic/claude-haiku-4.5   # as your provider names it
+          reviewer_provider: openrouter                 # only when not your active provider
+  ```
+- **Verdict.** `BLOCKED` when the detector blocks or the model reports a verified BLOCKING finding (a rigged test or
+  check, a secret, harm to data or production, a loosened control); `PASS WITH NOTES` for verified HIGH/MEDIUM
+  findings, unverified findings or a partly reviewed diff; `PASS` only when the detector found nothing and the model
+  reported nothing. Every finding must quote the diff verbatim: a quote that is not in that file's diff is dropped and
+  counted as unverified, so a model's claim alone never blocks, and a dropped claim still keeps the verdict off
+  `PASS`. `PASS` means "no verified findings", not "approved": a model can miss things, or be steered by the diff.
+  A model error, refusal, timeout or malformed answer gives *review could not run*, never a pass.
+- **Advisory.** The review grants, merges and unblocks nothing; the gate and `/foreman allow` work exactly as without
+  it. Text in the diff that tries to steer the reviewer (telling it to approve, or to drop its rules) is treated as data:
+  the prompt fences the diff with a random token and tells the model never to follow it.
+- **Bounded, and honest about it.** Lockfiles, generated and binary files are left out; tests and check files go
+  first; each file is cut at 30,000 characters and the whole diff at 120,000. The output lists what was left out or
+  cut and never reports full coverage when it was not.
+- **Stored.** The last review of each repository and target is kept in Foreman's data directory
+  (`reviews/<owner>__<repo>__pr<N>.json`, or `…__branch-<name>-<hash>.json` / `…__worktree-<name>-<hash>.json`):
+  model, time, verdict, verified findings and coverage.
+- A fallback on a custom endpoint (`base_url`) cannot be selected by a plugin; Foreman says so and uses your active
+  model.
+- **Limits.** A model can miss issues, and a quote that exists can still back a wrong conclusion: read the findings.
+  The same-model check compares with the main model in your config; a model you switched to inside the session is
+  not visible to plugins. For a pull request number the detector sees only the PR's diff (`check-changed` and
+  `secret-history` need the branch checked out: run `/foreman status` there).
+
 ## Install
 
 ```
@@ -100,13 +160,19 @@ Requires Hermes Agent >= 0.22.6 and git on the PATH.
 - **Reads files** of that repository: untracked files (up to 500, 512 KB each) to look for secrets and markers, the
   file a `write_file` would replace, `package.json` to compare its scripts, and a commit message file given with
   `-F`. It may read a non-ignored `.env` only to warn before it is committed; values are never printed or stored.
-- **Writes one file**, `foreman-grants.json` in its Hermes plugin data directory: the findings waiting for you and
-  the exceptions you allowed (rule, file, line, message; no file contents).
+- **Writes** in its Hermes plugin data directory: `foreman-grants.json`, the findings waiting for you and the
+  exceptions you allowed (rule, file, line, message; no file contents), and `reviews/*.json`, the last
+  `/foreman review` of each target (its findings quote lines of the diff).
 - Reads the working directory the terminal tool recorded for the session, through a Hermes internal
   (`tools.terminal_tool.get_session_cwd`), guarded, with Hermes's documented `resolve_agent_cwd()` as fallback.
-- **No network calls**, no telemetry, no credentials, no background processes, no model calls.
+- **Model calls only when you run `/foreman review`**: one call through Hermes (`ctx.llm`) with the diff, the
+  title and the detector's findings; it spends tokens on your provider. For a pull request number it runs `gh pr
+  view` and `gh pr diff` (read-only). To pick the reviewer it reads, through Hermes's config reader, your main model
+  and the provider and model names of the first fallback entry; nothing else of your config.
+- **No network calls of its own**, no telemetry, no credentials, no background processes.
 - It registers two hooks (`pre_tool_call`, `pre_verify`), one slash command (`/foreman`) and one tool
-  (`foreman_check`).
+  (`foreman_check`), and declares two capabilities, `llm.model_override` and `llm.provider_override`, used only by
+  `/foreman review` to run on a model other than your active one.
 
 ## Known limits
 
@@ -114,8 +180,9 @@ Requires Hermes Agent >= 0.22.6 and git on the PATH.
 - Commits made by an interpreter (a Python or Node script calling git, Hermes's `execute_code`), by git aliases or
   by other tools are not inspected at that moment; the next `git push` or `gh pr create` still sees what they
   committed. Foreman also does not model `GIT_INDEX_FILE` or `GIT_DIR` set in the environment of a git command.
-- It does not detect emptied test bodies, removed asserts, commented-out tests, or a test function deleted from a
-  file that still exists: only markers, whole-file deletions and moves, and changes to the check.
+- The detector does not detect emptied test bodies, removed asserts, commented-out tests, or a test function deleted
+  from a file that still exists: only markers, whole-file deletions and moves, and changes to the check.
+  `/foreman review` looks for those with a model, advisory only.
 - Tests switched off by selection are not detected: `-k 'not x'` in pytest `addopts`, or a `jest` section with
   `testPathIgnorePatterns` inside `package.json`.
 - Markers covered: pytest (`skip`, `xfail`, `skipif`), unittest (`skip*`, `expectedFailure`, `skipTest`),
