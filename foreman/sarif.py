@@ -268,7 +268,7 @@ def parse_file(path: str, root: str = "", threshold: float = DEFAULT_THRESHOLD, 
         for raw in _list(run.get("results")):
             seen += 1
             if seen % _DEADLINE_EVERY == 0:
-                _check_deadline(deadline)
+                _check_deadline(deadline, "the SARIF report")
             result = _dict(raw)
             if not result or _suppressed(result) or result.get("baselineState") == "absent":
                 continue
@@ -284,8 +284,8 @@ def parse_file(path: str, root: str = "", threshold: float = DEFAULT_THRESHOLD, 
             file = repo_path(uri, art.get("uriBaseId"), run, root) if isinstance(uri, str) else ""
             start = _dict(loc.get("region")).get("startLine")
             line = start if isinstance(start, int) and not isinstance(start, bool) and start > 0 else 0
-            in_scope = (touched is None or result.get("baselineState") in ("new", "updated")
-                        or (bool(file) and _key(file) in touched))
+            in_scope = (touched is None or not file or result.get("baselineState") in ("new", "updated")
+                        or _key(file) in touched)
             blocks = score >= threshold and in_scope
             message = "%s (%s%s)" % (_message(result, rule, rule_id), why,
                                      ", outside the change" if score >= threshold and not in_scope else "")
@@ -303,11 +303,12 @@ def parse_file(path: str, root: str = "", threshold: float = DEFAULT_THRESHOLD, 
 
 
 def collect(paths, root: str = "", threshold: float = DEFAULT_THRESHOLD, newest: Optional[float] = None,
-            changed=None, deadline: Optional[float] = None, unreadable: str = "note") -> SarifResult:
+            changed=None, deadline: Optional[float] = None, unreadable: str = "note",
+            stale_margin: float = 0.0) -> SarifResult:
     """Findings of several SARIF files, never raising (but for ``GitTimeout``, the hook's time budget). An unreadable
     file is one non-blocking note, or with ``unreadable="error"`` an entry of ``errors`` for the caller to refuse a
-    verdict on. ``newest`` is the timestamp of the newest change the reports gate; a report last written before it
-    gets a staleness note. ``changed`` and ``deadline`` as in ``parse_file``."""
+    verdict on. ``newest`` is the timestamp of the newest change the reports gate; a report written more than
+    ``stale_margin`` seconds before it gets a staleness note. ``changed`` and ``deadline`` as in ``parse_file``."""
     total = SarifResult()
 
     def fail(label, reason):
@@ -322,7 +323,7 @@ def collect(paths, root: str = "", threshold: float = DEFAULT_THRESHOLD, newest:
             part = parse_file(path, root, threshold, label, changed, deadline)
             total.blockers += part.blockers
             total.notes += part.notes
-            if newest is not None and os.path.getmtime(path) < newest:
+            if newest is not None and newest - os.path.getmtime(path) > stale_margin:
                 total.notes.append(note("sarif:stale", label, STALE))
         except GitTimeout:
             raise
