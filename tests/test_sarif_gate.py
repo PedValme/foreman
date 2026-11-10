@@ -37,7 +37,9 @@ class Base(GitRepoCase):
         return self.git("rev-parse", "HEAD").strip()
 
     def report(self, results, name="results.sarif"):
-        return self.write(name, json.dumps(doc(results)))
+        path = self.write(name, json.dumps(doc(results)))
+        os.utime(path, (4_000_000_000, 4_000_000_000))  # never stale: no test here reads the clock
+        return path
 
     def scan(self, base):
         return detector.scan_range(detector.Repo(self.root), base)
@@ -55,9 +57,9 @@ class Scope(Base):
         self.write("app.py", "x = 2\n")
         self.commit("change app")
         report = self.scan(base)
-        self.assertEqual(sorted(f.rule.split("/")[-1] for f in report.blockers), ["MINE", "NEW", "UPD"])
+        self.assertEqual(sorted(f.rule.split("/")[-1] for f in report.blockers), ["MINE", "NEW", "NOLOC", "UPD"])  # no location: cannot be scoped to a file
         self.assertEqual(sorted(f.rule.split("/")[-1] for f in report.notes if f.rule.startswith("sarif:scanner")),
-                         ["NOLOC", "OLD", "OLD2"])
+                         ["OLD", "OLD2"])
         self.assertTrue(all("outside the change" in f.message for f in report.notes if "OLD" in f.rule))
 
     def test_the_scope_all_in_the_base_config_lets_old_debt_block(self):
@@ -100,8 +102,10 @@ class Scope(Base):
         many = [result("R%d" % i, level="note") for i in range(sarif._DEADLINE_EVERY + 1)]
         path = self.report(many)
         past = time.monotonic() - 1
-        with self.assertRaises(detector.GitTimeout):
+        with self.assertRaises(detector.GitTimeout) as caught:
             sarif.parse_file(path, self.root, deadline=past)
+        self.assertIn("reading the SARIF report", str(caught.exception))
+        self.assertNotIn("the diff", str(caught.exception))
         with self.assertRaises(detector.GitTimeout):  # collect never swallows the hook's time budget
             sarif.collect([path], self.root, deadline=past)
         self.assertEqual(sarif.parse_file(path, self.root, deadline=time.monotonic() + 600).blockers, [])

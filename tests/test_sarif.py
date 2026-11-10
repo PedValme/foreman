@@ -8,7 +8,6 @@ import contextlib
 import io
 import json
 import os
-import time
 import unittest
 from unittest import mock
 
@@ -16,6 +15,7 @@ from foreman import commands, detector, gate, sarif
 from tests_support import GitRepoCase
 
 SKIP = "@pytest.mark." + "skip"
+NEVER_STALE = 4_000_000_000  # a report modified in 2096: newer than any change a test makes
 
 
 def doc(results, rules=None, tool="scanner", **run):
@@ -56,6 +56,7 @@ def hermes_security(findings):
 class SarifCase(GitRepoCase):
     def sarif_file(self, document, name="report.sarif", raw=None):
         path = self.write(name, raw if raw is not None else json.dumps(document))
+        os.utime(path, (NEVER_STALE, NEVER_STALE))  # staleness tests set their own times; no test reads the clock
         return path
 
     def parse(self, document, threshold=sarif.DEFAULT_THRESHOLD):
@@ -381,34 +382,57 @@ class Sources(SarifCase):
         self.assertEqual(report.blockers[0].file, "report.sarif")
         self.assertIn("SARIF report", report.blockers[0].message)
 
-    def test_staleness_is_a_note_that_does_not_block(self):
+    def stale(self, report):
+        return sarif.STALE in [n.message for n in report.notes]
+
+    def test_range_staleness_is_the_head_commit_newer_than_the_report_by_more_than_two_minutes(self):
         base = self.base_with_config(sarif=["report.sarif"])
         path = self.blocking_report(level="note")
-        old = time.time() - 3600
-        os.utime(path, (old, old))
         self.write("app.py", "x = 2\n")
-        self.commit("change")
-        report = detector.scan_range(detector.Repo(self.root), base)
-        self.assertEqual(report.verdict, "CLEAN")
-        self.assertIn(sarif.STALE, [n.message for n in report.notes])
-        fresh = time.time() + 3600
-        os.utime(path, (fresh, fresh))
-        report = detector.scan_range(detector.Repo(self.root), base)
-        self.assertNotIn(sarif.STALE, [n.message for n in report.notes])
+        self.commit("change", when=1_800_000_000)
+        repo = detector.Repo(self.root)
+        for mtime, expected in ((1_800_000_000 - 119, False), (1_800_000_000 - 120, False), (1_800_000_000 - 121, True),
+                                (1_800_000_000 + 5, False)):
+            os.utime(path, (mtime, mtime))
+            report = detector.scan_range(repo, base)
+            self.assertEqual(self.stale(report), expected, mtime)
+            self.assertEqual(report.verdict, "CLEAN")  # a note, never a blocker
 
-    def test_staleness_in_the_worktree_counts_edited_files_but_not_the_report(self):
+    def test_a_head_commit_that_only_adds_the_report_does_not_make_it_stale(self):
+        base = self.base_with_config(sarif=["report.sarif"])
+        self.write("app.py", "x = 2\n")
+        self.commit("change", when=1_800_000_000)
+        path = self.blocking_report(level="note")
+        self.commit("add the report", when=1_800_001_000)
+        os.utime(path, (1_700_000_000, 1_700_000_000))  # far older than the head commit
+        self.assertFalse(self.stale(detector.scan_range(detector.Repo(self.root), base)))
+        self.write("app.py", "x = 3\n")
+        self.commit("change again", when=1_800_002_000)  # now code changed after the scan
+        self.assertTrue(self.stale(detector.scan_range(detector.Repo(self.root), base)))
+
+    def test_staleness_in_the_worktree_is_a_changed_file_newer_than_the_report_by_more_than_two_seconds(self):
         self.base_with_config(sarif=["report.sarif"])
         path = self.blocking_report(level="note")
-        old = time.time() - 3600
-        os.utime(path, (old, old))
         repo = detector.Repo(self.root)
-        self.assertIn(sarif.STALE, [n.message for n in detector.scan_worktree(repo).notes])  # older than the commit
-        os.utime(path, None)
-        self.assertNotIn(sarif.STALE, [n.message for n in detector.scan_worktree(repo).notes])
+        self.assertFalse(self.stale(detector.scan_worktree(repo)))  # nothing changed since the commit
         edited = self.write("app.py", "x = 2\n")
-        later = time.time() + 3600
-        os.utime(edited, (later, later))
-        self.assertIn(sarif.STALE, [n.message for n in detector.scan_worktree(repo).notes])
+        t = 1_800_000_000
+        os.utime(path, (t, t))
+        for delta, expected in ((1, False), (2, False), (3, True), (-50, False)):
+            os.utime(edited, (t + delta, t + delta))
+            self.assertEqual(self.stale(detector.scan_worktree(repo)), expected, delta)
+        os.utime(edited, (t - 1000, t - 1000))
+        untracked = self.write("new.py", "z = 1\n")  # an untracked file counts as a change too
+        os.utime(untracked, (t + 60, t + 60))
+        self.assertTrue(self.stale(detector.scan_worktree(repo)))
+        os.utime(path, (t + 1000, t + 1000))  # the report is rewritten after the change: fresh
+        self.assertFalse(self.stale(detector.scan_worktree(repo)))
+
+    def test_the_report_itself_is_not_a_change_it_gates(self):
+        self.base_with_config(sarif=["report.sarif"])
+        path = self.blocking_report(level="note")  # untracked, so part of the worktree's changed paths
+        os.utime(path, (1_800_000_000, 1_800_000_000))
+        self.assertFalse(self.stale(detector.scan_worktree(detector.Repo(self.root))))
 
 
 class CommandLine(SarifCase):
