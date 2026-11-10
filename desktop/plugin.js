@@ -162,21 +162,27 @@ function argOf(item) {
   return null
 }
 
-// A Foreman command acts on the chat's repository, not on the card's. With one repository on the line they are the
-// same; with several, the panel offers no command rather than one that could reach the wrong repository.
+const SAFE_REPO = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/
+
+// A Foreman command acts on the chat's repository unless it names one with `--repo owner/name` (which Foreman accepts
+// only for a repository it already knows on this machine). Merge, reject and verdict name the card's repository;
+// review takes no --repo, so it is offered only when one repository is on the line. Without a usable repository name
+// and with several repositories on the line, no command is offered rather than one that could reach the wrong one.
 function actionsOf(item, st, group, oneRepo) {
-  const arg = oneRepo ? argOf(item) : null
+  const repo = typeof item.repo === 'string' && SAFE_REPO.test(item.repo) && !item.repo.includes('..') ? item.repo : null
+  const arg = repo || oneRepo ? argOf(item) : null
+  const where = repo ? ` --repo ${repo}` : ''
   const isPr = (item.target || {}).kind === 'pr'
   const out = []
   if (arg && group === 'owner' && isPr) {
-    out.push({ id: 'merge', label: `Merge ${refOf(item)}`, command: `/foreman merge ${arg}`, mode: 'submit', primary: true,
+    out.push({ id: 'merge', label: `Merge ${refOf(item)}`, command: `/foreman merge ${arg}${where}`, mode: 'submit', primary: true,
       hint: 'Runs in the chat: Foreman checks the verdict again and asks you to confirm.' })
-    out.push({ id: 'reject', label: 'Reject…', command: `/foreman reject ${arg}`, mode: 'draft',
+    out.push({ id: 'reject', label: 'Reject…', command: `/foreman reject ${arg}${where}`, mode: 'draft',
       hint: 'Puts the command in the chat box: add a note and press Enter.' })
   } else if (arg && group !== 'done') {
-    out.push({ id: 'verdict', label: 'Show verdict', command: `/foreman verdict ${arg}`, mode: 'submit',
+    out.push({ id: 'verdict', label: 'Show verdict', command: `/foreman verdict ${arg}${where}`, mode: 'submit',
       hint: 'Read-only: CLEAN or BLOCKED, with the reasons and the exact line.' })
-    if (item.stage === 'review' && st.review.status === 'error') {
+    if (oneRepo && item.stage === 'review' && st.review.status === 'error') {
       out.push({ id: 'review', label: 'Review again…', command: `/foreman review ${arg}`, mode: 'draft',
         hint: 'Puts the command in the chat box; a review spends model tokens.' })
     }
@@ -425,7 +431,7 @@ function Timeline({ events, now }) {
 function Actions({ ctx, item, st, group, oneRepo }) {
   const actions = actionsOf(item, st, group, oneRepo)
   const url = (item.target || {}).url
-  const blind = !oneRepo && group !== 'done' && argOf(item)
+  const blind = !actions.length && !oneRepo && group !== 'done' && argOf(item)
   if (!actions.length && !url && !blind) return null
   const hint = blind ? 'Several repositories are on the line: pick this one in the chat with /foreman use, then run /foreman there.'
     : actions.find(a => a.primary)?.hint
