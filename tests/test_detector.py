@@ -9,8 +9,8 @@ import os
 import time
 import unittest
 
+from tests_support import GitRepoCase  # first: it puts plugin/ on sys.path
 from foreman import detector
-from tests_support import GitRepoCase
 
 GHP = "ghp_"  # a GitHub token prefix, completed at runtime
 SKIP = "@pytest.mark." + "skip"

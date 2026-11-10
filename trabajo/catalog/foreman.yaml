@@ -1,0 +1,27 @@
+# DRAFT catalog entry for NousResearch/hermes-agent plugin-catalog/foreman.yaml. Not submitted.
+# Before submitting: replace the sha placeholder with the full 40-character commit of PedValme/foreman being listed
+# (the commit the reviewer reads), and keep version equal to plugin/plugin.yaml's version at that commit.
+# Owner-submitted: PedValme owns and maintains the repository. Exact-SHA pin. No self-updating code: the desktop
+# half is a static desktop/plugin.js that only reads Foreman's own backend route.
+name: foreman
+repo: https://github.com/PedValme/foreman
+sha: "REPLACE_WITH_40_CHAR_COMMIT_SHA_OF_PEDVALME_FOREMAN"  # PLACEHOLDER: the loader rejects anything but 40 hex
+subdir: plugin
+title: Foreman
+description: "A green check the agent did not rig: a deterministic gate (no model, standard library and git) that blocks git commit, git push, gh pr create and gh pr merge when the change skips, deletes or moves tests, edits or weakens what the check runs, bypasses hooks or carries a secret, and asks the agent to undo it before it finishes a coding turn. /foreman shows branches and pull requests with a verdict, runs an optional second-model review, and merges only on your command; a CI mode runs the same detector as a required check, and an optional Desktop panel shows each change's stage. Disclosure — runs read-only git commands in the repository the agent works in and reads its files (untracked files, package.json, a non-ignored .env only to warn, values never printed or stored); runs the GitHub CLI only when you type a /foreman subcommand (read-only gh repo/pr/issue view, list and diff; gh pr merge, gh pr comment and gh pr close only on /foreman merge or /foreman reject, merge and close after your confirmation, through Hermes's terminal tool); spends model tokens through ctx.llm on /foreman review and, by default, once per new diff before /foreman merge (auto_review), with the llm.model_override and llm.provider_override capabilities so the reviewer can be another model; sends notifications with hermes send only after you turn them on; reads your main model and the first fallback's provider and model names through Hermes's config reader, to pick the reviewer; reads the session's working directory through a Hermes internal (tools.terminal_tool.get_session_cwd), guarded, with public fallbacks, and /foreman use lists the directories inside the session's directories to find git repositories; writes only in its plugin data directory; its dashboard backend serves one read-only route (GET /api/plugins/foreman/pipeline) that the optional Desktop panel polls, reading only Foreman's own state file. No network calls of its own, no telemetry, no credentials, no background processes."
+maintainer: PedValme
+tier: community
+category: tools
+requires_hermes: ">=0.22.6"
+version: "0.1.0"
+docs_url: https://github.com/PedValme/foreman/blob/main/plugin/README.md
+platforms: []
+capabilities:
+  provides_tools:
+    - foreman_check
+    - foreman_review
+  provides_hooks:
+    - pre_tool_call
+    - pre_verify
+  provides_middleware: []
+  requires_env: []

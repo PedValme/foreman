@@ -9,12 +9,11 @@ import types
 import unittest
 from unittest import mock
 
+from tests_support import PLUGIN_DIR, GitRepoCase  # first: it puts plugin/ on sys.path
 from foreman import commands, detector, gate, grants
-from tests_support import GitRepoCase
 
 SKIP = "@pytest.mark." + "skip"
 GHP = "ghp_"
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class _Both:
@@ -781,8 +780,9 @@ class Registration(unittest.TestCase):
     """register(ctx) registers exactly what plugin.yaml declares, and only the /foreman command."""
 
     def test_register_matches_the_manifest(self):
-        spec = importlib.util.spec_from_file_location("foreman_plugin_under_test", os.path.join(ROOT, "__init__.py"),
-                                                      submodule_search_locations=[ROOT])
+        spec = importlib.util.spec_from_file_location("foreman_plugin_under_test",
+                                                      os.path.join(PLUGIN_DIR, "__init__.py"),
+                                                      submodule_search_locations=[PLUGIN_DIR])
         module = importlib.util.module_from_spec(spec)
         import sys
         sys.modules[spec.name] = module
@@ -796,7 +796,7 @@ class Registration(unittest.TestCase):
             module.register(ctx)
         finally:
             sys.modules.pop(spec.name, None)
-        with open(os.path.join(ROOT, "plugin.yaml"), encoding="utf-8") as fh:
+        with open(os.path.join(PLUGIN_DIR, "plugin.yaml"), encoding="utf-8") as fh:
             manifest = fh.read()
 
         def declared(key):

@@ -8,8 +8,8 @@ import types
 import unittest
 from unittest import mock
 
+from tests_support import GitRepoCase  # first: it puts plugin/ on sys.path
 from foreman import board, commands, finish, gate, grants, pipeline, review, verdicts
-from tests_support import GitRepoCase
 
 SKIP = "@pytest.mark." + "skip"
 KEYS = ("session-1",)

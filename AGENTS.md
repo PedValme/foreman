@@ -39,12 +39,15 @@ Code and tests are what the system really does; when a document and the code dis
 
 ## This repository
 - A native Hermes plugin in Python 3.11+, standard library only (no runtime dependencies), plus git. The plugin is
-  the repository root: `plugin.yaml`, `__init__.py` (registration) and the `foreman/` package. Requires Hermes
+  the `plugin/` folder, the only part Hermes installs (catalog `subdir: plugin`): `plugin.yaml`, `__init__.py`
+  (registration), the `foreman/` package, `desktop/`, `dashboard/`, `README.md` (the full one) and `LICENSE`. Nothing
+  in it reads outside `plugin/`. The root keeps the tests, examples and working documents. Requires Hermes
   >= 0.22.6. The user-facing README, messages and command output are in English.
-- Check: `python -m unittest discover -s tests -q` and `hermes plugins validate . --install-deps`. Both run before
+- Check, from the root: `python -m unittest discover -s tests -q` (`tests/tests_support.py` puts `plugin/` on
+  `sys.path`; import it before `foreman`) and `hermes plugins validate plugin --install-deps`. Both run before
   every commit. The detector and its tests are the product's controls: a change to them is reviewed by an agent that
   did not write it.
-- Try it without touching the owner's Hermes setup: `hermes plugins doctor .` (temporary HERMES_HOME), or a
+- Try it without touching the owner's Hermes setup: `hermes plugins doctor plugin` (temporary HERMES_HOME), or a
   dedicated profile (`hermes -p foreman-dev …`). Never install it into the default profile.
 - Hermes's plugin documentation, read before using a surface: `website/docs/developer-guide/plugins/` and
   `website/docs/user-guide/features/hooks.md` in NousResearch/hermes-agent; the admission rules are in

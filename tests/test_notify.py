@@ -4,9 +4,9 @@ import json
 import os
 import unittest
 
+from tests_support import GitRepoCase  # first: it puts plugin/ on sys.path
 from foreman import board, commands, gate, notify
 from test_board import BoardCase, FakeCtx, clean_diff, pr_view
-from tests_support import GitRepoCase
 
 
 class NotifyCtx(FakeCtx):

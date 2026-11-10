@@ -5,8 +5,9 @@ import os
 import re
 import unittest
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PLUGIN = os.path.join(ROOT, "desktop", "plugin.js")
+from tests_support import PLUGIN_DIR, ROOT
+
+PLUGIN = os.path.join(PLUGIN_DIR, "desktop", "plugin.js")
 
 
 def source():
