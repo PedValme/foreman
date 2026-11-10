@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Foreman panel preview</title>
+<style>
+/* Stand-ins for the Hermes Desktop theme variables the panel reads (--ui-*). Light follows the default skin in
+   apps/desktop/src/styles.css; dark is close to the default dark skin. Hermes repaints these per theme; the panel
+   only ever reads them. */
+:root{
+  color-scheme:light;
+  --ui-base:#17171a;--ui-accent:#0053fd;--ui-red:#cf2d56;--ui-orange:#db704b;--ui-yellow:#c08532;--ui-green:#1f8a65;
+  --pv-bg:#f6f8fc;--ui-bg-editor:#fdfdfe;--pv-chrome:#f1f4fa;
+}
+:root.dark{
+  color-scheme:dark;
+  --ui-base:#e6edf3;--ui-accent:#4c8dff;--ui-red:#e75e78;--ui-orange:#e08a64;--ui-yellow:#d6a14a;--ui-green:#55a583;
+  --pv-bg:#0d1014;--ui-bg-editor:#14181e;--pv-chrome:#101318;
+}
+:root{
+  --ui-text-primary:color-mix(in srgb,var(--ui-base) 94%,transparent);
+  --ui-text-secondary:color-mix(in srgb,var(--ui-base) 74%,transparent);
+  --ui-text-tertiary:color-mix(in srgb,var(--ui-base) 54%,transparent);
+  --ui-text-quaternary:color-mix(in srgb,var(--ui-base) 36%,transparent);
+  --ui-stroke-primary:color-mix(in srgb,var(--ui-accent) 24%,color-mix(in srgb,var(--ui-base) 10%,transparent));
+  --ui-stroke-secondary:color-mix(in srgb,var(--ui-accent) 16%,color-mix(in srgb,var(--ui-base) 7%,transparent));
+  --ui-stroke-tertiary:color-mix(in srgb,var(--ui-accent) 10%,color-mix(in srgb,var(--ui-base) 5%,transparent));
+  --ui-bg-secondary:color-mix(in srgb,var(--ui-accent) 11%,color-mix(in srgb,var(--ui-base) 7%,transparent));
+  --ui-bg-quaternary:color-mix(in srgb,var(--ui-accent) 5%,color-mix(in srgb,var(--ui-base) 4%,transparent));
+  --ui-bg-quinary:color-mix(in srgb,var(--ui-accent) 3%,color-mix(in srgb,var(--ui-base) 3%,transparent));
+  --ui-control-hover-background:color-mix(in srgb,var(--ui-accent) 6%,color-mix(in srgb,var(--ui-base) 4%,transparent));
+  --font-mono:"Cascadia Mono","SF Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{display:flex;flex-direction:column;background:var(--pv-bg);color:var(--ui-text-secondary);font:13px/1.4 "Segoe UI",-apple-system,BlinkMacSystemFont,system-ui,sans-serif}
+.pv-bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding:8px 12px;border-bottom:1px solid var(--ui-stroke-tertiary);background:var(--pv-chrome);font-size:12px}
+.pv-bar b{color:var(--ui-text-primary);font-weight:600}
+.pv-group{display:flex;align-items:center;gap:4px}
+.pv-bar button{font:inherit;font-size:11.5px;padding:3px 8px;border-radius:4px;border:1px solid var(--ui-stroke-secondary);background:transparent;color:var(--ui-text-secondary);cursor:pointer}
+.pv-bar button[aria-pressed=true]{background:var(--ui-accent);border-color:var(--ui-accent);color:var(--ui-bg-editor)}
+.pv-caption{flex-basis:100%;color:var(--ui-text-tertiary);font-size:11.5px}
+.pv-stage{flex:1;min-height:0;display:flex}
+.pv-chat{flex:1;min-width:240px;display:flex;flex-direction:column;justify-content:flex-end;gap:8px;padding:16px;background:var(--pv-chrome)}
+.pv-chat h2{margin:0 0 auto;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ui-text-quaternary)}
+.pv-msg{align-self:flex-end;max-width:90%;padding:6px 10px;border-radius:10px;background:var(--ui-bg-secondary);color:var(--ui-text-primary);font-family:var(--font-mono);font-size:12px}
+.pv-msg[data-kind=draft],.pv-msg[data-kind=clipboard],.pv-msg[data-kind=link],.pv-msg[data-kind=action]{align-self:center;background:none;color:var(--ui-text-tertiary);font-family:inherit;font-size:11px}
+.pv-composer{min-height:38px;padding:9px 12px;border:1px solid var(--ui-stroke-secondary);border-radius:10px;background:var(--ui-bg-editor);color:var(--ui-text-primary);font-family:var(--font-mono);font-size:12px}
+.pv-composer:empty::before{content:"Message Hermes…";color:var(--ui-text-quaternary);font-family:"Segoe UI",system-ui,sans-serif}
+.pv-pane{flex:none;display:flex;flex-direction:column;min-height:0;border-left:1px solid var(--ui-stroke-tertiary);background:var(--ui-bg-editor)}
+.pv-pane-tab{padding:7px 12px;font-size:11.5px;color:var(--ui-text-tertiary);border-bottom:1px solid var(--ui-stroke-tertiary)}
+#pane{flex:1;min-height:0}
+.pv-status{display:flex;align-items:center;justify-content:flex-end;gap:12px;height:24px;padding:0 8px;border-top:1px solid var(--ui-stroke-tertiary);background:var(--pv-chrome);font-size:11px;color:var(--ui-text-tertiary)}
+#chip{height:100%;display:flex}
+.pv-toasts{position:fixed;right:16px;bottom:36px;display:flex;flex-direction:column;gap:6px;z-index:10}
+.pv-toast{max-width:320px;padding:8px 12px;border-radius:8px;background:var(--ui-bg-editor);border:1px solid var(--ui-stroke-secondary);box-shadow:0 4px 16px color-mix(in srgb,var(--ui-base) 14%,transparent);font-size:12px;color:var(--ui-text-primary)}
+/* The SDK's Button, approximated (the real one is the app's own component). */
+.pv-btn{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:12px;font-weight:500;line-height:16px;padding:4px 10px;border-radius:2.5px;border:0;cursor:pointer;white-space:nowrap}
+.pv-btn:disabled{opacity:.5;cursor:default}
+.pv-btn-default{background:var(--ui-accent);color:var(--ui-bg-editor)}
+.pv-btn-outline{background:transparent;color:var(--ui-text-primary);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ui-stroke-secondary) 100%,transparent)}
+.pv-btn-ghost{background:transparent;color:var(--ui-text-secondary)}
+.pv-btn:hover:not(:disabled){filter:brightness(1.05)}
+.pv-btn-outline:hover,.pv-btn-ghost:hover{background:var(--ui-control-hover-background)}
+.pv-missing{margin:auto;max-width:520px;padding:24px;font-size:14px;color:var(--ui-text-primary)}
+html[data-shot] .pv-bar{display:none}
+</style>
+</head>
+<body>
+<div class="pv-bar" id="bar">
+  <b>Foreman panel preview</b>
+  <div class="pv-group" id="scenarios"></div>
+  <div class="pv-group"><button id="prev" title="Previous step">◀</button><button id="play">Pause</button><button id="next" title="Next step">▶</button></div>
+  <div class="pv-group"><button id="theme">Dark</button><button id="motion" aria-pressed="false">Reduced motion</button></div>
+  <div class="pv-group" id="widths"></div>
+  <div class="pv-caption" id="caption"></div>
+</div>
+<div class="pv-stage">
+  <section class="pv-chat" aria-label="Chat (stand-in)">
+    <h2>Chat (stand-in for Hermes)</h2>
+    <div id="chat" style="display:flex;flex-direction:column;gap:6px"></div>
+    <div class="pv-composer" id="composer"></div>
+  </section>
+  <section class="pv-pane" id="pane-frame" aria-label="Foreman pane">
+    <div class="pv-pane-tab">Foreman</div>
+    <div id="pane"></div>
+  </section>
+</div>
+<footer class="pv-status"><span>main · 0 ↑</span><div id="chip"></div></footer>
+<div class="pv-toasts" id="toasts"></div>
+<script src="out/react.js"></script>
+<script src="shim.js"></script>
+<script src="out/plugin.classic.js"></script>
+<script src="mock.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

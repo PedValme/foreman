@@ -29,8 +29,18 @@ the owner confirms it. An option the owner turned down is a decision too and sta
 - 2026-11-09 · Test on Linux, macOS and Windows with GitHub Actions, and also on Pedro's own Hermes instance;
   the YOLO-mode behaviour is tested when we reach it · Pedro: «lo probamos cuanfo lleguemos» and «tambien … probar
   como te decia en mi instancia de hermes».
-- 2026-11-10 · DECISIONES.md and ESTADO.md stay public in this repository; how the owner's machines are reached is
+- 2026-11-09 · DECISIONES.md and ESTADO.md stay public in this repository; how the owner's machines are reached is
   kept out of it · Pedro: «déjalos públicos, limpia lo del ssh y sigue».
+- 2026-11-09 · `main` is protected: changes only by pull request, no force push, no deletion, the CI checks
+  required; only the owner's account and the agents' account can merge, nobody else · Pedro: «con solo yo me referia
+  a solo nosotros o sea bot y yo, que otra gente no pueda fusionar sin niestra luz verde. Si aprobado que lo hagas».
+- 2026-11-09 · Two test beds: the owner's Token Plan voice plugins in a private repository, for real merges and
+  rejections; the small cart example for the demo video · Pedro: «usemos el plugin de token plan como test creemosle
+  un repo, es una sinulacion mas limpia porque es tgabajo que se hsria normalmente sobre un hermes agent gateway»,
+  and to the proposal of both, the first one private: «sí, vamos con los dos, crea el repo privado».
+- 2026-11-09 · The demo video shows the plugin working as before and after: loaded, then enabled, then acting ·
+  Pedro: «el video debe mostar al plugin funcionando, con lo que abria que activarlo luego de mostrar que esta
+  cargado y ver como luego de activado entra en accion».
 - 2026-11-09 · Demo video: the agent writes the script and the recording instructions (orientation, camera, tool)
   according to the rules and does the editing; Pedro records and publishes on X · Pedro: «guion e indicaciones de
   grabacion … tu haces la edicion!».

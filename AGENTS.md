@@ -94,7 +94,7 @@ step before your reply:
 ## Remote hosts
 One: the owner's own Hermes machine, the only one with a model provider configured (role: production, it is his
 live agent). This repository is public, so how to reach it is not written here: it is in the owner's private
-environment (DECISIONES.md, 2026-11-10). The owner approved its use for testing this plugin (DECISIONES.md,
+environment (DECISIONES.md, 2026-11-09). The owner approved its use for testing this plugin (DECISIONES.md,
 2026-11-09). A host with no role is production. Every connection, deploy or command on a production or client host
 needs the owner's approval, reading included. On it, the plugin is installed only into the dedicated profile
 `foremandev`, never the default one; the Hermes home there is itself a git repository: never commit in it.

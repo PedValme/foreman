@@ -18,8 +18,8 @@ def register(ctx):
         "foreman",
         commands.handle_slash,
         description="Foreman: the board, verdicts, merge and reject with reasons (board, use, prs, issues, verdict, "
-                    "merge, reject, review, status, allow, help)",
-        args_hint="[board|use|prs|issues|verdict|merge|reject|review|status|allow|help]",
+                    "merge, reject, review, status, allow, notify, help)",
+        args_hint="[board|use|prs|issues|verdict|merge|reject|review|status|allow|notify|help]",
     )
     ctx.register_tool(
         name="foreman_check",

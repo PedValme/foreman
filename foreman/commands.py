@@ -200,6 +200,10 @@ from . import board as _board  # noqa: E402  (board.py imports this module lazil
 
 SUBCOMMANDS.update(_board.SUBCOMMANDS)
 
+from . import notify as _notify  # noqa: E402
+
+SUBCOMMANDS.update(_notify.SUBCOMMANDS)
+
 
 def handle_slash(raw_args: str = "", session_id: str = "", session_key: str = "", **kwargs) -> str:
     try:

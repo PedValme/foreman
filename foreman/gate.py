@@ -907,7 +907,7 @@ def on_pre_tool_call(tool_name: str = "", args=None, task_id: str = "", **kwargs
         command = args.get("command")
         if not isinstance(command, str):
             return None
-        if _names_store(command):
+        if _names_store(command) and not _OWN_NOTIFY.match(command.strip()):
             return _store_guard()
         exported = _exported_hook_env(command)
         if exported:
@@ -932,12 +932,16 @@ def on_pre_tool_call(tool_name: str = "", args=None, task_id: str = "", **kwargs
 
 # Foreman's own state in its data directory: the exceptions the user granted, the repository pinned per session,
 # the reject comments waiting for `gh`, and saved model reviews. Only the user's /foreman commands change them.
-STORE_FILES = (grants.GRANTS_FILE, "foreman-board.json")
-STORE_DIRS = ("outbox", "reviews")
+STORE_FILES = (grants.GRANTS_FILE, "foreman-board.json", "foreman-notify.json")
+STORE_DIRS = ("outbox", "reviews", "notify")
 _STORE_DIR_TEXT = re.compile(r"(?:plugin-data/foreman|\.foreman)/(?:%s)(?:/|$|[\s\"'])" % "|".join(STORE_DIRS))
 # /foreman reject's own `gh pr comment --body-file <outbox file>` needs no exemption: it runs through
 # ctx.dispatch_tool -> tools.registry.dispatch, which calls the tool's handler without firing pre_tool_call (that
-# hook fires in model_tools, on the agent's own tool calls only).
+# hook fires in model_tools, on the agent's own tool calls only). The same holds for a notification's
+# `hermes send`; its exemption below is the notifier's and stays as it wrote it.
+# What a notification runs: hermes send reading the message file Foreman wrote (only reads it).
+_OWN_NOTIFY = re.compile(r'^hermes send --to "[a-z][a-z0-9_]*(?::[^\s"\'`$;&|<>\\%!]+)?" '
+                         r'--file "[^"$`%!\n\r]*/notify/msg-[A-Za-z0-9_]+\.txt" --quiet$')
 
 
 def _store_dirs_text() -> list:
