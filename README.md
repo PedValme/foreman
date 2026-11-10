@@ -282,6 +282,34 @@ change introduces.
   not visible to plugins. For a pull request number the detector sees only the PR's diff (`check-changed` and
   `secret-history` need the branch checked out: run `/foreman status` there).
 
+## Desktop panel
+
+Hermes Desktop (and the Webapp it serves) can show each change on Foreman's line, **Gate → Review → Owner →
+Merge**: one card per pull request or branch, with a marker at the station where it is now, the bounces back to the
+agent (`1/3`), each station's detail and the latest events. Changes waiting for you come first; finished ones fold
+away. A status-bar chip says `Foreman · 2 waiting for you`.
+
+To turn it on, after installing and enabling Foreman (below): in Hermes Desktop open **Capabilities → Plugins**, find
+**Foreman** and switch on its **Desktop** column (a plugin's Desktop half ships switched off; click **Rescan** if the
+row does not show it yet). The **Foreman** pane opens beside the chat; **Ctrl/⌘ K → Foreman: show the line** brings it
+back.
+
+- It reads only Foreman's own state file (`pipeline.json` in its plugin data directory), through a read-only route
+  Hermes mounts for enabled plugins (`GET /api/plugins/foreman/pipeline`, `dashboard/plugin_api.py`). It polls that
+  route every 2 s while the pane is on screen and every 15 s otherwise, never while the window is hidden; no network
+  calls, nothing written.
+- Its buttons only put a Foreman command into the chat, the same text you would type: **Merge #6** sends
+  `/foreman merge 6` (which checks the verdict again and asks you to confirm), **Reject…** and **Review again…** put
+  the command in the chat box for you to finish (never over text you are typing), **Show verdict** sends
+  `/foreman verdict …`. If the chat box is not available, the command is copied to the clipboard for you to paste;
+  **Open ↗** opens the pull request in your browser. A command acts on the chat's repository, so with changes from
+  several repositories on the line the panel offers no command and says to pick the repository with `/foreman use`.
+  The panel never runs `gh` or merges by itself.
+- Titles, branch names and event lines are shown as plain text, never as HTML or Markdown.
+
+To look at it without Hermes: `python examples/panel-preview/build.py`, then open `examples/panel-preview/index.html`
+(scripted scenarios, light and dark, reduced motion).
+
 ## Install
 
 ```
