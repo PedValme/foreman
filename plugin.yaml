@@ -2,7 +2,7 @@ name: foreman
 version: "0.1.0"
 manifest_version: 2
 api_version: 1
-description: "A green check the agent did not rig: a deterministic gate (no model) that blocks git commit, git push, gh pr create and gh pr merge when the change skips, isolates, deletes or moves tests, edits what the check runs, bypasses hooks or carries a secret, and asks the agent to undo it before it finishes a coding turn."
+description: "A green check the agent did not rig: a deterministic gate (no model) that blocks git commit, git push, gh pr create and gh pr merge when the change skips, isolates, deletes or moves tests, edits what the check runs, bypasses hooks or carries a secret, and asks the agent to undo it before it finishes a coding turn. On demand, /foreman review asks a second model to review the diff."
 author: "PedValme"
 license: MIT
 homepage: https://github.com/PedValme/foreman
@@ -13,3 +13,17 @@ provides_tools:
 provides_hooks:
   - pre_tool_call
   - pre_verify
+capabilities:
+  - llm.model_override     # /foreman review on a model other than the one that wrote the code
+  - llm.provider_override  # ...when that model lives on another provider
+config_schema:
+  reviewer_model:
+    type: str
+    default: ""
+    label: "Reviewer model"
+    description: "Model for /foreman review, as your provider names it. Empty: your first Hermes fallback model, else the active model. Needs the llm.model_override capability."
+  reviewer_provider:
+    type: str
+    default: ""
+    label: "Reviewer provider"
+    description: "Hermes provider id for reviewer_model when it is not your active provider (e.g. openrouter). Needs the llm.provider_override capability."
