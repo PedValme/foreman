@@ -49,3 +49,27 @@ the owner confirms it. An option the owner turned down is a decision too and sta
 - 2026-11-09 · rejected: guardia as a merge gate that publishes a GitHub check from the agent · `diaktoros` already
   publishes the check and the ruleset, `receipts` already blocks push and PR creation, and a check published by the
   agent that wrote the code is not independent; Pedro chose Foreman.
+- 2026-11-09 · Foreman grows into the whole line of a software factory in one plugin: automatic reviews, bounces
+  back to the agent, a notice to the owner and approval from the messaging app, a second-family checker model
+  (optional), an agent doing what guardia does, and a visual animated workflow in the Desktop panel showing where
+  each change is. The core promise stays the gate · Pedro: «si queremos ganar necesitamos algo que aporte mas
+  valor, por eso mi idea inicial en muy simple era llevar la fabrica completa a un plugin o sea las revisiones en
+  auto, los rebotes, las notificaciones o aprobacilnes de fusion por boton en etelegram […] y un sgebte que haga
+  lo que hace guardia. Inckuso para hacerlo ganador con un workflow visual en motion que se vea desde el panel»,
+  and «dale de largo a todo lo que puedas avanzar durante la noche».
+- 2026-11-09 · The second-model review runs by default when someone asks to merge; the full loop on every coding
+  turn is an option the user turns on (`auto_review`: `merge` default, `finish`, `off`) · Pedro chose «Al fusionar
+  (Recomendado)» over «En cada turno». A merge is never automatic (agent's limit, catalog rule 12, accepted with
+  the plan).
+- 2026-11-09 · On the owner's Hermes machine, in the dedicated profile: test sessions through the night, more
+  test issues and pull requests in the private test repository, and the agent answers the consent screen that
+  lets Foreman use another model as reviewer · Pedro chose all three, and: «hay dos cuentas que puedes usar sin
+  drama en glorieto, openai chatgpt por suscripcion puedes usarla en lo que necesites terra y sol 6.1 y opencode
+  go que es mi gailover/secundsria usa puro deepseek 4.1 flash en high de esa sub».
+- 2026-11-09 · The Desktop panel is checked on the Hermes Desktop of the development PC or on the web version ·
+  Pedro: «hay hermes desktop en este pc pero puedes usar la version web tambien».
+- 2026-11-09 · The catalog pull request and the feature request to Hermes go out under the owner's account only
+  after he has seen the texts · Pedro chose «Preparo y te muestro (Recomendado)».
+- 2026-11-09 · The installable plugin lives in a subdirectory (`plugin/`), so a user's install gets only the
+  plugin while the method documents stay public in the repository · Pedro: «sí, mueve el plugin a una subcarpeta
+  al final como propones».
