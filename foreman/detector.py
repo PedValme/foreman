@@ -993,6 +993,144 @@ def scan_worktree(repo: Repo, staged_only: bool = False, include_untracked: bool
     return report
 
 
+def name_status_from_diff(diff: str) -> str:
+    """``git diff --name-status`` rows (A, M, D, R100) built from the headers of a unified git diff, for a diff that
+    comes without its name-status (``gh pr diff``)."""
+    rows, cur = [], None
+
+    def close():
+        if cur is None:
+            return
+        old, new = cur["old"] or cur["new"], cur["new"] or cur["old"]
+        if cur["kind"] == "R" and old and new:
+            rows.append("R100\t%s\t%s" % (old, new))
+        elif cur["kind"] == "D" and old:
+            rows.append("D\t%s" % old)
+        elif new:
+            rows.append("%s\t%s" % (cur["kind"], new))
+
+    in_hunks = False  # past the file's first @@: lines are content, never headers ("++ b/x" added is "+++ b/x")
+    for text in diff.splitlines():
+        if text.startswith("diff --git "):
+            close()
+            cur, in_hunks = {"kind": "M", "old": None, "new": None}, False
+            m = re.match(r'^diff --git (?:"?a/(.+?)"?) (?:"?b/(.+?)"?)$', text)
+            if m and m.group(1) == m.group(2):
+                cur["old"] = cur["new"] = unquote_path('"%s"' % m.group(1)) if "\\" in m.group(1) else m.group(1)
+            continue
+        if cur is None or in_hunks:
+            continue
+        if text.startswith("@@"):
+            in_hunks = True
+        elif text.startswith("new file mode"):
+            cur["kind"] = "A"
+        elif text.startswith("deleted file mode"):
+            cur["kind"] = "D"
+        elif text.startswith("rename from "):
+            cur["kind"], cur["old"] = "R", unquote_path(text[len("rename from "):])
+        elif text.startswith("rename to "):
+            cur["kind"], cur["new"] = "R", unquote_path(text[len("rename to "):])
+        elif text.startswith("--- ") and cur["kind"] != "R":
+            path = unquote_path(text[4:])
+            if path != "/dev/null":
+                cur["old"] = path[2:] if path.startswith("a/") else path
+        elif text.startswith("+++ ") and cur["kind"] != "R":
+            path = unquote_path(text[4:])
+            if path != "/dev/null":
+                cur["new"] = path[2:] if path.startswith("b/") else path
+    close()
+    return "\n".join(rows)
+
+
+def _file_diffs(diff: str) -> dict:
+    """The part of a unified diff that belongs to each file, keyed by its new path (old path for a deletion)."""
+    out, cur, lines, in_hunks = {}, None, [], False
+    for text in diff.splitlines(keepends=True):
+        if text.startswith("diff --git "):
+            if cur is not None:
+                out[cur] = "".join(lines)
+            cur, lines, in_hunks = None, [text], False
+            continue
+        lines.append(text)
+        in_hunks = in_hunks or text.startswith("@@")
+        if in_hunks:
+            continue
+        if cur is None and text.startswith(("+++ ", "rename to ")):
+            path = unquote_path(text[4:] if text.startswith("+++ ") else text[len("rename to "):])
+            if path != "/dev/null":
+                cur = path[2:] if text.startswith("+++ ") and path.startswith("b/") else path
+        elif cur is None and text.startswith("--- "):
+            path = unquote_path(text[4:])
+            if path != "/dev/null":
+                cur = path[2:] if path.startswith("a/") else path
+    if cur is not None:
+        out[cur] = "".join(lines)
+    return out
+
+
+def apply_file_diff(old_text: Optional[str], file_diff: str) -> Optional[str]:
+    """A file's new content from its old content and its unified diff, or None when the diff does not apply."""
+    old = (old_text or "").splitlines()
+    new, pos = [], 0
+    hunks = list(re.finditer(r"(?m)^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@.*$", file_diff))
+    if not hunks:
+        return None
+    for i, m in enumerate(hunks):
+        start = int(m.group(1)) - (0 if m.group(2) == "0" else 1)
+        if start < pos or start > len(old):
+            return None
+        new += old[pos:start]
+        pos = start
+        end = hunks[i + 1].start() if i + 1 < len(hunks) else len(file_diff)
+        for text in file_diff[m.end():end].splitlines()[1:]:
+            if text.startswith("\\"):
+                continue
+            body = text[1:]
+            if text.startswith("+"):
+                new.append(body)
+            elif text.startswith(("-", " ")) or text == "":
+                if pos >= len(old) or old[pos] != body:
+                    return None
+                pos += 1
+                if not text.startswith("-"):
+                    new.append(body)
+            else:
+                break
+    new += old[pos:]
+    return "\n".join(new) + ("\n" if new else "")
+
+
+def findings_from_diff(diff: str, name_status: str = "", check: Optional[str] = None,
+                       base_is_file: Optional[Callable[[str], bool]] = None,
+                       base_text: Optional[Callable[[str], Optional[str]]] = None, messages: str = "",
+                       deadline: Optional[float] = None) -> list:
+    """Blockers in a change known only as a unified diff (a pull request that is not available locally): markers,
+    secrets in the added lines, deleted and moved tests and, when ``base_is_file`` and ``base_text`` describe the
+    base, a change to what the check runs. ``name_status`` defaults to the one in the diff's headers; ``messages``
+    are the commit messages (for ``foreman:allow <path>: <reason>``). Secrets in intermediate commits are not seen:
+    that needs the commits themselves (``scan_range``)."""
+    name_status = name_status or name_status_from_diff(diff)
+    paths, deleted, renamed = paths_from_name_status(name_status)
+    allowed_paths = allowed_paths_in(messages)
+    per_file = _file_diffs(diff)
+
+    def version_of(path: str) -> str:
+        part = per_file.get(path)
+        return "diff:" + hashlib.sha256(part.encode("utf-8")).hexdigest()[:16] if part else "deleted"
+
+    found = detect(diff, deleted, renamed=renamed, allowed_paths=allowed_paths,
+                   new_files=added_from_name_status(name_status), version_of=version_of, deadline=deadline)
+    if base_is_file is not None:
+        protected = [CONFIG_FILE] if base_is_file(CONFIG_FILE) else []
+        if check or protected:
+            def contents(p):
+                old = base_text(p) if base_text else None
+                return old, apply_file_diff(old, per_file.get(p, ""))
+            found += check_changed(check, paths, base_is_file, allowed_paths, protected, contents=contents,
+                                   version_of=version_of)
+    return found
+
+
 def scan_branch(repo: Repo, check: Optional[str] = None, sarif=(), sarif_threshold: Optional[float] = None,
                 sarif_scope: Optional[str] = None) -> Report:
     """The current branch against the merge-base with the remote's default branch (or a local main/master)."""
