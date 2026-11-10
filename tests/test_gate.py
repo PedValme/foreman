@@ -3,10 +3,13 @@ import importlib.util
 import json
 import os
 import re
+import sys
+import time
+import types
 import unittest
 from unittest import mock
 
-from foreman import commands, detector, gate
+from foreman import commands, detector, gate, grants
 from tests_support import GitRepoCase
 
 SKIP = "@pytest.mark." + "skip"
@@ -105,30 +108,129 @@ class TerminalGate(GitRepoCase):
         with mock.patch.object(gate, "session_cwd", return_value=self.root):
             self.assertEqual(terminal("git commit -m x")["action"], "block")
 
-    def test_deleted_test_is_blocked_and_the_allow_line_escalates(self):
+    def test_deleted_test_is_blocked_and_the_allow_line_waits_for_the_user(self):
         self.git("rm", "-q", "tests/test_app.py")
-        self.assertEqual(terminal("git commit -m 'drop test'", self.root)["action"], "block")
+        d = terminal("git commit -m 'drop test'", self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertNotIn(detector.MARKER, d["message"])  # the marker is not advertised on ordinary blocks
         msg = "replace\n\n" + detector.MARKER + " tests/test_app.py: merged into test_new.py"
         d = terminal("git commit -m '%s'" % msg, self.root)
-        self.assertEqual(d["action"], "approve")
-        self.assertIn("tests/test_app.py", d["message"])
-        self.assertTrue(d["rule_key"].startswith("foreman:"))
+        self.assertEqual(d["action"], "block")
+        short_id = re.search(r"id ([0-9a-f]{8})", d["message"]).group(1)
+        self.assertIn("/foreman allow", d["message"])
+        self.assertIn(short_id, commands.handle_slash("allow"))
+        self.assertIn("allowed", commands.handle_slash("allow " + short_id))
+        self.assertIsNone(terminal("git commit -m '%s'" % msg, self.root))
 
-    def test_marker_never_passes_alone(self):
-        self.write("tests/test_app.py", SKIP + "  # " + detector.MARKER + " flaky upstream\n")
+    def test_marker_never_passes_alone_in_any_approval_mode(self):
+        marked = SKIP + "  # " + detector.MARKER + " flaky upstream"
+        self.write("tests/test_app.py", marked + "\n")
         self.git("add", "-A")
         d = terminal("git commit -m x", self.root)
-        self.assertEqual(d["action"], "approve")
+        self.assertEqual(d["action"], "block")  # not "approve": YOLO or approvals off would pass that alone
+        short_id = re.search(r"id ([0-9a-f]{8})", d["message"]).group(1)
+        self.assertIn("You cannot allow it yourself", d["message"])
+        commands.handle_slash("allow " + short_id)
+        self.assertIsNone(terminal("git commit -m x", self.root))
+        # The grant covers that exact line: changing it is checked again.
+        self.write("tests/test_app.py", marked + " and more\n")
+        self.git("add", "-A")
+        self.assertEqual(terminal("git commit -m x", self.root)["action"], "block")
+        # With another blocker it blocks either way.
+        self.write("tests/test_app.py", marked + "\n")
         self.write("app.py", "K = '" + GHP + "f" * 36 + "'\n")
         self.git("add", "-A")
-        self.assertEqual(terminal("git commit -m x", self.root)["action"], "block")  # with a blocker, it blocks
+        self.assertEqual(terminal("git commit -m x", self.root)["action"], "block")
+
+    def test_grants_expire(self):
+        self.write("tests/test_app.py", SKIP + "  # " + detector.MARKER + " flaky\n")
+        self.git("add", "-A")
+        short_id = re.search(r"id ([0-9a-f]{8})", terminal("git commit -m x", self.root)["message"]).group(1)
+        commands.handle_slash("allow " + short_id)
+        later = time.time() + grants.GRANT_TTL_SECONDS + 60
+        with mock.patch.object(grants.time, "time", return_value=later):
+            self.assertEqual(terminal("git commit -m x", self.root)["action"], "block")
+
+    def test_unknown_or_short_ids_are_refused(self):
+        self.assertIn("No pending", commands.handle_slash("allow deadbeef"))
+        self.assertIn("at least 4", commands.handle_slash("allow ab"))
+        self.assertIn("nothing is waiting", commands.handle_slash("allow"))
+
+    def test_the_exception_store_is_off_limits(self):
+        store = grants.store_path()
+        self.assertEqual(gate.on_pre_tool_call(tool_name="write_file", args={"path": store, "content": "{}"})["action"],
+                         "block")
+        self.assertEqual(terminal("echo {} > %s" % store, self.root)["action"], "block")
 
     def test_no_verify_is_blocked_even_when_clean(self):
         self.write("app.py", "x = 3\n")
         self.git("add", "-A")
         d = terminal("git commit --no-verify -m x", self.root)
         self.assertEqual(d["action"], "block")
-        self.assertIn("hooks-bypassed", d["message"])
+        self.assertIn("skips the repository's git hooks", d["message"])
+
+    def test_block_messages_are_short(self):
+        self.write("tests/test_app.py", SKIP + "\n")
+        self.git("add", "-A")
+        d = terminal("git commit -m x", self.root)
+        lines = d["message"].splitlines()
+        self.assertEqual(lines[0], "Foreman blocked `git commit`.")
+        self.assertEqual(len(lines), 3)  # headline, finding, its fix
+
+    def test_earlier_segments_that_change_the_tree_are_refused(self):
+        for command in ("git rm -q tests/test_app.py && git commit -m x",
+                        "git mv tests/test_app.py archive.py && git commit -m x",
+                        "rm tests/test_app.py && git commit -am x",
+                        "sed -i s/True/False/ tests/test_app.py && git commit -am x",
+                        "python fix.py; git push",
+                        "git commit -am x && git push",
+                        'bash -c "rm -f app.py && git commit -am x"'):
+            d = terminal(command, self.root)
+            self.assertEqual(d["action"], "block", command)
+            self.assertIn("as its own command", d["message"], command)
+        for command in ("git add -A && git commit -m x", "cd . && git status && git commit -m x",
+                        "echo go; git diff --stat; git commit -m x", "FOO=1 git commit -m x",
+                        "git commit -m x && echo done"):
+            self.write("app.py", "x = %d\n" % len(command))
+            self.git("add", "-A")
+            self.assertIsNone(terminal(command, self.root), command)
+
+    def test_push_of_several_branches_asks_a_person(self):
+        d = terminal("git push --all origin", self.root)
+        self.assertEqual(d["action"], "approve")
+        self.assertIn("more than one branch", d["message"])
+
+    def test_cmd_c_is_followed(self):
+        self.write("tests/test_app.py", SKIP + "\n")
+        self.git("add", "-A")
+        self.assertEqual(terminal("cmd /c git commit -m x", self.root)["action"], "block")
+
+    def test_an_unlocated_command_outside_a_repository_is_blocked(self):
+        outside = os.path.join(self.tmp, "plain")
+        os.makedirs(outside)
+        with mock.patch.object(gate, "session_cwd", return_value=outside):
+            d = terminal("git commit -m x")
+        self.assertEqual(d["action"], "block")
+        self.assertIn("workdir", d["message"])
+
+    def test_the_terminal_recorded_session_directory_is_used(self):
+        fake = types.ModuleType("tools.terminal_tool")
+        fake.get_session_cwd = lambda key: self.root if key == "task-7" else None
+        with mock.patch.dict(sys.modules, {"tools.terminal_tool": fake, "tools": types.ModuleType("tools")}):
+            self.assertEqual(gate.session_cwd("task-7"), self.root)
+            self.write("tests/test_app.py", SKIP + "\n")
+            self.git("add", "-A")
+            d = gate.on_pre_tool_call(tool_name="terminal", args={"command": "git commit -m x"}, task_id="task-7")
+            self.assertEqual(d["action"], "block")
+            self.assertIn("Foreman: BLOCKED", commands.handle_slash("status", session_key="task-7"))
+
+    def test_the_hook_deadline_covers_the_repository_lookup(self):
+        self.write("app.py", "x = 9\n")
+        self.git("add", "-A")
+        with mock.patch.object(gate, "HOOK_BUDGET_SECONDS", -1):
+            d = terminal("git commit -m x", self.root)
+        self.assertEqual(d["action"], "approve")
+        self.assertIn("time budget", d["message"])
 
     def test_push_inspects_the_history(self):
         self.git("checkout", "-q", "-b", "feature")
@@ -213,9 +315,23 @@ class WriteGate(GitRepoCase):
             d = self.write_file("tests/test_new.py", "it." + "only('x', () => {})\n")
         self.assertEqual(d["action"], "block")
 
-    def test_marked_write_asks_a_person(self):
-        d = self.write_file(self.test_file, SKIP + "  # " + detector.MARKER + " needs a GPU\n")
-        self.assertEqual(d["action"], "approve")
+    def test_marked_write_waits_for_the_user(self):
+        content = SKIP + "  # " + detector.MARKER + " needs a GPU\n"
+        d = self.write_file(self.test_file, content)
+        self.assertEqual(d["action"], "block")
+        short_id = re.search(r"id ([0-9a-f]{8})", d["message"]).group(1)
+        commands.handle_slash("allow " + short_id)
+        self.assertIsNone(self.write_file(self.test_file, content))
+        # The same exception then covers the commit of that line.
+        self.write("tests/test_app.py", content)
+        self.git("add", "-A")
+        self.assertIsNone(terminal("git commit -m x", self.root))
+
+    def test_conditional_skip_in_a_new_test_file_passes(self):
+        cond = "@pytest.mark." + "skipif(sys.platform == 'win32', reason='posix')\n"
+        new = os.path.join(self.root, "tests", "test_posix.py")
+        self.assertIsNone(self.write_file(new, cond + "def test_p():\n    assert True\n"))
+        self.assertEqual(self.write_file(self.test_file, cond + "def test_x():\n    assert True\n")["action"], "block")
 
     def test_patch_replace_and_v4a(self):
         d = gate.on_pre_tool_call(tool_name="patch", args={

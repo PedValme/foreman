@@ -12,8 +12,8 @@ def register(ctx):
     ctx.register_command(
         "foreman",
         commands.handle_slash,
-        description="Foreman: is this repository's green check honest? (status, help)",
-        args_hint="[status|help]",
+        description="Foreman: is this repository's green check honest? (status, allow, help)",
+        args_hint="[status|allow|help]",
     )
     ctx.register_tool(
         name="foreman_check",
