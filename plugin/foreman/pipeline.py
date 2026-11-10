@@ -611,8 +611,10 @@ def record_needs_owner(ref: Ref, summary: str) -> None:
         item = _ensure(data, ref, at)
         if item["stage"] in DONE:
             return
-        if int(item.get("bounces") or 0) > 0:  # never "bounced 0/3": with no bounce the stage stays where it is
+        if int(item.get("bounces") or 0) > 0:
             item["stage"] = "bounced"
+        elif item["stage"] in ("ready", "awaiting_owner"):  # never "bounced 0/3", and never "ready" for unreviewed work
+            item["stage"] = "review"
         _event(item, summary, at)
         _queue(meta, item, "needs_owner", "%s: %s" % (_label(item), summary))
     _mutate(apply)

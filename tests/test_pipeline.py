@@ -180,6 +180,12 @@ class Shape(PipelineCase):
         self.assertEqual(pipeline.line(item), "gate ok > review FAIL (1 blocking) > owner - > merge -")
         pipeline.record_needs_owner(ref, "review budget used up (4 model calls)")
         self.assertEqual(pipeline.get(ref.id)["stage"], "review")  # needing the owner is no bounce either
+        other = self.ref(number=8, branch="feat/z")
+        pipeline.record_gate(other, "pass", "CLEAN", "Gate passed")
+        pipeline.record_review(other, {"verdict": "PASS", "findings": [], "cache_key": "k9"})
+        self.assertEqual(pipeline.get(other.id)["stage"], "ready")
+        pipeline.record_needs_owner(other, "review budget used up: the latest changes are not reviewed")
+        self.assertEqual(pipeline.get(other.id)["stage"], "review")  # unreviewed work is no longer "ready"
         # a state file written before this change: "bounced" with no bounce reads as the failed review it was
         legacy = dict(item, stage="bounced", bounces=0)
         self.assertEqual(pipeline.shown_stage(legacy), "review")
