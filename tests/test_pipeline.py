@@ -153,7 +153,7 @@ class Shape(PipelineCase):
         self.assertEqual(pipeline.get(ref.id)["bounces"], 1)
         pipeline.record_review(ref, {"verdict": "PASS", "findings": [], "cache_key": "k2"})
         item = pipeline.get(ref.id)
-        self.assertEqual((item["stage"], item["bounces"]), ("ready", 0))
+        self.assertEqual((item["stage"], item["bounces"]), ("ready", 1))  # the history of bounces stays
         pipeline.record_waiting(ref)
         self.assertEqual(pipeline.get(ref.id)["stage"], "awaiting_owner")
         pipeline.record_merge_refused(ref, "`gh pr merge` denied")
@@ -178,7 +178,7 @@ class Shape(PipelineCase):
         pipeline.record_review(ref, ok)
         self.assertEqual(len(self.sent), 1)
         e = self.sent[0]
-        self.assertEqual(set(e), {"kind", "id", "repo", "target", "head", "summary", "actions"})
+        self.assertEqual(set(e), {"kind", "id", "repo", "root", "target", "head", "summary", "actions"})
         self.assertEqual((e["kind"], e["id"], e["repo"], e["head"]), ("ready", "acme/widgets#pr:6", "acme/widgets",
                                                                      "a" * 40))
         self.assertEqual(e["actions"], [{"label": "Merge", "command": "/foreman merge 6 --yes"},
@@ -261,6 +261,43 @@ class Shape(PipelineCase):
         self.assertIn("Review sent it back (2 blocking, 1 high), bounce 1/3", text)
 
 
+class PanelAndNotifier(PipelineCase):
+    """The two consumers: the Desktop panel reads pipeline.json through panel_api; the notifier gets one event."""
+
+    def test_gate_review_fail_bounce_review_pass_ready(self):
+        from foreman import panel_api
+        changed = []
+        with mock.patch.object(panel_api, "notify_changed", side_effect=lambda: changed.append(1) or True):
+            ref = self.ref()
+            pipeline.record_gate(ref, "pass", "CLEAN", "Gate passed `git push`")
+            self.tick()
+            bad = {"verdict": "BLOCKED", "cache_key": "k1", "model": {"provider": "p", "model": "m"},
+                   "findings": [finding("BLOCKING", "a.py", "x"), finding("HIGH", "a.py", "y")]}
+            pipeline.record_review(ref, bad, bounce=True)
+            self.tick()
+            pipeline.record_review(ref, {"verdict": "PASS", "findings": [], "cache_key": "k2",
+                                         "model": {"provider": "p", "model": "m"}}, bounce=True)
+        self.assertEqual(len(changed), 3)  # the panel is told after each write
+        snap = panel_api.read_snapshot(os.path.join(grants.store_dir(), "pipeline.json"))
+        self.assertIsNone(snap["problem"])
+        [item] = snap["items"]
+        self.assertEqual((item["id"], item["stage"], item["bounces"], item["max_bounces"]),
+                         ("acme/widgets#pr:6", "ready", 1, 3))
+        self.assertEqual([(s["name"], s["status"]) for s in item["stages"]],
+                         [("gate", "pass"), ("review", "pass"), ("owner", "pending"), ("merge", "pending")])
+        self.assertEqual(item["stages"][1]["model"], "p/m")
+        self.assertEqual(item["head"], "a" * 40)
+        self.assertEqual(item["target"]["url"], "https://github.com/acme/widgets/pull/6")
+        self.assertEqual([e["text"] for e in item["events"]],
+                         ["Gate passed `git push`", "Review sent it back (1 blocking, 1 high), bounce 1/3",
+                          "Review passed (no findings)"])
+        ready = [e for e in self.sent if e["kind"] == "ready"]
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(len(ready), 1)
+        self.assertEqual(ready[0]["root"], self.root)
+        self.assertEqual(ready[0]["target"]["number"], 6)
+
+
 class StoreGuard(PipelineCase):
     def test_the_agent_cannot_write_the_pipeline_but_a_ci_pipeline_json_is_fine(self):
         store = grants.store_dir()
@@ -329,9 +366,9 @@ class ReviewCache(PipelineCase):
 
     def test_slash_fresh_is_parsed(self):
         review._CTX = FakeCtx(FakeLlm(parsed=answer()))
-        with mock.patch.object(review, "locate", return_value=(self.root, "given")):
-            review.cmd_review("")
-            out = review.cmd_review("--fresh")
+        board.pin(self.root)
+        review.cmd_review("")
+        out = review.cmd_review("--fresh")
         self.assertEqual(len(review._CTX.llm.calls), 2)
         self.assertNotIn("stored result", out)
         self.assertEqual(pipeline.items_for(root=self.root)[0]["stage"], "ready")
@@ -623,7 +660,7 @@ class Incomplete(PipelineCase):
         self.assertIn("gate INCOMPLETE", board_text)
         out = self.run_cmd("verdict 7")
         self.assertIn("Foreman verdict for PR #7: INCOMPLETE", out)
-        self.assertIn("reports/scan.sarif", out)
+        self.assertIn("scan.sarif", out)
         self.assertNotIn("ready to merge", out)
         out = self.run_cmd("merge 7 --yes")
         self.assertIn("Foreman will not merge PR #7: its verdict is INCOMPLETE", " ".join(out.split()))

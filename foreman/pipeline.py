@@ -207,9 +207,19 @@ def _mutate(fn: Callable[[dict, dict], Any]) -> Any:
     except Exception:
         logger.warning("foreman: cannot update the pipeline", exc_info=True)
         return None
+    _panel_changed()
     for event in outbox:
         _send(event)
     return result
+
+
+def _panel_changed() -> None:
+    """Tell an open Desktop panel that ``pipeline.json`` changed (it polls anyway). Never raises."""
+    try:
+        from . import panel_api
+        panel_api.notify_changed()
+    except Exception:
+        logger.debug("foreman: cannot tell the panel", exc_info=True)
 
 
 def _send(event: dict) -> None:
@@ -374,7 +384,7 @@ def _queue(meta: dict, item: dict, kind: str, summary: str, notes: bool = False)
     actions = _actions(item, kind)
     if notes:
         actions = [dict(a, command=a["command"].replace(" --yes", "")) for a in actions]
-    meta["_outbox"].append({"kind": kind, "id": item["id"], "repo": item.get("repo"),
+    meta["_outbox"].append({"kind": kind, "id": item["id"], "repo": item.get("repo"), "root": item.get("root"),
                             "target": dict(item["target"]), "head": item.get("head"),
                             "summary": _one_line(summary, 200), "actions": actions})
 
@@ -464,7 +474,7 @@ def record_review(ref: Ref, record: dict, then: str = "ready", bounce: bool = Fa
                     _queue(meta, item, "needs_owner", "%s: the reviewer still finds problems after %d bounce(s); "
                            "it needs you" % (_label(item), item["bounces"]))
             elif status in ("pass", "notes") and gate_ok:
-                item["bounces"] = 0
+                # bounces stay: they count every time this change went back (the line shows "bounced 1/3")
                 worktree_on_pr = ref.kind == "branch" and item["target"].get("kind") == "pr"
                 # a review of the local working tree says nothing about the pull request's head on GitHub
                 item["stage"] = "review" if worktree_on_pr and then == "ready" else then

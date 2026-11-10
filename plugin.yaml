@@ -39,3 +39,14 @@ config_schema:
     default: 3
     label: "Bounce limit"
     description: "With auto_review finish: how many times a change is sent back to the agent before Foreman stops and hands it to you. Never more than Hermes's agent.max_verify_nudges."
+  notify:
+    type: str
+    choices: ["off", "on"]
+    default: "off"
+    label: "Notifications"
+    description: "Off: nothing is sent anywhere. On: a message to notify_to when a pull request waits for you, sent with `hermes send` through Hermes's terminal tool and your own bot. Same as /foreman notify on|off."
+  notify_to:
+    type: str
+    default: ""
+    label: "Notify where"
+    description: "A hermes send target: telegram (your Telegram home channel, set with /sethome), telegram:<chat id>, discord:#channel, slack:<channel id>."

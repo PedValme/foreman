@@ -1,0 +1,10 @@
+{
+  "name": "foreman",
+  "label": "Foreman",
+  "description": "Backend route for Foreman's Desktop panel; Foreman has no web dashboard page.",
+  "icon": "Factory",
+  "version": "0.1.0",
+  "tab": { "path": "/foreman", "hidden": true },
+  "entry": "index.js",
+  "api": "plugin_api.py"
+}

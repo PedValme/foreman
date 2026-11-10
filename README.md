@@ -70,6 +70,7 @@ approvals off, Hermes lets them through without a person.**
 /foreman allow [id]          list or allow findings the agent marked
 /foreman review [pr|branch] [--fresh]  a second model reviews the diff (see below)
 /foreman pipeline [pr|branch] a change's stages: gate, review, bounces, owner, merge
+/foreman notify [on [target]|off|test]   tell you on your phone when a PR waits for you (off by default)
 /foreman help
 ```
 
@@ -335,6 +336,84 @@ plugins:
         max_bounces: 3
 ```
 
+## Desktop panel
+
+Hermes Desktop (and the Webapp it serves) can show each change on Foreman's line, **Gate → Review → Owner →
+Merge**: one card per pull request or branch, with a marker at the station where it is now, the bounces back to the
+agent (`1/3`), each station's detail and the latest events. Changes waiting for you come first; finished ones fold
+away. A status-bar chip says `Foreman · 2 waiting for you`.
+
+To turn it on, after installing and enabling Foreman (below): in Hermes Desktop open **Capabilities → Plugins**, find
+**Foreman** and switch on its **Desktop** column (a plugin's Desktop half ships switched off; click **Rescan** if the
+row does not show it yet). The **Foreman** pane opens beside the chat; **Ctrl/⌘ K → Foreman: show the line** brings it
+back.
+
+- It reads only Foreman's own state file (`pipeline.json` in its plugin data directory), through a read-only route
+  Hermes mounts for enabled plugins (`GET /api/plugins/foreman/pipeline`, `dashboard/plugin_api.py`). It polls that
+  route every 2 s while the pane is on screen and every 15 s otherwise, never while the window is hidden; no network
+  calls, nothing written.
+- Its buttons only put a Foreman command into the chat, the same text you would type: **Merge #6** sends
+  `/foreman merge 6` (which checks the verdict again and asks you to confirm), **Reject…** and **Review again…** put
+  the command in the chat box for you to finish (never over text you are typing), **Show verdict** sends
+  `/foreman verdict …`. If the chat box is not available, the command is copied to the clipboard for you to paste;
+  **Open ↗** opens the pull request in your browser. Merge, reject and verdict name the card's repository
+  (`/foreman merge 6 --repo acme/widgets`; `--repo` takes only a repository Foreman already knows). The panel offers
+  no command it cannot point at the right repository.
+  The panel never runs `gh` or merges by itself.
+- Titles, branch names and event lines are shown as plain text, never as HTML or Markdown.
+
+To look at it without Hermes: `python examples/panel-preview/build.py`, then open `examples/panel-preview/index.html`
+(scripted scenarios, light and dark, reduced motion).
+
+## Notifications
+
+Off by default: nothing is sent anywhere until you type `/foreman notify on <target>` (or ask for a sample with
+`/foreman notify test`). The target is where Hermes's
+own `hermes send` would deliver: `telegram` (your Telegram home channel, the chat where you ran `/sethome`),
+`telegram:<chat id>`, `discord:#channel`, `slack:<channel id>`, and the other platforms your Hermes is set up for.
+Typed in a chat, `/foreman notify on` uses that platform's home channel. `/foreman notify test` sends a sample now,
+`/foreman notify` shows the state and the last message, `/foreman notify off` stops them. The same two settings
+(`notify`, `notify_to`) are on the plugin's page in the Desktop.
+
+**What is sent.** One short plain-text message each time Foreman's pipeline reports that a pull request is ready
+for you or needs your decision (or was merged or rejected), once per pull request head: the repository, the pull request's number and
+title, its branch and head commit, the one-line verdict, the link, and the commands to act on it. On Telegram:
+
+```
+Foreman: PR #6 is ready to merge and waits for you
+Repository: acme/widgets
+Title: Retry the upload on a timeout
+Change: branch feat/retry-upload · head 1a2b3c4
+Verdict: CLEAN: no skipped, deleted or moved tests, no change to the check, no secrets. CI passing.
+https://github.com/acme/widgets/pull/6
+
+Merge (Foreman checks it again, then asks you with Merge / Cancel buttons):
+/foreman merge 6 --repo acme/widgets
+Reject (add your reason at the end; Foreman posts it with its findings):
+/foreman reject 6 --repo acme/widgets
+Tap a command to copy it, then send it to this chat. Nothing is merged until you confirm there.
+```
+
+The title, branch and verdict are made inert first: no Markdown or HTML, no @mentions, no clickable links, and no
+Hermes media directive, so a crafted pull request title cannot ping people, add a link or make Hermes attach a file.
+
+**A message is never a confirmation.** Hermes gives plugins no public way to put buttons on a message that answer
+back to the plugin, so the message carries commands, not buttons. When you send `/foreman merge 6 --repo
+acme/widgets` in the chat, it is exactly the command described in *Merge and reject*: a fresh verdict, refused when
+BLOCKED, conflicting, a draft or still being computed, and then Hermes's own **Merge** / **Cancel** buttons (on
+Telegram, Discord and Slack; a numbered list elsewhere). `--repo` accepts only a repository you already used on this
+machine (pinned with `/foreman use`, or reported with its path by Foreman's pipeline), by its remote's `owner/name`
+or its exact path; any other value is refused before Foreman opens it, so a command copied from a message only acts
+on repositories you already work with.
+
+**The network path.** Foreman runs `hermes send --to <target> --file <message> --quiet` through Hermes's own
+terminal tool. Your Hermes and your own bot deliver it; Foreman never reads a token or a credential file. The
+message file lives in Foreman's data directory for the moment the command runs. With a Docker or remote terminal
+backend `hermes` is not there, and the message is not sent (the reason is returned and shown by `/foreman notify`).
+A send waits for `hermes send` for at most 60 s; one that fails or times out is reported, never retried. The
+message file and the log of sends are Foreman's state: the agent's commands and writes that name them are blocked,
+like the rest of its data directory.
+
 ## Install
 
 ```
@@ -355,10 +434,11 @@ Requires Hermes Agent >= 0.22.6 and git on the PATH.
 - **Writes in its Hermes plugin data directory** only: `foreman-grants.json` (the findings waiting for you and the
   exceptions you allowed: rule, file, line, message; no file contents), `foreman-board.json` (the repository pinned
   per session and the last ten you used: paths only), `reviews/*.json` (the last `/foreman review` of each target;
-  its findings quote lines of the diff, and `/foreman reject` includes them), `pipeline.json` and
-  `pipeline-meta.json` (each change's stages and events: repository, branch, pull request number and title, short
-  finding summaries), and, for a moment, the text of a
-  `/foreman reject` comment in `outbox/` (deleted once `gh pr comment` has read it). Foreman blocks the agent's
+  its findings quote lines of the diff, and `/foreman reject` includes them; `reviews/cache/` keeps up to 300 of
+  them by diff), `pipeline.json` and `pipeline-meta.json` (each change's stages and events: repository, branch, pull
+  request number and title, short finding summaries), and, for a moment, the text of a
+  `/foreman reject` comment in `outbox/` (deleted once `gh pr comment` has read it), and, with notifications on,
+  `foreman-notify.json` and, for a moment, a message in `notify/`. Foreman blocks the agent's
   `write_file`, `patch` and terminal commands that name these files or directories. This guard is best effort: it
   matches text, so a glob, a relative path after `cd`, or Hermes's `execute_code` gets past it.
 - **Runs the GitHub CLI (`gh`) only when you type a `/foreman` subcommand**, as a subprocess with its own login, in
@@ -379,8 +459,11 @@ Requires Hermes Agent >= 0.22.6 and git on the PATH.
   provider. For a pull request number it runs `gh pr
   view` and `gh pr diff` (read-only). To pick the reviewer it reads, through Hermes's config reader, your main model
   and the provider and model names of the first fallback entry; nothing else of your config.
-- **No network calls of its own** (only the `gh` commands above and the review's model call),
-  no telemetry, no credentials, no background processes.
+- **Notifications, only after you turn them on** (`/foreman notify on <target>`): one `hermes send` per pull request
+  event, through Hermes's terminal tool, to the target you chose (see *Notifications*). It records the last 30 sends
+  (kind, pull request id, target, outcome) in `foreman-notify.json` in its data directory.
+- **No network calls of its own** (only the `gh` commands above, the review's model call, and the notifications you
+  turned on, sent by Hermes), no telemetry, no credentials, no background processes.
 - It registers two hooks (`pre_tool_call`, `pre_verify`), one slash command (`/foreman`) and two tools
   (`foreman_check`, `foreman_review`), and declares two capabilities, `llm.model_override` and
   `llm.provider_override`, used only by the second-model review to run on a model other than your active one.

@@ -720,7 +720,7 @@ def on_pre_tool_call(tool_name: str = "", args=None, task_id: str = "", **kwargs
         command = args.get("command")
         if not isinstance(command, str):
             return None
-        if _names_store(command) and not _OWN_COMMENT.match(command.strip()):
+        if _names_store(command) and not (_OWN_COMMENT.match(command.strip()) or _OWN_NOTIFY.match(command.strip())):
             return _store_guard()
         if not _QUICK.search(command):
             return None
@@ -740,13 +740,17 @@ def on_pre_tool_call(tool_name: str = "", args=None, task_id: str = "", **kwargs
 
 # Foreman's own state in its data directory: the exceptions the user granted, the repository pinned per session,
 # the reject comments waiting for `gh`, and saved model reviews. Only the user's /foreman commands change them.
-STORE_FILES = (grants.GRANTS_FILE, "foreman-board.json")
-# Store entries whose names are common elsewhere (a CI "pipeline.json"): guarded only inside Foreman's data directory.
-STORE_DIRS = ("outbox", "reviews", "pipeline.json", "pipeline-meta.json")
+STORE_FILES = (grants.GRANTS_FILE, "foreman-board.json", "foreman-notify.json")
+# Store entries whose names are common elsewhere (a CI "pipeline.json"): guarded only inside Foreman's data directory,
+# so the agent cannot write fake "waiting for you" cards, and a repository's own pipeline.json stays usable.
+STORE_DIRS = ("outbox", "reviews", "notify", "pipeline.json", "pipeline-meta.json")
 _STORE_DIR_TEXT = re.compile(r"(?:plugin-data/foreman|\.foreman)/(?:%s)(?:/|$|[\s\"'])"
                              % "|".join(re.escape(d) for d in STORE_DIRS))
 # What /foreman reject itself runs: gh reading the comment file it wrote.
-_OWN_COMMENT = re.compile(r'^gh pr comment \d+ --body-file "[^"$`]*/outbox/reject-\d+-[A-Za-z0-9_]+\.md"$')
+_OWN_COMMENT = re.compile(r'^gh pr comment \d+ --body-file "[^"$`%!\n\r]*/outbox/reject-\d+-[A-Za-z0-9_]+\.md"$')
+# What a notification runs: hermes send reading the message file Foreman wrote (only reads it).
+_OWN_NOTIFY = re.compile(r'^hermes send --to "[a-z][a-z0-9_]*(?::[^\s"\'`$;&|<>\\%!]+)?" '
+                         r'--file "[^"$`%!\n\r]*/notify/msg-[A-Za-z0-9_]+\.txt" --quiet$')
 
 
 def _store_dirs_text() -> list:

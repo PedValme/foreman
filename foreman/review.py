@@ -60,7 +60,7 @@ from typing import Any, Optional
 
 from . import detector, grants
 from .detector import _DIFF_OPTS, GitError, Repo
-from .gate import NO_REPOSITORY_HERE, locate
+from .gate import NO_REPOSITORY_HERE
 
 logger = logging.getLogger(__name__)
 
@@ -816,10 +816,11 @@ def _parse_target(args: str) -> tuple:
     arg = [a for a in (args or "").strip().split() if a != "--fresh"]
     if not arg:
         return None, None
+    from .board import _pr_number  # the same forms the board takes: 12, #12, a pull request URL
     ref = arg[0]
-    m = re.fullmatch(r"#?(\d+)", ref)
-    if m:
-        return "pr", m.group(1)
+    number = _pr_number(ref)
+    if number is not None:
+        return "pr", str(number)
     return "branch", ref
 
 
@@ -855,7 +856,8 @@ def run_review(args: str = "", keys: tuple = (), platform: Optional[str] = None,
     never called: a diff with no stored review gets the verdict NOT REVIEWED."""
     ctx = ctx if ctx is not None else _CTX
     if where is None:
-        where, _how = locate(*keys, platform=platform)
+        from .board import resolve  # like every board subcommand: the pinned repository, then gate.locate
+        where, _how = resolve(keys, platform)
         if where is None:
             return {"verdict": "NO_REPOSITORY", "message": NO_REPOSITORY_HERE}
     root = detector.find_repo(where)
@@ -915,16 +917,19 @@ def run_review(args: str = "", keys: tuple = (), platform: Optional[str] = None,
     if result is not None:
         parsed, error = parse_result(result)
     _main_provider, main_model = main_route(cfg)
-    ran_model = str(_attr(result, "model", "") or choice.model or "") if result is not None else (choice.model or "")
+    # What Hermes attributes the call to. Without an override its provider (and, when the provider's response has
+    # no model id, its model) come from Hermes's own idea of the main route, not from what ran: kept in the record
+    # for inspection, never printed as the reviewer's name.
+    attributed = ("%s / %s" % (_attr(result, "provider", "") or "?", _attr(result, "model", "") or "?")
+                  if result is not None else "")
     if not choice.override:
         same = True
     elif not main_model:
         same = None
     else:  # what was asked for, not the provider's canonical id (an alias and its dated id would not match)
         same = same_model(choice.model or "", main_model)
-    record["model"] = {"provider": str(_attr(result, "provider", "") or choice.provider or "") if result is not None
-                       else (choice.provider or ""), "model": ran_model or "(the host's active model)",
-                       "source": choice.source, "same_as_author": same}
+    record["model"] = {"provider": choice.provider or "", "model": choice.model or "", "source": choice.source,
+                       "same_as_author": same, "attributed_to": attributed}
     record["model_notes"] = list(choice.notes)
     # The key of the reviewer that really ran (Hermes may have refused the override); the requested key points to
     # the same record, which names the model that ran, so asking again does not call the model again.
@@ -1009,10 +1014,11 @@ def format_review(r: dict) -> str:
                                         else "", r.get("slug", "")))
     m = r.get("model")
     if m:
-        how = {"setting": "the reviewer_model setting", "fallback": "your Hermes fallback model",
-               "default": "the host's active model"}[m["source"]]
-        name = _label(m["provider"] or None, m["model"])
-        lines.append("Reviewer: %s" % (how if name == how else "%s (%s)" % (name, how)))
+        if m["source"] == "default" or not m["model"]:
+            lines.append("Reviewer: the host's default model")  # its name is not reliably known to a plugin
+        else:
+            how = {"setting": "the reviewer_model setting", "fallback": "your Hermes fallback model"}[m["source"]]
+            lines.append("Reviewer: %s (%s)" % (_label(m["provider"] or None, m["model"]), how))
         lines += r.get("model_notes", [])
         if not r.get("error") and m["same_as_author"] is True:
             lines.append(SAME_MODEL)
@@ -1057,9 +1063,14 @@ def format_review(r: dict) -> str:
 
 
 def cmd_review(args: str = "", keys: tuple = (), platform: Optional[str] = None) -> str:
-    """``/foreman review [<pr>|<branch>] [--fresh]``: typed by a person, so it may call the model at any level."""
-    fresh = "--fresh" in (args or "").split()
-    r = run_review(args, keys, platform, fresh=fresh)
+    """``/foreman review [<pr>|<branch>] [--fresh] [--repo r]``: typed by a person, so it may call the model at any
+    level. ``--repo`` goes through the board's validated resolver (only a repository Foreman already knows)."""
+    from .board import root_for
+    words, root, problem = root_for(args, keys, platform)
+    if problem:
+        return problem
+    fresh = "--fresh" in words
+    r = run_review(" ".join(words), keys, platform, where=root, fresh=fresh)
     record_in_pipeline(r)
     return format_review(r)
 
@@ -1088,6 +1099,6 @@ def _pr_branch(title: str) -> str:
 
 
 SUBCOMMANDS: dict = {
-    "review": (cmd_review, "[<pr>|<branch>] [--fresh]  a second model reviews the diff (spends tokens once per "
-                           "diff; --fresh asks again)"),
+    "review": (cmd_review, "[<pr>|<branch>] [--fresh] [--repo r]  a second model reviews the diff (spends tokens "
+                           "once per diff; --fresh asks again)"),
 }
