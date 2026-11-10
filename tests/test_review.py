@@ -5,7 +5,7 @@ import types
 import unittest
 from unittest import mock
 
-from foreman import commands, review
+from foreman import board, commands, review
 from tests_support import GitRepoCase
 
 SKIP = "@pytest.mark." + "skip"
@@ -63,9 +63,9 @@ class ReviewCase(GitRepoCase):
         self.commit("base")
         self.git("checkout", "-q", "-b", "feature")
 
-    def review(self, ctx, args="", cfg=MAIN):
+    def review(self, ctx, args="", cfg=MAIN, fresh=False, allow_model=True):
         with mock.patch.object(review, "hermes_config", return_value=cfg):
-            return review.run_review(args, ctx=ctx, where=self.root)
+            return review.run_review(args, ctx=ctx, where=self.root, fresh=fresh, allow_model=allow_model)
 
     def loosen_test(self):
         self.write("tests/test_calc.py",
@@ -112,7 +112,8 @@ class HappyPath(ReviewCase):
         self.assertEqual(self.review(FakeCtx(FakeLlm(parsed=answer())))["verdict"], "PASS")
         high = answer([{"severity": "HIGH", "file": "tests/test_calc.py", "line": 5, "title": "Weak", "why": "w",
                         "evidence": "assert add(2, 2) is not None", "fix": "f"}], verdict="CONCERNS")
-        self.assertEqual(self.review(FakeCtx(FakeLlm(parsed=high)))["verdict"], "PASS WITH NOTES")
+        # the same diff again: only --fresh asks the model a second time (the cache is tested in test_pipeline)
+        self.assertEqual(self.review(FakeCtx(FakeLlm(parsed=high)), fresh=True)["verdict"], "PASS WITH NOTES")
 
     def test_named_branch_and_slash_dispatch(self):
         self.loosen_test()
@@ -268,27 +269,35 @@ class Failures(ReviewCase):
         self.assertIn("provider 500", r["error"])
 
     def test_pr_without_gh(self):
-        with mock.patch.object(review.shutil, "which", return_value=None):
+        def missing(args, cwd, timeout):
+            raise FileNotFoundError("gh")
+        with mock.patch.object(board, "GH_RUNNER", missing):
             r = self.review(FakeCtx(FakeLlm(parsed=answer())), args="12")
         self.assertEqual(r["verdict"], "ERROR")
-        self.assertIn("`gh` (GitHub CLI) is not installed", review.format_review(r))
+        self.assertIn("gh (the GitHub CLI) is not installed", review.format_review(r))
 
 
 class PullRequest(ReviewCase):
     def test_pr_diff_through_gh(self):
+        """The pull request is read through the board's pr_verdict: the same gh calls, the head re-checked."""
         secret = GHP + "q" * 36
         diff = ("diff --git a/app/conf.py b/app/conf.py\nnew file mode 100644\n--- /dev/null\n+++ b/app/conf.py\n"
                 "@@ -0,0 +1,1 @@\n+TOKEN = '" + secret + "'\n")
-        meta = json.dumps({"number": 7, "title": "Add config", "url": "https://github.com/acme/widgets/pull/7",
-                           "baseRefName": "main", "headRefName": "feat"})
+        head = "a" * 40
+        meta = {"number": 7, "title": "Add config", "url": "https://github.com/acme/widgets/pull/7", "state": "OPEN",
+                "baseRefName": "main", "headRefName": "feat", "headRefOid": head, "mergeable": "MERGEABLE",
+                "statusCheckRollup": [], "closingIssuesReferences": [], "commits": [], "files": []}
         calls = []
 
-        def fake_gh(args, cwd):
+        def fake_gh(args, cwd, timeout):
             calls.append(args)
-            return meta if args[1] == "view" else diff
-        with mock.patch.object(review, "_gh", side_effect=fake_gh):
+            if args[:2] == ["pr", "view"]:
+                return 0, json.dumps(meta if "headRefOid" != args[-1] else {"headRefOid": head}), ""
+            return 0, diff, ""
+        with mock.patch.object(board, "GH_RUNNER", fake_gh):
             r = self.review(FakeCtx(FakeLlm(parsed=answer())), args="#7")
-        self.assertEqual([c[:2] for c in calls], [["pr", "view"], ["pr", "diff"]])
+        self.assertEqual([c[:2] for c in calls], [["pr", "view"], ["pr", "diff"], ["pr", "view"]])
+        self.assertEqual(r["head"], head)
         self.assertEqual(r["slug"], "acme/widgets")
         self.assertEqual(r["verdict"], "BLOCKED")
         self.assertEqual(r["deterministic"]["findings"][0]["rule"], "secret")

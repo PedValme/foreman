@@ -741,8 +741,10 @@ def on_pre_tool_call(tool_name: str = "", args=None, task_id: str = "", **kwargs
 # Foreman's own state in its data directory: the exceptions the user granted, the repository pinned per session,
 # the reject comments waiting for `gh`, and saved model reviews. Only the user's /foreman commands change them.
 STORE_FILES = (grants.GRANTS_FILE, "foreman-board.json")
-STORE_DIRS = ("outbox", "reviews")
-_STORE_DIR_TEXT = re.compile(r"(?:plugin-data/foreman|\.foreman)/(?:%s)(?:/|$|[\s\"'])" % "|".join(STORE_DIRS))
+# Store entries whose names are common elsewhere (a CI "pipeline.json"): guarded only inside Foreman's data directory.
+STORE_DIRS = ("outbox", "reviews", "pipeline.json", "pipeline-meta.json")
+_STORE_DIR_TEXT = re.compile(r"(?:plugin-data/foreman|\.foreman)/(?:%s)(?:/|$|[\s\"'])"
+                             % "|".join(re.escape(d) for d in STORE_DIRS))
 # What /foreman reject itself runs: gh reading the comment file it wrote.
 _OWN_COMMENT = re.compile(r'^gh pr comment \d+ --body-file "[^"$`]*/outbox/reject-\d+-[A-Za-z0-9_]+\.md"$')
 
@@ -776,8 +778,8 @@ def _is_store_path(path) -> bool:
 
 def _store_guard() -> dict:
     return {"action": "block", "message": "Foreman blocked this call: Foreman's own state (its exceptions, the "
-                                          "pinned repository, reject comments, saved reviews) changes only through "
-                                          "the user's `/foreman` commands."}
+                                          "pinned repository, reject comments, saved reviews, the pipeline) changes "
+                                          "only through the user's `/foreman` commands."}
 
 
 def gate_command(command: str, workdir: Optional[str] = None, task_id: str = "") -> Optional[dict]:
@@ -814,7 +816,39 @@ def gate_command(command: str, workdir: Optional[str] = None, task_id: str = "")
         total.sarif_notes += o.sarif_notes
         total.repos += o.repos
         total.errors += ["%s in %s: %s" % (_LABELS[act.kind], act.cwd, err) for err in o.errors]
-    return directive(what, total)
+    result = directive(what, total)
+    _pipeline_gate(total, what, result, deadline)
+    return result
+
+
+def _pipeline_gate(outcome: Outcome, what: str, result: Optional[dict], deadline: float) -> None:
+    """Put the gate's decision on the pipeline item of each repository's current branch. Never raises, and skips it
+    when the hook's time is nearly spent."""
+    if time.monotonic() > deadline - 2:
+        return
+    try:
+        from . import pipeline
+        blocking = [f for f in _dedupe(outcome.findings) if not f.allowed or not grants.is_granted(f.fingerprint)]
+        if result and result.get("action") == "block":
+            status = "fail"
+            first = blocking[0] if blocking else None
+            detail = ("%d blocker(s): %s" % (len(blocking), ", ".join(dict.fromkeys(f.rule for f in blocking)))
+                      if blocking else _one(outcome.reasons[0] if outcome.reasons else "blocked"))
+            event = "Gate blocked %s: %s" % (what, "%s in %s" % (first.message, first.location) if first
+                                              else detail)
+        elif outcome.errors:
+            status, detail = "pending", "INCOMPLETE: %s" % _one(outcome.errors[0])
+            event = "Gate could not inspect %s: %s" % (what, _one(outcome.errors[0]))
+        else:
+            status, detail, event = "pass", "CLEAN", "Gate passed %s" % what
+        for root in dict.fromkeys(outcome.repos):
+            pipeline.record_gate(pipeline.local_ref(root, deadline=deadline), status, detail, event)
+    except Exception:
+        logger.warning("foreman: cannot record the gate on the pipeline", exc_info=True)
+
+
+def _one(text: str, limit: int = 160) -> str:
+    return _short(str(text or ""), limit)
 
 
 # ─── Writes to test files ────────────────────────────────────────────────────
@@ -962,6 +996,15 @@ def gate_write(tool_name: str, args: dict, task_id: str = "") -> Optional[dict]:
     parts = ["Foreman blocked this %s: it switches off a test." % tool_name, _list(blocking + waiting)]
     if waiting:
         parts.append(_ASK_USER)
+    if root:
+        try:
+            from . import pipeline
+            first = (blocking + waiting)[0]
+            pipeline.record_gate(pipeline.local_ref(root), "fail", "%d blocker(s): test-skipped"
+                                 % len(blocking + waiting), "Gate blocked a write: test skipped in %s"
+                                 % first.location)
+        except Exception:
+            logger.warning("foreman: cannot record the write on the pipeline", exc_info=True)
     return {"action": "block", "message": "\n".join(parts)}
 
 
@@ -969,17 +1012,60 @@ def gate_write(tool_name: str, args: dict, task_id: str = "") -> Optional[dict]:
 
 def on_pre_verify(coding: bool = False, attempt: int = 0, changed_paths=None, session_id: str = "",
                   **kwargs) -> Optional[dict]:
+    """The deterministic gate first (one nudge per turn, as always); with ``auto_review: finish`` and a CLEAN gate,
+    the review loop (``finish.step``), which only reads stored reviews: the model runs in the tool, never here."""
     try:
-        if not coding or attempt:
+        if not coding:
             return None
-        return verify_worktrees(changed_paths or [], session_id=session_id if isinstance(session_id, str) else "")
+        attempt = attempt if isinstance(attempt, int) else 0
+        sid = session_id if isinstance(session_id, str) else ""
+        from . import pipeline
+        finish_level = pipeline.level() == "finish"
+        if attempt and not finish_level:
+            return None
+        if finish_level and not attempt:
+            pipeline.nudge_clear("turn:%s|" % sid)  # a new turn: the last turn's nudge marks do not carry over
+        deadline = time.monotonic() + HOOK_BUDGET_SECONDS
+        roots, blockers = _scan_changed(changed_paths or [], deadline, sid)
+        _pipeline_verify(roots, blockers, deadline)
+        if blockers:
+            return None if attempt else _blockers_directive(roots, blockers)
+        if not roots or not finish_level:
+            return None
+        from . import finish
+        return finish.step(roots[0], sid, attempt, deadline)
     except Exception:
         logger.warning("foreman: pre_verify failed", exc_info=True)
         return None
 
 
+def _pipeline_verify(roots: list, blockers: list, deadline: float) -> None:
+    """The end-of-turn scan on the pipeline: the gate fails with the blockers, else passes."""
+    if time.monotonic() > deadline - 2:
+        return
+    try:
+        from . import pipeline
+        for root in roots:
+            mine = [f for r, f in blockers if r == root]
+            if mine:
+                pipeline.record_gate(pipeline.local_ref(root, deadline=deadline), "fail",
+                                     "%d blocker(s): %s" % (len(mine), ", ".join(dict.fromkeys(f.rule for f in mine))),
+                                     "Gate asked the agent to undo: %s in %s" % (mine[0].message, mine[0].location))
+            else:
+                pipeline.record_gate(pipeline.local_ref(root, deadline=deadline), "pass", "CLEAN",
+                                     "Gate passed the agent's changes")
+    except Exception:
+        logger.warning("foreman: cannot record the end-of-turn scan on the pipeline", exc_info=True)
+
+
 def verify_worktrees(changed_paths: list, budget: float = HOOK_BUDGET_SECONDS, session_id: str = "") -> Optional[dict]:
     deadline = time.monotonic() + budget
+    roots, blockers = _scan_changed(changed_paths, deadline, session_id)
+    return _blockers_directive(roots, blockers)
+
+
+def _scan_changed(changed_paths: list, deadline: float, session_id: str = "") -> tuple:
+    """(repository roots of the changed paths, at most 3; [(root, blocking finding)] of their uncommitted changes)."""
     cwd = session_cwd(session_id) or os.getcwd()
     roots = []
     for p in list(changed_paths)[:50]:
@@ -1000,6 +1086,10 @@ def verify_worktrees(changed_paths: list, budget: float = HOOK_BUDGET_SECONDS, s
         except GitError:
             continue
         blockers += [(root, f) for f in report.blockers]
+    return roots, blockers
+
+
+def _blockers_directive(roots: list, blockers: list) -> Optional[dict]:
     if not blockers:
         return None
     many = len(roots) > 1

@@ -10,6 +10,7 @@ tags: [git, testing, security, coding]
 requires_hermes: ">=0.22.6"
 provides_tools:
   - foreman_check
+  - foreman_review
 provides_hooks:
   - pre_tool_call
   - pre_verify
@@ -27,3 +28,14 @@ config_schema:
     default: ""
     label: "Reviewer provider"
     description: "Hermes provider id for reviewer_model when it is not your active provider (e.g. openrouter). Needs the llm.provider_override capability."
+  auto_review:
+    type: str
+    choices: [merge, finish, "off"]
+    default: merge
+    label: "Automatic review"
+    description: "merge: /foreman merge first gets the second-model review of the pull request's exact head (one model call per new diff). finish: every coding turn is reviewed through the foreman_review tool and sent back to the agent until it is clean or max_bounces is reached. off: the review runs only when you type /foreman review. A person always merges."
+  max_bounces:
+    type: int
+    default: 3
+    label: "Bounce limit"
+    description: "With auto_review finish: how many times a change is sent back to the agent before Foreman stops and hands it to you. Never more than Hermes's agent.max_verify_nudges."

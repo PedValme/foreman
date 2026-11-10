@@ -117,13 +117,13 @@ class UnreadableIsNotClean(Base):
     def test_status_and_check_do_not_say_clean(self):
         self.setup_repo(sarif="results.sarif")  # the generated report is absent
         v = commands.verdict(self.root)
-        self.assertEqual(v["verdict"], "NEEDS_APPROVAL")
+        self.assertEqual(v["verdict"], "INCOMPLETE")  # one vocabulary (foreman/verdicts.py)
         self.assertIn("could not read the SARIF report", v["errors"][0])
         text = commands.format_verdict(v)
-        self.assertIn("Foreman: NEEDS_APPROVAL", text)
+        self.assertIn("Foreman: INCOMPLETE", text)
         self.assertIn("results.sarif", text)
         self.assertNotIn("No skipped, deleted", text)
-        self.assertEqual(json.loads(commands.foreman_check_tool({"path": self.root}))["verdict"], "NEEDS_APPROVAL")
+        self.assertEqual(json.loads(commands.foreman_check_tool({"path": self.root}))["verdict"], "INCOMPLETE")
 
     def test_the_hook_asks_instead_of_passing(self):
         self.setup_repo(sarif="results.sarif")
