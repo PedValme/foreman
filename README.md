@@ -14,14 +14,14 @@ command text.
 | `test-skipped` | skip, only, ignore and expected-failure markers added to tests (see *Known limits* for the list) |
 | `test-deleted` | a test code file deleted (snapshots, JSON and fixtures do not count) |
 | `test-moved` | a test code file renamed out of the tests |
-| `check-changed` | with no configuration: a change to the `test`/`check`/`lint` scripts of a `package.json`, the `test`/`check`/`ci` targets of a `Makefile`, or `commands` in `[testenv*]` of `tox.ini` (one that exists at the base); plus, with `.foreman.json`, any change to a file its check command runs, or to `.foreman.json` itself |
+| `check-changed` | with no configuration: a change to the `test`/`check`/`lint` scripts of a `package.json` (with `test:*` and the scripts they run), the `test`/`check`/`ci` targets of a `Makefile` (with the test targets and variables they use), or tox's `envlist` and `commands`/`setenv` of `[testenv*]` (only what exists at the base); plus, with `.foreman.json`, any change to a file its check command runs, or to `.foreman.json` itself |
 | `check-weakened` | `\|\| true` or `continue-on-error: true` in `.github/workflows/*` next to a test runner; `--deselect` / `--ignore=` pointing at tests in pytest config; `testPathIgnorePatterns` / `exclude` in jest or vitest config (not in coverage settings) |
 | `secret`, `env-file` | real credential formats (cloud, GitHub, model APIs, Slack, Stripe, private keys…) everywhere; key/value guesses (passwords in code, config, shell, YAML, `.env`) outside the tests, and in tests only long values mixing upper case, lower case and digits |
 | `secret-history` | a secret in any commit of what is pushed, even if a later commit removed it |
 
 It also refuses `git commit --no-verify` / `-n`, `git push --no-verify`, `git -c core.hooksPath=…`, hook-disabling
-variables in front of a commit or push (`HUSKY=0`, `SKIP=…`, `PRE_COMMIT_ALLOW_NO_CONFIG=1`, `LEFTHOOK=0`, …) and
-`git config core.hooksPath …` (set or unset).
+variables in front of a commit or push or exported for later calls (`HUSKY=0`, `SKIP=…`, `PRE_COMMIT_ALLOW_NO_CONFIG=1`,
+`LEFTHOOK=0`, …) and `git config core.hooksPath …` (set or unset).
 
 ## When it acts
 
@@ -340,16 +340,18 @@ Requires Hermes Agent >= 0.22.6 and git on the PATH.
 - Markers covered: pytest (`skip`, `xfail`, `skipif`), unittest (`skip*`, `expectedFailure`, `skipTest`),
   Jest/Vitest/Mocha/Jasmine (`.skip`, `.only`, `.concurrent`, `.each`, `.skipIf`, `xit`, `xtest`, `xdescribe`,
   `fit`, `fdescribe`, `this.skip()`), Go (`t.Skip*`), Rust (`#[ignore]`), JUnit (`@Disabled`, `@Ignore`), and
-  `raise SkipTest` / `raise unittest.SkipTest`. A conditional skip in a new test file is allowed; added to an
+  `raise SkipTest` / `raise unittest.SkipTest` / `raise pytest.skip.Exception`. A conditional skip in a new test file is allowed; added to an
   existing test it is blocked. A test renamed so the runner stops collecting it (`def test_x` to `def _test_x`,
-  `func TestX` to `func _TestX`, `it("x", …)` to another callee in the same file) counts as skipped.
+  `class TestX` to `class _TestX`, `func TestX` to `func _TestX`, `it("x", …)` to `it.todo`/`xit`/`_it` in the same
+  file) counts as skipped.
 - Check protection covers the entry point named in `.foreman.json` (not everything it runs), the default entry
   points in the table, and the narrow `check-weakened` patterns above. A `noxfile.py`, or a test command in
   `pyproject.toml` or `setup.cfg`, is not protected without `.foreman.json`.
-- Hook-disabling variables are seen only in front of the gated command: `export HUSKY=0` run in an earlier terminal
-  call, a variable set in the shell's profile, or a hook manager's own config file switching hooks off, is not.
-- A test switched off by renaming its class (`class TestX` to `class _TestX`), by a `return` at its top, or by a
-  decorator Foreman does not know is not detected; `/foreman review` may see it.
+- Hook-disabling variables are seen in front of the gated command and when exported in a terminal call; one set in
+  the shell's profile, by a script, or a hook manager's own config file switching hooks off, is not.
+- A test switched off by a rename Foreman does not know (`test_x` to `tst_x`), by a `return` at its top, or by a
+  decorator Foreman does not know is not detected; `/foreman review` may see it. A gated command run through a
+  program Foreman does not follow is refused until it runs on its own; one hidden inside a script file is not seen.
 - In a shared chat, any member Hermes authorises can type `/foreman merge … --yes`; Foreman does not check who typed
   it — restrict who can talk to your Hermes.
 - Secrets are found by pattern: real credential formats reliably, key/value guesses with false negatives (and none

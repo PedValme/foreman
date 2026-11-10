@@ -330,7 +330,16 @@ class TerminalGate(GitRepoCase):
         for command, n in (("gh pr merge --squash", "<n>"), ("gh pr merge 42", "42"),
                            ("gh pr merge -t title --squash #42", "42"),
                            ("gh -R acme/w pr merge https://github.com/acme/w/pull/9 --auto", "9"),
-                           ("bash -c 'gh pr merge 42'", "42"), ("git push && gh pr merge 42", "42")):
+                           ("bash -c 'gh pr merge 42'", "42"), ("git push && gh pr merge 42", "42"),
+                           ('pwsh -Command "gh pr merge 42"', "42"), ('pwsh -NoProfile -Command "cd x; gh pr merge 42"',
+                                                                       "42"),
+                           ('cmd /c "gh pr merge 42"', "42"), ('cmd /s /c "gh pr merge 42"', "42"),
+                           ("timeout 60 gh pr merge 42", "42"), ("timeout -k 5 60 gh pr merge 42", "42"),
+                           ("nice -n 5 gh pr merge 42", "42"), ("sudo -u me gh pr merge 42", "42"),
+                           ("env -i PATH=/bin gh pr merge 42", "42"), ("echo 42 | xargs -n 1 gh pr merge", "<n>"),
+                           ("gh pr -R o/r merge 42", "42"), ("gh pr --repo o/r merge 42", "42"),
+                           ("eval gh pr merge 42", "42"), ("eval 'gh pr merge 42'", "42"),
+                           ("some-wrapper --flag gh pr merge 42", "42")):
             d = terminal(command, self.root)
             self.assertEqual(d, {"action": "block", "message": "Merging is the user's decision. Ask them to run "
                                                                "`/foreman merge %s`." % n}, command)
@@ -639,6 +648,27 @@ class HookBypasses(GitRepoCase):
             self.assertIn("skips the repository's git hooks", d["message"], command)
         for command in ("HUSKY=1 git commit -m x", "LANG=C git commit -m x", "SKIP= git commit -m x"):
             self.assertIsNone(terminal(command, self.root), command)
+        d = terminal("HUSKY=0 bash -c 'git commit -m x'", self.root)
+        self.assertIn("skips the repository's git hooks", d["message"])
+
+    def test_exporting_a_hook_disabling_variable_is_refused(self):
+        # The terminal keeps exported variables between calls: every later commit would skip the hooks.
+        for command in ("export HUSKY=0", "export SKIP=flake8", "export LEFTHOOK=0 && npm test", "$env:HUSKY = 0",
+                        "$env:SKIP='lint'", "setx HUSKY 0", "set PRE_COMMIT_ALLOW_NO_CONFIG=1"):
+            d = terminal(command, self.root)
+            self.assertEqual(d and d["action"], "block", command)
+        for command in ("export HUSKY=1", "export PATH=$PATH:/x", "echo SKIP the intro", "export SKIP_TESTS_DOC=1",
+                        "grep -n 'git commit' notes.md", "man git commit"):
+            self.assertIsNone(terminal(command, self.root), command)
+
+    def test_wrapped_commits_are_still_inspected(self):
+        self.write("tests/test_app.py", SKIP + "\n")
+        self.git("add", "-A")
+        for command in ("timeout 60 git commit -m x", 'pwsh -Command "git commit -m x"', 'cmd /c "git commit -m x"',
+                        "nice -n 5 git commit -m x"):
+            d = terminal(command, self.root)
+            self.assertEqual(d and d["action"], "block", command)
+            self.assertIn("test-skipped", d["message"], command)
 
     def test_git_config_core_hooks_path_is_refused(self):
         for command in ("git config core.hooksPath .nohooks", "git config --unset core.hooksPath",
@@ -720,6 +750,12 @@ class Performance(GitRepoCase):
                 "command": "gh pr " * (n // 6), "workdir": self.root}),
             "command of quotes": lambda: gate.on_pre_tool_call(tool_name="terminal", args={
                 "command": "git commit -m '" + "'\"" * (n // 2), "workdir": self.root}),
+            "unknown runner of gh words": lambda: gate.parse_actions("runner " + "gh pr view " * (n // 11), os.sep),
+            "eval of quoted git words": lambda: gate.parse_actions("eval " + "'git log push' " * (n // 15), os.sep),
+            "exports of hook names": lambda: gate.on_pre_tool_call(tool_name="terminal", args={
+                "command": "export SKIP " * (n // 12)}),
+            "makefile of continuations": lambda: detector.default_check_changes(
+                "Makefile", "test:\n\tx \\\n" + "  y \\\n" * (n // 6), "test:\n\tz\n"),
             "yaml value then spaces": lambda: detector.has_secret("+token: abcdefghij" + " " * n + "x", "c.yaml"),
             "dotted run": lambda: detector.has_secret("+" + "a." * (n // 2) + "x", "app.py"),
             "url-ish run": lambda: detector.has_secret("+" + "a-" * (n // 2) + "://u:p", "app.py"),

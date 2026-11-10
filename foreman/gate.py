@@ -43,7 +43,30 @@ def _quick(command: str) -> bool:
     return bool(_QUICK_TOOL.search(command)) and bool(_QUICK_VERB.search(command))
 _SHELLS = {"bash", "sh", "zsh", "dash", "ksh", "fish"}
 _POWERSHELLS = {"powershell", "pwsh"}
-_WRAPPERS = {"sudo", "env", "command", "time", "nohup", "exec", "builtin", "nice"}
+_WRAPPERS = {"sudo", "env", "command", "time", "nohup", "exec", "builtin", "nice", "timeout", "stdbuf", "xargs",
+             "doas", "ionice", "chronic", "unbuffer"}
+# Options of a wrapper that take the next word as their value.
+_WRAPPER_VALUE_OPTS = {
+    "sudo": {"-u", "-g", "-C", "-h", "-p", "-U", "-r", "-t", "-D", "-R", "-T"}, "doas": {"-u", "-C"},
+    "env": {"-u", "-C", "-S", "--unset", "--chdir", "--split-string"}, "nice": {"-n", "--adjustment"},
+    "timeout": {"-s", "-k", "--signal", "--kill-after"}, "stdbuf": {"-i", "-o", "-e"},
+    "xargs": {"-n", "-I", "-L", "-P", "-d", "-E", "-s", "-a", "--max-args", "--max-procs", "--delimiter"},
+    "ionice": {"-c", "-n", "-p"}, "time": {"-f", "-o", "--format", "--output"},
+}
+
+
+def _skip_wrapper(words: list) -> list:
+    """``words`` without the leading wrapper, its options, and (for ``timeout``) its duration."""
+    prog, i = _prog(words[0]), 1
+    takes = _WRAPPER_VALUE_OPTS.get(prog, set())
+    while i < len(words) and words[i].startswith("-") and words[i] != "-":
+        if words[i] == "--":
+            i += 1
+            break
+        i += 2 if words[i] in takes else 1
+    if prog == "timeout" and i < len(words):
+        i += 1  # the duration
+    return words[i:]
 _CD = {"cd", "pushd", "set-location", "sl", "chdir"}
 # What may run before a gated command in the same line: it cannot change what the command records.
 _SAFE_PROGS = {"echo"}
@@ -171,11 +194,13 @@ def parse_actions(command: str, cwd: str, located: bool = False, _depth: int = 0
     for words in segments(command):
         original = list(words)
         words, writes_file = _strip_redirs(words)
-        env_bypass = ""
+        env_bypass = state.get("env_bypass", "")
         while words and (_ASSIGNMENT.match(words[0]) or _prog(words[0]) in _WRAPPERS):
-            if _ASSIGNMENT.match(words[0]) and not env_bypass:
-                env_bypass = _hook_env_bypass(words[0])
-            words = words[1:]
+            if _ASSIGNMENT.match(words[0]):
+                env_bypass = env_bypass or _hook_env_bypass(words[0])
+                words = words[1:]
+            else:
+                words = _skip_wrapper(words)
         if not words:
             continue
         prog = _prog(words[0])
@@ -197,15 +222,20 @@ def parse_actions(command: str, cwd: str, located: bool = False, _depth: int = 0
         if prog in _SHELLS:  # bash -c "git commit ..."
             idx = next((k for k, w in enumerate(words[1:], 1) if re.match(r"^-[a-z]*c$", w)), None)
             inner = words[idx + 1] if idx is not None and idx + 1 < len(words) else None
-        elif prog in _POWERSHELLS:  # pwsh -Command git commit ...
+        elif prog in _POWERSHELLS:  # pwsh -Command git commit ... / pwsh -Command "git commit ..."
             idx = next((k for k, w in enumerate(words[1:], 1) if w.lower() in ("-c", "-command")), None)
-            inner = " ".join(_requote(w) for w in words[idx + 1:]) if idx is not None else None
-        elif prog == "cmd":  # cmd /c git commit ...
+            inner = _script_after(words, idx)
+        elif prog == "cmd":  # cmd /c git commit ... / cmd /s /c "git commit ..."
             idx = next((k for k, w in enumerate(words[1:], 1) if w.lower() in ("/c", "/k")), None)
-            inner = " ".join(_requote(w) for w in words[idx + 1:]) if idx is not None else None
+            inner = _script_after(words, idx)
         if prog in _SHELLS | _POWERSHELLS | {"cmd"}:
             if inner is not None and _depth < 3:
-                actions += parse_actions(inner, cwd, located, _depth + 1, state)
+                outer_env = state.get("env_bypass", "")
+                state["env_bypass"] = env_bypass  # HUSKY=0 bash -c 'git commit' still skips the hooks
+                try:
+                    actions += parse_actions(inner, cwd, located, _depth + 1, state)
+                finally:
+                    state["env_bypass"] = outer_env
             else:
                 unsafe(original)
             continue
@@ -228,7 +258,11 @@ def parse_actions(command: str, cwd: str, located: bool = False, _depth: int = 0
                 continue
         else:
             unsafe(original)
-            continue
+            hidden = _hidden_action(words, cwd, located, _depth, state)
+            if hidden is None:
+                continue
+            act = hidden  # `eval git commit`, `foo gh pr merge 5`: found, and it must run on its own
+            act.preceded_by = act.preceded_by or "`%s`" % _short(words[0], 40)
         if state["gated"]:
             act.preceded_by = state["gated"]
         elif state["unsafe"]:
@@ -236,6 +270,50 @@ def parse_actions(command: str, cwd: str, located: bool = False, _depth: int = 0
         state["gated"] = _LABELS[act.kind]
         actions.append(act)
     return actions
+
+
+# Programs that only read or print their arguments: a git command named in them is text.
+_READERS = {"grep", "egrep", "fgrep", "rg", "ag", "ack", "man", "info", "help", "tldr", "apropos", "which", "type",
+            "where", "whereis", "printf", "cat", "less", "more", "head", "tail", "select-string", "write-output",
+            "write-host", "get-help", "sed", "awk", "jq", "git-grep", "history", "alias"}
+# Programs that run a script given to them as one quoted argument.
+_RUNNERS = {"eval", "su", "runuser", "script", "watch", "flock", "parallel", "invoke-expression", "iex", "start-process",
+            "wsl", "busybox", "entr", "systemd-run", "retry"}
+
+
+def _script_after(words: list, idx: Optional[int]) -> Optional[str]:
+    """The script after a shell's ``-Command`` or ``/c``: one quoted word is the script itself (re-quoting it would
+    turn it into a single word); several words are joined back."""
+    if idx is None:
+        return None
+    rest = words[idx + 1:]
+    if len(rest) == 1:
+        return rest[0]
+    return " ".join(_requote(w) for w in rest)
+
+
+def _hidden_action(words: list, cwd: str, located: bool, depth: int, state: dict) -> Optional[Action]:
+    """A gated git or gh command inside a segment run by a program Foreman does not follow (``eval git commit``, a
+    wrapper it does not know, a quoted script handed to another tool), or None."""
+    runner = _prog(words[0])
+    if runner in _READERS:
+        return None  # `grep "git commit" notes`, `man git commit`: they only read
+    for i, w in enumerate(words[1:], 1):
+        prog = _prog(w)
+        # A bounded window: the action is refused anyway (it must run on its own), and a copy of the rest of the
+        # line per "git" word would be quadratic.
+        if prog == "git":
+            act, _sub = _parse_git(words[i + 1:i + 257], cwd, state["git_add"], located)
+        elif prog == "gh":
+            act, _sub = _parse_gh(words[i + 1:i + 257], cwd, located)
+        elif runner in _RUNNERS and depth < 3 and re.search(r"\s", w) and _quick(w):
+            inner = parse_actions(w, cwd, located, depth + 1, {"unsafe": "", "git_add": False, "gated": ""})
+            act = inner[0] if inner else None
+        else:
+            continue
+        if act is not None:
+            return act
+    return None
 
 
 _HARMLESS_TARGETS = {"/dev/null", "nul", "$null"}
@@ -321,6 +399,35 @@ def _hook_env_bypass(assignment: str) -> str:
     return ""
 
 
+_HOOK_ENV_NAMES = re.compile(r"\b(?:HUSKY|HUSKY_SKIP_HOOKS|SKIP|PRE_COMMIT_ALLOW_NO_CONFIG|LEFTHOOK|LEFTHOOK_EXCLUDE|"
+                             r"OVERCOMMIT_DISABLE|GIT_CONFIG_PARAMETERS|GIT_CONFIG_KEY_\d+)\b", re.I)
+_PS_ENV = re.compile(r"(?i)\$env:(\w+)\s*=\s*['\"]?([^'\";\s|&]*)")
+_EXPORTERS = {"export", "declare", "typeset", "set", "setx", "setenv"}
+
+
+def _exported_hook_env(command: str) -> str:
+    """A hook-disabling variable exported on its own (``export HUSKY=0``, ``$env:HUSKY = 0``, ``setx SKIP lint``):
+    the terminal keeps exported variables between calls, so every later commit would skip the hooks. "" when
+    none."""
+    if not _HOOK_ENV_NAMES.search(command):
+        return ""
+    for m in _PS_ENV.finditer(command):
+        found = _hook_env_bypass("%s=%s" % (m.group(1), m.group(2)))
+        if found:
+            return found
+    for words in segments(command):
+        if not words or _prog(words[0]) not in _EXPORTERS:
+            continue
+        rest = [w for w in words[1:] if not w.startswith("-")]
+        if _prog(words[0]) in ("setx", "setenv") and len(rest) >= 2 and "=" not in rest[0]:
+            rest = ["%s=%s" % (rest[0], rest[1])]
+        for w in rest:
+            found = _hook_env_bypass(w) if _ASSIGNMENT.match(w) else ""
+            if found:
+                return found
+    return ""
+
+
 def _sets_hooks_path(args: list) -> bool:
     """``git config`` arguments that set or unset ``core.hooksPath`` (reading it is fine)."""
     key = next((i for i, a in enumerate(args) if a.lower() == "core.hookspath"), None)
@@ -388,11 +495,17 @@ def _commit_no_verify(args: list) -> str:
 
 
 def _parse_gh(words: list, cwd: str, located: bool):
-    i = 0
-    while i < len(words) and words[i].startswith("-"):
-        i += 2 if words[i] in ("-R", "--repo") else 1
-    if i + 1 < len(words) and words[i] == "pr" and words[i + 1] in ("create", "merge"):
-        return Action("pr-" + words[i + 1], cwd, words[i + 2:], located=located), words[i + 1]
+    def skip_flags(i):
+        while i < len(words) and words[i].startswith("-"):
+            i += 2 if words[i] in ("-R", "--repo") else 1
+        return i
+
+    i = skip_flags(0)
+    if i < len(words) and words[i] == "pr":
+        j = skip_flags(i + 1)  # gh pr -R owner/repo merge 5: the persistent flag may come after "pr"
+        if j < len(words) and words[j] in ("create", "merge"):
+            return Action("pr-" + words[j], cwd, words[j + 1:], located=located), words[j]
+        return None, words[j] if j < len(words) else ""
     return None, words[i + 1] if i + 1 < len(words) else ""
 
 
@@ -796,6 +909,11 @@ def on_pre_tool_call(tool_name: str = "", args=None, task_id: str = "", **kwargs
             return None
         if _names_store(command):
             return _store_guard()
+        exported = _exported_hook_env(command)
+        if exported:
+            return {"action": "block", "message": "Foreman blocked `%s`: the terminal keeps it for later commands, so "
+                    "every commit and push would skip the repository's git hooks. Leave the hooks on; if a hook fails, "
+                    "fix what it reports." % _short(exported, 60)}
         if not _quick(command):
             return None
         try:

@@ -180,6 +180,7 @@ class SkipMarkers(unittest.TestCase):
         "it." + "skip" + "If(true)('x', f)", "@pytest.mark." + "skip" + "if(1, reason='x')",
         "@unittest." + "skip" + "Unless(False, 'x')",
         "raise unittest." + "SkipTest('later')", "raise " + "SkipTest", "    raise unittest.case." + "SkipTest('x')",
+        "raise pytest." + "skip.Exception('x')",
     )
     CONDITIONAL = ("@pytest.mark." + "skipif(sys.platform == 'win32', reason='posix')",
                    "@unittest." + "skipIf(IS_WINDOWS, 'x')", "@unittest." + "skipUnless(HAS_GPU, 'gpu')",
@@ -344,6 +345,15 @@ class RenamedTests(unittest.TestCase):
         self.assertEqual(self.rules(concurrent), [])
         marker = change("src/calc.test.js", ["it" + "('adds', () => {"], ["x" + "it('adds', () => {"])
         self.assertEqual(self.rules(marker), [("test-skipped", 1)])  # one finding, not two
+        helper = change("tests/test_calc.py", ["def " + "test_data():"], ["def make_" + "test_data():"])
+        self.assertEqual(self.rules(helper), [])  # a helper, not a switched-off test
+        table = change("src/calc.test.js", ["it" + "('adds', () => {"], ["check('adds', () => {"])
+        self.assertEqual(self.rules(table), [])
+
+    def test_a_test_class_renamed_out_of_collection(self):
+        diff = change("tests/test_calc.py", ["class " + "TestCalc(unittest.TestCase):"],
+                      ["class _" + "TestCalc(unittest.TestCase):"])
+        self.assertEqual(self.rules(diff), [("test-skipped", 1)])
 
 
 class DefaultCheckProtection(unittest.TestCase):
@@ -360,11 +370,49 @@ class DefaultCheckProtection(unittest.TestCase):
         self.assertEqual(detector.default_check_changes("web/package.json", base, "{broken"),
                          ["`scripts.test` in web/package.json"])
 
+    def test_what_the_entry_points_delegate_to(self):
+        base = json.dumps({"scripts": {"test": "npm run test:unit && yarn e2e", "test:unit": "jest", "e2e": "playwright",
+                                       "build": "tsc", "lint": "eslint ."}})
+        f = lambda **changes: detector.default_check_changes(
+            "package.json", base, json.dumps({"scripts": dict(json.loads(base)["scripts"], **changes)}))
+        self.assertEqual(f(**{"test:unit": "jest -t nothing"}), ["`scripts.test:unit` in package.json"])
+        self.assertEqual(f(e2e="true"), ["`scripts.e2e` in package.json"])
+        self.assertEqual(f(build="vite build"), [])
+        make = "PYTEST_ARGS = -q\nCC = gcc\n\ntest: unit\n\tpytest $(PYTEST_ARGS)\n\nunit:\n\tpytest tests/unit\n"
+        g = lambda new: detector.default_check_changes("Makefile", make, new)
+        self.assertEqual(g(make.replace("-q", "-q -k nothing")),
+                         ["`PYTEST_ARGS`, which the test targets use, in Makefile"])
+        self.assertEqual(g(make.replace("tests/unit", "tests/none")), ["the `unit` target of Makefile"])
+        self.assertEqual(g(make.replace("CC = gcc", "CC = clang")), [])
+        cont = "test:\n\tpytest \\\n  --cov=x \\\n  -q\n\techo done\n"
+        self.assertEqual(detector.default_check_changes("Makefile", cont, cont.replace("echo done", "exit 0")),
+                         ["the `test` target of Makefile"])
+        cond = "test:\nifeq ($(CI),1)\n\tpytest --ci\nelse\n\tpytest\nendif\n"
+        self.assertEqual(detector.default_check_changes("Makefile", cond, cond.replace("\tpytest\n", "\ttrue\n")),
+                         ["the `test` target of Makefile"])
+        tox = "[tox]\nenvlist = py, lint\n\n[testenv]\nsetenv = PYTEST_ADDOPTS=-q\ncommands = pytest\n"
+        h = lambda new: detector.default_check_changes("tox.ini", tox, new)
+        self.assertEqual(h(tox.replace("py, lint", "py")), ["`[tox] envlist` in tox.ini"])
+        self.assertEqual(h(tox.replace("-q", "-k nothing")), ["`[testenv] setenv` in tox.ini"])
+
+    def test_a_remote_diff_that_does_not_apply_is_not_a_finding(self):
+        # The base text is the base branch's tip, newer than the diff's base: a dependency bump does not apply.
+        base = '{\n  "scripts": {"test": "jest"},\n  "dependencies": {"a": "3"}\n}\n'
+        bump = ("diff --git a/package.json b/package.json\n--- a/package.json\n+++ b/package.json\n"
+                "@@ -1,4 +1,4 @@\n {\n   \"scripts\": {\"test\": \"jest\"},\n-  \"dependencies\": {\"a\": \"1\"}\n"
+                "+  \"dependencies\": {\"a\": \"2\"}\n }\n")
+        kw = dict(base_is_file=lambda p: p == "package.json", base_text=lambda p: base)
+        self.assertEqual(detector.findings_from_diff(bump, **kw), [])
+        deleted = ("diff --git a/package.json b/package.json\ndeleted file mode 100644\n--- a/package.json\n"
+                   "+++ /dev/null\n@@ -1,4 +0,0 @@\n-{\n-  \"scripts\": {\"test\": \"jest\"},\n"
+                   "-  \"dependencies\": {\"a\": \"1\"}\n-}\n")
+        self.assertEqual([f.rule for f in detector.findings_from_diff(deleted, **kw)], ["check-changed"])
+
     def test_makefile_targets(self):
         base = "build:\n\tcc x.c\n\ntest check: build\n\tpytest -q\n\nci:\n\tmake test\n"
         f = lambda new: detector.default_check_changes("Makefile", base, new)
         self.assertEqual(f(base.replace("pytest -q", "true")),
-                         ["the `test` target of Makefile", "the `check` target of Makefile"])
+                         ["the `check` target of Makefile", "the `test` target of Makefile"])
         self.assertEqual(f(base.replace("cc x.c", "cc -O2 x.c")), [])
         self.assertEqual(f(base.replace("ci:\n\tmake test\n", "ci:\n\t@echo ok\n")), ["the `ci` target of Makefile"])
         self.assertEqual(f(base + "\nlint:\n\truff .\n"), [])

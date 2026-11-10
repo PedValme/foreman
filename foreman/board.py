@@ -1103,12 +1103,14 @@ def saved_review(name_with_owner: str, number: int, head_oid: str = "", head_bra
 
 _ZWSP = "\u200b"  # zero-width space, written as an escape: never a literal invisible character in the source
 _CONTROL = re.compile(r"[\x00-\x1f\x7f\x85\u2028\u2029]+")
-_MENTION = re.compile(r"(?<![\w])@(?=[A-Za-z0-9])")
-_ISSUE_REF = re.compile(r"(?:(?<![\w&])#|\b(?:GH|gh)-)(?=\d)")
-_URL = re.compile(r"(?i)\b(https?|ftp|mailto|www)(:|\.)")
+# No lookbehind anywhere: GitHub's own rules differ from Python's \w (Unicode letters, "_", owner/repo#12), so
+# every "@", every "#" and every scheme or "www." gets the zero-width space.
+_MENTION = re.compile(r"@")
+_ISSUE_REF = re.compile(r"#|(?i:gh)-(?=\d)")
+_URL = re.compile(r"(?i)(://|www\.)")
 
 
-def _no_mentions(text: str) -> str:
+def _no_mentions(text: str, code: bool = False) -> str:
     """Third-party words (file names from the pull request, a model's findings, gh's errors) put into a comment the
     user's account posts: on one line, and unable to notify anyone or link anything. Every control character and
     line break becomes a space (a blank line would end a code span and start a new paragraph); ``@name``,
@@ -1117,9 +1119,14 @@ def _no_mentions(text: str) -> str:
     would break an existing code span open."""
     text = _CONTROL.sub(" ", str(text or ""))
     text = _MENTION.sub("@" + _ZWSP, text)
-    text = _ISSUE_REF.sub(lambda m: m.group(0)[:-1] + _ZWSP + m.group(0)[-1] if m.group(0).endswith("-")
+    text = _ISSUE_REF.sub(lambda m: m.group(0)[:-1] + _ZWSP + "-" if m.group(0).endswith("-")
                           else m.group(0) + _ZWSP, text)
-    return _URL.sub(lambda m: m.group(1) + _ZWSP + m.group(2), text)
+    text = _URL.sub(lambda m: ":" + _ZWSP + "//" if m.group(1) == "://" else m.group(1)[:-1] + _ZWSP + ".", text)
+    if code:
+        return text  # inside a code span GitHub decodes no entity and renders no link
+    # Outside one: no HTML (an entity like &#64; becomes "@" after the filters above), no link syntax.
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return re.sub(r"([\[\]\\])", r"\\\1", text)
 
 
 def reject_comment(v: dict, note: str = "", review: Optional[list] = None) -> str:
@@ -1137,7 +1144,7 @@ def reject_comment(v: dict, note: str = "", review: Optional[list] = None) -> st
         for d in findings:
             marked = " (marked `%s` by the author, not allowed by the reviewer)" % MARKER if d.get("allowed") else ""
             lines.append("- **%s** `%s`: %s%s." % (_no_mentions(d["rule"]).replace("`", "'"),
-                                                    _no_mentions(d["location"]).replace("`", "'"),
+                                                    _no_mentions(d["location"], code=True).replace("`", "'"),
                                                     _no_mentions(d["message"]).rstrip("."), marked))
             lines.append("  Fix: %s" % _no_mentions(d["fix"]))
     else:

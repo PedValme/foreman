@@ -106,6 +106,7 @@ SKIPPED_TEST = tuple(re.compile(x) for x in (
     r"\bpytest\.mark\.(?:skip|xfail)\b", r"\bpytest\.(?:skip|xfail)\s*\(",
     r"@unittest\.(?:skip|expectedFailure)\b", r"\bself\.skipTest\s*\(",
     r"\braise\s+(?:unittest\.(?:case\.)?)?SkipTest\b",  # raise unittest.SkipTest("...") / raise SkipTest
+    r"\braise\s+(?:pytest\.)?skip\.Exception\b",
     r"\bthis\.skip\s*\(\s*\)",
     r"\bt\.Skip(?:f|Now)?\s*\(",          # Go
     r"#\[ignore\b",                       # Rust
@@ -152,7 +153,7 @@ FIXES = {
                      "Remove the marker and make the test pass by fixing the code under test."),
     "test-deleted": ("test file deleted", "Restore the test file and fix the code it tests."),
     "test-moved": ("test file moved out of the tests", "Move it back under the tests."),
-    "check-changed": ("change to a file the check command runs",
+    "check-changed": ("change to the check or to what it runs",
                       "Revert the change to the check's entry point and fix the code instead."),
     "check-weakened": ("line that neutralises the check (|| true, continue-on-error, deselected or ignored tests)",
                        "Remove it and fix the failing step or tests instead."),
@@ -500,17 +501,27 @@ def _iter_removed(diff: str, deadline: Optional[float] = None):
 
 # A test the runner no longer collects because it was renamed: `def test_x` -> `def _test_x` (pytest and unittest
 # collect names starting with "test"), `func TestX` -> `func _TestX` (Go), `it("x", ...)` -> another callee.
-_PY_TEST_DEF = re.compile(r"^\s*(?:async\s+)?def\s+(\w+)\s*\(")
+_PY_TEST_DEF = re.compile(r"^\s*(?:async\s+)?(?:def|class)\s+(\w+)\s*[(:]")
 _GO_TEST_FUNC = re.compile(r"^\s*func\s+(\w+)\s*\(")
 _JS_TEST_CALL = re.compile(r"^(\s*)([\w.$]+)(\s*\(\s*['\"`].*)$")
+# What a person types to switch a test off by renaming it: `_test_x`, `xtest_x`, `disabled_test_x`, `skip_TestX`.
+# A helper such as `make_test_data` is not one.
+_DISABLING_PREFIX = re.compile(r"^(?:_+|[xX]+_?|_*(?:disabled?|skip(?:ped)?|todo|broken|off|no|ignored?|tmp|old|"
+                               r"wip|fixme|pending|dont)_*)$", re.I)
+_JS_DISABLING_CALLEE = re.compile(r"^(?:_+\w*|[xX]\w+|\w+\.(?:todo|skip\w*))$")
+
+
+def _collected_python(name: str) -> bool:
+    """pytest and unittest collect functions and methods named test*, and classes named Test*."""
+    return name.startswith("test") or name.startswith("Test")
 
 
 def _test_definitions(lines) -> tuple:
-    """(python names, go names, js calls as (indent+rest -> callee)) of test definitions among ``lines``."""
+    """(python names, go names, js calls as (rest of the line -> callee)) of test definitions among ``lines``."""
     py, go, js = set(), set(), {}
     for l in lines:
         m = _PY_TEST_DEF.match(l)
-        if m and m.group(1).startswith("test"):
+        if m and _collected_python(m.group(1)):
             py.add(m.group(1))
         m = _GO_TEST_FUNC.match(l)
         if m and re.match(r"^Test(?:[A-Z_0-9]|$)", m.group(1)):
@@ -521,43 +532,44 @@ def _test_definitions(lines) -> tuple:
     return py, go, js
 
 
-def _removed_suffix(name: str, removed, fold: bool = False) -> str:
-    """The removed test name that ``name`` ends with after a non-empty prefix (``_test_x`` ends with ``test_x``),
-    looked up by suffix so the cost does not grow with the number of removed tests."""
-    probe = name.lower() if fold else name
+def _removed_suffix(name: str, removed: dict) -> str:
+    """The removed test that ``name`` renames by adding a disabling prefix (``_test_x`` for ``test_x``), compared
+    without case; looked up by suffix so the cost does not grow with the number of removed tests."""
+    probe = name.lower()
+    if probe in removed:
+        return removed[probe]  # testX for TestX (Go)
     start = probe.find("test", 1)
     while start > 0:
-        old = probe[start:]
-        if old in removed:
-            return removed[old] if isinstance(removed, dict) else old
+        old = removed.get(probe[start:])
+        if old and _DISABLING_PREFIX.match(name[:start]):
+            return old
         start = probe.find("test", start + 1)
     return ""
 
 
 def disabled_by_rename(path: str, removed: list, added_line: str) -> str:
     """The test definition that ``added_line`` re-adds under a name the runner does not collect, given the removed
-    lines of the same file ("" when it does not): ``def test_x`` removed and ``def _test_x`` added."""
+    lines of the same file ("" when it does not): ``def test_x`` removed and ``def _test_x`` added. ``removed`` is
+    (python names, go names, js calls), the names as lower case -> original."""
     py, go, js = removed
     m = _PY_TEST_DEF.match(added_line)
-    if m and py and not m.group(1).startswith("test"):
+    if m and py and not _collected_python(m.group(1)):
         old = _removed_suffix(m.group(1), py)
         if old:
             return old
     m = _GO_TEST_FUNC.match(added_line)
     if m and go and path.endswith("_test.go") and not re.match(r"^Test(?:[A-Z_0-9]|$)", m.group(1)):
-        folded = {g.lower(): g for g in go}
-        old = folded.get(m.group(1).lower()) or _removed_suffix(m.group(1), folded, fold=True)  # testX, _TestX
+        old = _removed_suffix(m.group(1), go)
         if old:
             return old
     m = _JS_TEST_CALL.match(added_line)
     if m and js:
         key = (m.group(1) + m.group(3)).strip()
-        if key in js and m.group(2) not in _JS_COLLECTED:
+        if key in js and _JS_DISABLING_CALLEE.match(m.group(2)):
             return "%s(%s" % (js[key], key.split("(", 1)[1][:60])
     return ""
 
 
-_JS_COLLECTED = {"it", "test", "it.concurrent", "test.concurrent", "it.only", "test.only"}
 
 
 def _renamed_tests(rows: list, diff: str, deadline: Optional[float]) -> list:
@@ -565,7 +577,7 @@ def _renamed_tests(rows: list, diff: str, deadline: Optional[float]) -> list:
     collect. ``rows`` are ``_iter_new_side`` rows of the same diff."""
     removed_by_path = {}
     for path, body in _iter_removed(diff, deadline):
-        if path and is_test_path(path) and ("def " in body or "func " in body or "(" in body):
+        if path and is_test_path(path) and ("def " in body or "class " in body or "func " in body or "(" in body):
             removed_by_path.setdefault(path, []).append(body)
     if not removed_by_path:
         return []
@@ -577,7 +589,8 @@ def _renamed_tests(rows: list, diff: str, deadline: Optional[float]) -> list:
     for path, removed in removed_by_path.items():
         py, go, js = _test_definitions(removed)
         still_py, still_go, still_js = _test_definitions(added_by_path.get(path, []))
-        net = (py - still_py, go - still_go, {k: v for k, v in js.items() if k not in still_js})
+        net = ({p.lower(): p for p in py - still_py}, {g.lower(): g for g in go - still_go},
+               {k: v for k, v in js.items() if k not in still_js})
         if any(net):
             net_by_path[path] = net
     found = []
@@ -758,33 +771,82 @@ DEFAULT_TARGETS = ("test", "check", "ci")         # Makefile targets
 MAKEFILE = re.compile(r"(^|/)(GNUmakefile|[Mm]akefile)$")
 TOX_INI = re.compile(r"(^|/)tox\.ini$")
 _MAKE_RULE = re.compile(r"^([^\s:=#][^:=#]*)::?(?!=)(.*)$")  # greedy: a lazy name before \s* is quadratic
+_MAKE_VAR = re.compile(r"^(?:export\s+|override\s+)?([A-Za-z_][\w.-]*)\s*(?::{1,3}|\?|\+|!)?=(.*)$")
+_MAKE_REF = re.compile(r"\$[({]([A-Za-z_][\w.-]*)[)}]")
+_MAKE_DIRECTIVE = re.compile(r"^\s*(?:ifeq|ifneq|ifdef|ifndef|else|endif)\b")
+_SCRIPT_RUN = re.compile(r"\b(?:npm|pnpm|yarn|bun)\s+(?:run(?:-script)?\s+)?([\w:.@/-]+)")
+_SCRIPT_FAMILY = re.compile(r"^(?:test|check|lint)[:_.-]")
 
 
-def _make_recipes(text: Optional[str], targets=DEFAULT_TARGETS) -> dict:
-    """target -> (prerequisites, recipe lines) for the named targets of a Makefile text."""
-    out, current = {}, []
-    for raw in (text or "").splitlines():
-        if raw.startswith("\t"):
-            for t in current:
-                out[t][1].append(raw.strip())
+def _protected_scripts(scripts: dict) -> list:
+    """The package.json scripts that make up the test entry points: test, check, lint, their ``test:*`` family, and
+    every script they run with ``npm run``/``yarn``/``pnpm``/``bun``, transitively."""
+    todo = [k for k in scripts if k in DEFAULT_SCRIPTS or _SCRIPT_FAMILY.match(k)]
+    seen = []
+    while todo:
+        k = todo.pop()
+        if k in seen or k not in scripts:
             continue
+        seen.append(k)
+        todo += [m.group(1) for m in _SCRIPT_RUN.finditer(str(scripts[k]))]
+    return sorted(seen)
+
+
+def _make_rules(text: Optional[str]) -> tuple:
+    """(target -> (prerequisites, recipe lines), variable -> value) of a Makefile text. Recipe lines continue
+    after a backslash and across conditional directives."""
+    rules, variables, current, continued = {}, {}, [], False
+    for raw in (text or "").splitlines():
+        if raw.startswith("\t") or (continued and current):
+            for t in current:
+                rules[t][1].append(raw.strip())
+            continued = raw.rstrip().endswith("\\")
+            continue
+        continued = False
         if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        if _MAKE_DIRECTIVE.match(raw):
+            continue  # ifeq/else/endif inside or around a recipe: the recipe goes on
+        v = _MAKE_VAR.match(raw)
+        if v and ":" not in raw.split("=", 1)[0].rstrip(":?+!"):
+            variables.setdefault(v.group(1), []).append(" ".join(v.group(2).split()))
+            current = []
             continue
         m = _MAKE_RULE.match(raw)
         current = []
         if m:
+            prereq, _, inline = m.group(2).partition(";")
             for t in m.group(1).split():
-                if t in targets:
-                    out.setdefault(t, ([], []))[0].append(" ".join(m.group(2).split(";", 1)[0].split()))
-                    if ";" in m.group(2):
-                        out[t][1].append(m.group(2).split(";", 1)[1].strip())
-                    current.append(t)
-    return {t: (tuple(p), tuple(r)) for t, (p, r) in out.items()}
+                rules.setdefault(t, ([], []))[0].append(" ".join(prereq.split()))
+                if inline.strip():
+                    rules[t][1].append(inline.strip())
+                current.append(t)
+    return ({t: (tuple(p), tuple(r)) for t, (p, r) in rules.items()},
+            {k: tuple(v) for k, v in variables.items()})
 
 
-def _tox_commands(text: Optional[str]) -> Optional[dict]:
-    """"[section] key" -> value for ``commands`` and ``commands_pre`` of every ``[testenv*]`` section of a tox.ini
-    text; None when it cannot be parsed."""
+_TESTISH_TARGET = re.compile(r"(?i)test|check|lint|unit|e2e|spec|integration|verify")
+
+
+def _make_protected(rules: dict, variables: dict) -> tuple:
+    """(targets, variables) behind the test, check and ci targets: their prerequisites that are test targets
+    themselves (``test: unit lint``; not ``build``, whose flags change in normal work), transitively, and the
+    variables their recipes reference."""
+    todo, targets, names = [t for t in DEFAULT_TARGETS if t in rules], [], []
+    while todo:
+        t = todo.pop()
+        if t in targets or t not in rules:
+            continue
+        targets.append(t)
+        prereqs, recipe = rules[t]
+        todo += [p for line in prereqs for p in line.split() if p in rules and _TESTISH_TARGET.search(p)]
+        names += [m.group(1) for line in recipe + prereqs for m in _MAKE_REF.finditer(line)]
+    return targets, sorted(n for n in set(names) if n in variables)
+
+
+def _tox_settings(text: Optional[str]) -> Optional[dict]:
+    """"[section] key" -> value for the test settings of a tox.ini text (``envlist`` of ``[tox]``, and
+    ``commands``, ``commands_pre`` and ``setenv`` of every ``[testenv*]`` section); None when it cannot be parsed."""
     import configparser
     parser = configparser.RawConfigParser(strict=False, interpolation=None)
     try:
@@ -793,18 +855,24 @@ def _tox_commands(text: Optional[str]) -> Optional[dict]:
         return None
     out = {}
     for section in parser.sections():
-        if section == "testenv" or section.startswith("testenv:"):
-            for key in ("commands", "commands_pre"):
-                if parser.has_option(section, key):
-                    out["[%s] %s" % (section, key)] = " ".join((parser.get(section, key) or "").split())
+        if section == "tox":
+            keys = ("envlist", "env_list")
+        elif section == "testenv" or section.startswith("testenv:"):
+            keys = ("commands", "commands_pre", "setenv", "set_env")
+        else:
+            continue
+        for key in keys:
+            if parser.has_option(section, key):
+                out["[%s] %s" % (section, key)] = " ".join((parser.get(section, key) or "").split())
     return out
 
 
 def default_check_changes(path: str, old: Optional[str], new: Optional[str]) -> list:
     """What the change does to the usual test entry points of ``path`` with no .foreman.json: the ``test``,
-    ``check`` and ``lint`` scripts of a package.json, the ``test``, ``check`` and ``ci`` targets of a Makefile, the
-    ``commands`` of tox's test environments. Only what exists at the base counts: a new script is not a finding.
-    Returns one description per change."""
+    ``check`` and ``lint`` scripts of a package.json (with their ``test:*`` family and the scripts they run), the
+    ``test``, ``check`` and ``ci`` targets of a Makefile (with the targets they depend on and the variables they
+    use), tox's ``envlist`` and its test environments' ``commands`` and ``setenv``. Only what exists at the base
+    counts: a new script is not a finding. ``new`` None means the file is gone. One description per change."""
     name = path.rsplit("/", 1)[-1]
     if old is None:
         return []
@@ -813,14 +881,17 @@ def default_check_changes(path: str, old: Optional[str], new: Optional[str]) -> 
         if not isinstance(before, dict):
             return []
         after = after if isinstance(after, dict) else {}
-        return ["`scripts.%s` in %s" % (k, path) for k in DEFAULT_SCRIPTS
-                if k in before and (new is None or after.get(k) != before[k])]
+        return ["`scripts.%s` in %s" % (k, path) for k in _protected_scripts(before)
+                if new is None or after.get(k) != before[k]]
     if MAKEFILE.search(path):
-        before, after = _make_recipes(old), _make_recipes(new)
-        return ["the `%s` target of %s" % (t, path) for t in DEFAULT_TARGETS
-                if t in before and (new is None or after.get(t) != before[t])]
+        (rules, variables), (new_rules, new_variables) = _make_rules(old), _make_rules(new)
+        targets, names = _make_protected(rules, variables)
+        changed = ["the `%s` target of %s" % (t, path) for t in sorted(targets)
+                   if new is None or new_rules.get(t) != rules[t]]
+        return changed + ["`%s`, which the test targets use, in %s" % (n, path) for n in names
+                          if new is None or new_variables.get(n) != variables[n]]
     if TOX_INI.search(path):
-        before, after = _tox_commands(old), _tox_commands(new)
+        before, after = _tox_settings(old), _tox_settings(new)
         if not before:
             return []
         after = after or {}
@@ -1412,7 +1483,15 @@ def findings_from_diff(diff: str, name_status: str = "", check: Optional[str] = 
         if check or protected:
             checked = check_changed(check, paths, base_is_file, allowed_paths, protected, contents=contents,
                                     version_of=version_of)
-        found += checked + default_check_findings(paths, contents, allowed_paths, version_of,
+        gone = set(deleted)
+
+        def default_contents(p):
+            # The base text may be newer than the diff's own base (a remote verdict reads the base branch's tip):
+            # a diff that does not apply proves nothing about the scripts, so only a deletion counts then.
+            old, new = contents(p)
+            return (old, None) if p in gone else (old, new if new is not None else old)
+
+        found += checked + default_check_findings(paths, default_contents, allowed_paths, version_of,
                                                   skip={f.file for f in checked})
     return found
 

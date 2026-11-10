@@ -415,13 +415,16 @@ class PullRequestVerdicts(BoardCase):
         self.assertNotRegex(body, r"(?<![\w])@victim")
         self.assertIn("@\u200bvictim", findings[0])
         self.assertIn("#\u200b12", findings[0])
-        self.assertIn("https\u200b://evil", findings[0])
+        self.assertIn("https:\u200b//evil", findings[0])
 
     def test_no_mentions_keeps_code_spans_closed(self):
         self.assertEqual(board._no_mentions("`cc @octocat` and @org/team, GH-4, #9, mail a@b.io"),
-                         "`cc @\u200boctocat` and @\u200borg/team, GH\u200b-4, #\u200b9, mail a@b.io")
+                         "`cc @\u200boctocat` and @\u200borg/team, GH\u200b-4, #\u200b9, mail a@\u200bb.io")
+        self.assertEqual(board._no_mentions("o/r#12 caf\u00e9@x _https://e.io_ &#64;u [a](//e) <b>"),
+                         "o/r#\u200b12 caf\u00e9@\u200bx _https:\u200b//e.io_ &amp;#\u200b64;u \\[a\\](//e) &lt;b&gt;")
+        self.assertEqual(board._no_mentions("a/[b] & @c", code=True), "a/[b] & @\u200bc")
         self.assertEqual(board._no_mentions("a\r\nb\x00c\u2028d"), "a b c d")
-        self.assertEqual(board._no_mentions("see www.x.io and http://y"), "see www\u200b.x.io and http\u200b://y")
+        self.assertEqual(board._no_mentions("see www.x.io and http://y"), "see www\u200b.x.io and http:\u200b//y")
 
     def test_a_stale_saved_review_is_not_posted_and_a_branch_review_is(self):
         self.blocked_pr()
