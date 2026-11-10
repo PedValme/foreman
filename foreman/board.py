@@ -1107,6 +1107,8 @@ def _terminal(command: str, root: str, timeout: int = MERGE_TIMEOUT) -> tuple:
         return "denied", tail
     if status == "pending_approval" or data.get("approval_pending"):
         return "waiting", tail
+    if status == "yielded_to_background":  # Hermes moved a long command to the background: no exit status yet
+        return "background", tail
     if status in ("timeout", "timed_out") or "timed out" in error.lower() or exit_code == 124:
         return "timeout", tail
     if exit_code == 0 and not error:
@@ -1123,6 +1125,12 @@ def _outcome_text(state: str, detail: str, what: str, command: str) -> str:
                                                                                     else "")
     if state == "waiting":
         return "Foreman: Hermes is waiting for your approval of `%s`; approve or deny it there." % command
+    if state == "background":
+        m = re.match(r"gh pr \w+ (\d+)", command)
+        check = ("`/foreman verdict %s` shows MERGED when it is done" % m.group(1) if m and " merge " in command
+                 else "check the pull request on GitHub")
+        return ("Foreman: `%s` is still running (Hermes moved it to the background), so its result is not known yet. "
+                "Do not run it again: %s." % (command, check))
     if state == "timeout":
         return ("Foreman: `%s` timed out; check the pull request on GitHub before you try again.%s"
                 % (command, "\n" + detail if detail else ""))
@@ -1364,14 +1372,22 @@ def _pipeline_refused(ref, detail: str) -> None:
 MAX_REVIEW_FINDINGS = 20
 
 
-def saved_review(name_with_owner: str, number: int) -> list:
-    """Findings of the last ``/foreman review`` of this pull request (``review.load``), as Markdown bullet texts;
-    [] when there is none."""
-    if "/" not in (name_with_owner or ""):
+def saved_review(name_with_owner: str, number: int, head_oid: str = "", head_branch: str = "",
+                 root: str = "") -> list:
+    """Findings of the last ``/foreman review`` of this pull request, or of its head branch (``review.load``), as
+    Markdown bullet texts; [] when there is none. A review of another commit than ``head_oid`` (or one that does not
+    say which commit it read) is stale and is not used."""
+    if "/" not in (name_with_owner or "") or not _OID.fullmatch(head_oid or ""):
         return []
+    data = None
     try:
         from . import review
-        data = review.load(name_with_owner, "pr", str(number))
+        wanted = [("pr", str(number), "")] + ([("branch", head_branch, root)] if head_branch else [])
+        for kind, ref, where in wanted:
+            found = review.load(name_with_owner, kind, ref, where, head=head_oid)
+            if isinstance(found, dict) and found.get("head") == head_oid:
+                data = found
+                break
     except Exception:
         logger.warning("foreman: cannot read the saved review", exc_info=True)
         return []
@@ -1401,9 +1417,32 @@ def saved_review(name_with_owner: str, number: int) -> list:
     return out
 
 
-def _no_mentions(text: str) -> str:
-    """A model's words must not ping people or teams: @name becomes `@name` (a code span notifies nobody)."""
-    return re.sub(r"(?<![\w`])@([A-Za-z0-9][\w-]*(?:/[\w.-]+)?)", r"`@\1`", text)
+_ZWSP = "\u200b"  # zero-width space, written as an escape: never a literal invisible character in the source
+_CONTROL = re.compile(r"[\x00-\x1f\x7f\x85\u2028\u2029]+")
+# No lookbehind anywhere: GitHub's own rules differ from Python's \w (Unicode letters, "_", owner/repo#12), so
+# every "@", every "#" and every scheme or "www." gets the zero-width space.
+_MENTION = re.compile(r"@")
+_ISSUE_REF = re.compile(r"#|(?i:gh)-(?=\d)")
+_URL = re.compile(r"(?i)(://|www\.)")
+
+
+def _no_mentions(text: str, code: bool = False) -> str:
+    """Third-party words (file names from the pull request, a model's findings, gh's errors) put into a comment the
+    user's account posts: on one line, and unable to notify anyone or link anything. Every control character and
+    line break becomes a space (a blank line would end a code span and start a new paragraph); ``@name``,
+    ``#123``, ``GH-123`` and URLs get a zero-width space after ``@``, ``#``, ``GH`` or the scheme, which GitHub
+    does not autolink or notify. Inserting, never wrapping in backticks: a backtick added next to the author's own
+    would break an existing code span open."""
+    text = _CONTROL.sub(" ", str(text or ""))
+    text = _MENTION.sub("@" + _ZWSP, text)
+    text = _ISSUE_REF.sub(lambda m: m.group(0)[:-1] + _ZWSP + "-" if m.group(0).endswith("-")
+                          else m.group(0) + _ZWSP, text)
+    text = _URL.sub(lambda m: ":" + _ZWSP + "//" if m.group(1) == "://" else m.group(1)[:-1] + _ZWSP + ".", text)
+    if code:
+        return text  # inside a code span GitHub decodes no entity and renders no link
+    # Outside one: no HTML (an entity like &#64; becomes "@" after the filters above), no link syntax.
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return re.sub(r"([\[\]\\])", r"\\\1", text)
 
 
 def reject_comment(v: dict, note: str = "", review: Optional[list] = None) -> str:
@@ -1412,16 +1451,18 @@ def reject_comment(v: dict, note: str = "", review: Optional[list] = None) -> st
     lines = ["### Foreman: changes requested", ""]
     findings = (v.get("blockers") or []) + (v.get("marked") or [])
     if v.get("error"):
-        lines.append("Foreman could not compute a verdict for this pull request (%s)." % v["error"].rstrip("."))
+        lines.append("Foreman could not compute a verdict for this pull request (%s)."
+                     % _no_mentions(v["error"]).rstrip("."))
     elif findings:
         lines.append("Foreman's deterministic check found %d blocker(s)%s:" % (
             len(findings), " at `%s`" % head if head else ""))
         lines.append("")
         for d in findings:
             marked = " (marked `%s` by the author, not allowed by the reviewer)" % MARKER if d.get("allowed") else ""
-            lines.append("- **%s** `%s`: %s%s." % (d["rule"], d["location"].replace("`", "'"),
-                                                    _no_mentions(d["message"].rstrip(".")), marked))
-            lines.append("  Fix: %s" % d["fix"])
+            lines.append("- **%s** `%s`: %s%s." % (_no_mentions(d["rule"]).replace("`", "'"),
+                                                    _no_mentions(d["location"], code=True).replace("`", "'"),
+                                                    _no_mentions(d["message"]).rstrip("."), marked))
+            lines.append("  Fix: %s" % _no_mentions(d["fix"]))
     else:
         lines.append("Foreman's deterministic check found no blockers%s; the reviewer rejects it for the reason "
                      "below." % (" at `%s`" % head if head else ""))
@@ -1456,7 +1497,7 @@ def cmd_reject(args: str = "", keys: tuple = (), platform: Optional[str] = None)
         return ("Foreman found no blockers in PR #%d. To reject it, say why: `/foreman reject %d <note>`."
                 % (number, number))
     name = v.get("name") or ""
-    body = reject_comment(v, note, saved_review(name, number))
+    body = reject_comment(v, note, saved_review(name, number, v.get("head_oid") or "", v.get("head") or "", root))
     if close and not yes:  # closing is the part that needs a confirmation; it is asked before anything is posted
         rerun = "/foreman reject %d%s --close --yes%s" % (number, _repo_suffix(args), " " + note if note else "")
         answer = _confirm("Post the comment and close PR #%d?\n%s" % (number, trim(v.get("title"), WIDTH)),
@@ -1488,6 +1529,9 @@ def cmd_reject(args: str = "", keys: tuple = (), platform: Optional[str] = None)
             pass
     rule = "-" * 40
     where = " (%s)" % name if name else ""
+    if state == "background":
+        return "\n".join([_outcome_text(state, detail, "", command),
+                          "The comment may still be posted on PR #%d%s. Its text:" % (number, where), rule, body, rule])
     if state != "done":
         return "\n".join([_outcome_text(state, detail, "", command),
                           "The comment was NOT posted on PR #%d%s. Its text:" % (number, where), rule, body, rule])

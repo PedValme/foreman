@@ -71,11 +71,14 @@ SECRET_FORMATS = tuple(re.compile(x) for x in (
 BEARER = re.compile(r"(?i)authorization:\s*bearer\s+[A-Za-z0-9._~+/-]{20,}")
 SECRET_KEY_VALUE = re.compile(
     r"(?i)(password|passwd|contrase(?:ñ|n)a|secret|api_?key|token)\w{0,80}[\"']?\s*[:=]\s*[\"'](?P<value>[^\"'\s]{8,})[\"']")
-CREDENTIAL_URL = re.compile(r"\b[a-z][a-z0-9+.-]*://(?P<user>[^\s:/@\"']+):(?P<value>[^\s@/\"']+)@(?P<host>[^\s/\"':?#]+)")
-# Only in YAML files: in code, "token: string" is a type annotation.
+# The scheme is bounded: unbounded, every word boundary of a long "a.a.a..." run rescans it (quadratic).
+CREDENTIAL_URL = re.compile(r"\b[a-z][a-z0-9+.-]{0,31}://(?P<user>[^\s:/@\"']+):(?P<value>[^\s@/\"']+)@(?P<host>[^\s/\"':?#]+)")
+# Only in YAML files: in code, "token: string" is a type annotation. The value runs to a comment or the end of the
+# line, trailing spaces included (plausible_secret strips them): a lazy value followed by \s* is quadratic on a
+# long run of spaces.
 SECRET_YAML = re.compile(
     r"(?i)^\+\s*[\w.-]{0,80}(password|passwd|secret|api_?key|token)[\w.-]{0,80}\s*:\s*"
-    r"(?P<value>[^\s'\"#{}\[\]$<|>&*!%@`][^#\n]{7,}?)\s*(#.*)?$")
+    r"(?P<value>[^\s'\"#{}\[\]$<|>&*!%@`][^#\n]{7,})(#.*)?$")
 IS_YAML = re.compile(r"\.ya?ml$", re.I)
 # properties, ini, conf, toml, .env: key=value or key: value, unquoted.
 SECRET_CONFIG = re.compile(
@@ -104,6 +107,8 @@ SKIPPED_TEST = tuple(re.compile(x) for x in (
     r"\b(?:xit|xtest|xdescribe|fit|fdescribe)\s*\(",
     r"\bpytest\.mark\.(?:skip|xfail)\b", r"\bpytest\.(?:skip|xfail)\s*\(",
     r"@unittest\.(?:skip|expectedFailure)\b", r"\bself\.skipTest\s*\(",
+    r"\braise\s+(?:unittest\.(?:case\.)?)?SkipTest\b",  # raise unittest.SkipTest("...") / raise SkipTest
+    r"\braise\s+(?:pytest\.)?skip\.Exception\b",
     r"\bthis\.skip\s*\(\s*\)",
     r"\bt\.Skip(?:f|Now)?\s*\(",          # Go
     r"#\[ignore\b",                       # Rust
@@ -150,7 +155,7 @@ FIXES = {
                      "Remove the marker and make the test pass by fixing the code under test."),
     "test-deleted": ("test file deleted", "Restore the test file and fix the code it tests."),
     "test-moved": ("test file moved out of the tests", "Move it back under the tests."),
-    "check-changed": ("change to a file the check command runs",
+    "check-changed": ("change to the check or to what it runs",
                       "Revert the change to the check's entry point and fix the code instead."),
     "check-weakened": ("line that neutralises the check (|| true, continue-on-error, deselected or ignored tests)",
                        "Remove it and fix the failing step or tests instead."),
@@ -243,9 +248,31 @@ def _value_rule(regex, text: str, allow_spaces: bool = True) -> bool:
     return any(plausible_secret(m.group("value"), allow_spaces) for m in regex.finditer(text))
 
 
+_JWT_START = re.compile(r"\beyJ")
+_JWT_RUN = re.compile(r"[A-Za-z0-9_-]*")
+
+
+def _jwt_matches(text: str):
+    """``JWT.finditer`` in linear time. ``\\b`` also holds after a ``-`` inside a run of token characters, so a
+    plain finditer retries every "-eyJ" of one long run and rescans it each time (quadratic). A later start inside
+    the same run reaches the same end and fails the same way, so after a failed start the rest of its run is
+    skipped."""
+    pos = 0
+    while True:
+        s = _JWT_START.search(text, pos)
+        if not s:
+            return
+        m = JWT.match(text, s.start())
+        if m:
+            yield m
+            pos = m.end()
+        else:
+            pos = max(_JWT_RUN.match(text, s.start()).end(), s.start() + 1)
+
+
 def _jwt_secret(text: str) -> bool:
     """A JWT outside the tests, except Supabase's anon key: it is public by design and ships in the frontend."""
-    for m in JWT.finditer(text):
+    for m in _jwt_matches(text):
         payload = m.group(0).split(".")[1]
         try:
             role = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))).get("role")
@@ -386,7 +413,8 @@ def paths_from_name_status(name_status: str):
 
 def allowed_paths_in(messages: Optional[str]) -> set:
     """Paths a commit message allows to delete, move or change: a line ``foreman:allow <path>: <reason>``."""
-    return {m.group(1) for m in re.finditer(r"(?m)^\s*%s\s+(\S+?):\s+\S" % re.escape(MARKER), messages or "")}
+    # [ \t], not \s, before the marker: \s crosses newlines, and from every line start that is quadratic.
+    return {m.group(1) for m in re.finditer(r"(?m)^[ \t]*%s[ \t]+(\S+?):\s+\S" % re.escape(MARKER), messages or "")}
 
 
 _HUNK = re.compile(r"^(@{2,}) (.*?) @{2,}")
@@ -438,6 +466,146 @@ def _iter_new_side(diff: str, deadline: Optional[float] = None):
                     line, new_left = int(start), n
                 elif ncols == 1:
                     old_left = n
+
+
+def _iter_removed(diff: str, deadline: Optional[float] = None):
+    """Yield (path, removed line without its prefix) for the removed lines of a unified diff (one-parent hunks)."""
+    path, new_left, old_left, ncols = None, 0, 0, 1
+    for count, text in enumerate(diff.splitlines()):
+        if count % _CHECK_EVERY == 0:
+            _check_deadline(deadline)
+        if (new_left > 0 or old_left > 0) and text[:1] in (" ", "+", "-", "\\", ""):
+            if text.startswith("\\"):
+                continue
+            prefix, body = text[:ncols], text[ncols:]
+            if "-" in prefix:
+                old_left -= 1
+                if ncols == 1:
+                    yield path, body
+                continue
+            if "+" not in prefix:
+                old_left -= 1
+            new_left -= 1
+            continue
+        new_left = old_left = 0
+        if text.startswith("+++ "):
+            path = _diff_path(text)
+            continue
+        m = _HUNK.match(text)
+        if m:
+            ncols = len(m.group(1)) - 1
+            for sign, _start, n in re.findall(r"([-+])(\d+)(?:,(\d+))?", m.group(2)):
+                if sign == "+":
+                    new_left = int(n) if n else 1
+                elif ncols == 1:
+                    old_left = int(n) if n else 1
+
+
+# A test the runner no longer collects because it was renamed: `def test_x` -> `def _test_x` (pytest and unittest
+# collect names starting with "test"), `func TestX` -> `func _TestX` (Go), `it("x", ...)` -> another callee.
+_PY_TEST_DEF = re.compile(r"^\s*(?:async\s+)?(?:def|class)\s+(\w+)\s*[(:]")
+_GO_TEST_FUNC = re.compile(r"^\s*func\s+(\w+)\s*\(")
+_JS_TEST_CALL = re.compile(r"^(\s*)([\w.$]+)(\s*\(\s*['\"`].*)$")
+# What a person types to switch a test off by renaming it: `_test_x`, `xtest_x`, `disabled_test_x`, `skip_TestX`.
+# A helper such as `make_test_data` is not one.
+_DISABLING_PREFIX = re.compile(r"^(?:_+|[xX]+_?|_*(?:disabled?|skip(?:ped)?|todo|broken|off|no|ignored?|tmp|old|"
+                               r"wip|fixme|pending|dont)_*)$", re.I)
+_JS_DISABLING_CALLEE = re.compile(r"^(?:_+\w*|[xX]\w+|\w+\.(?:todo|skip\w*))$")
+
+
+def _collected_python(name: str) -> bool:
+    """pytest and unittest collect functions and methods named test*, and classes named Test*."""
+    return name.startswith("test") or name.startswith("Test")
+
+
+def _test_definitions(lines) -> tuple:
+    """(python names, go names, js calls as (rest of the line -> callee)) of test definitions among ``lines``."""
+    py, go, js = set(), set(), {}
+    for l in lines:
+        m = _PY_TEST_DEF.match(l)
+        if m and _collected_python(m.group(1)):
+            py.add(m.group(1))
+        m = _GO_TEST_FUNC.match(l)
+        if m and re.match(r"^Test(?:[A-Z_0-9]|$)", m.group(1)):
+            go.add(m.group(1))
+        m = _JS_TEST_CALL.match(l)
+        if m and m.group(2) in ("it", "test"):
+            js[(m.group(1) + m.group(3)).strip()] = m.group(2)
+    return py, go, js
+
+
+def _removed_suffix(name: str, removed: dict) -> str:
+    """The removed test that ``name`` renames by adding a disabling prefix (``_test_x`` for ``test_x``), compared
+    without case; looked up by suffix so the cost does not grow with the number of removed tests."""
+    probe = name.lower()
+    if probe in removed:
+        return removed[probe]  # testX for TestX (Go)
+    start = probe.find("test", 1)
+    while start > 0:
+        old = removed.get(probe[start:])
+        if old and _DISABLING_PREFIX.match(name[:start]):
+            return old
+        start = probe.find("test", start + 1)
+    return ""
+
+
+def disabled_by_rename(path: str, removed: list, added_line: str) -> str:
+    """The test definition that ``added_line`` re-adds under a name the runner does not collect, given the removed
+    lines of the same file ("" when it does not): ``def test_x`` removed and ``def _test_x`` added. ``removed`` is
+    (python names, go names, js calls), the names as lower case -> original."""
+    py, go, js = removed
+    m = _PY_TEST_DEF.match(added_line)
+    if m and py and not _collected_python(m.group(1)):
+        old = _removed_suffix(m.group(1), py)
+        if old:
+            return old
+    m = _GO_TEST_FUNC.match(added_line)
+    if m and go and path.endswith("_test.go") and not re.match(r"^Test(?:[A-Z_0-9]|$)", m.group(1)):
+        old = _removed_suffix(m.group(1), go)
+        if old:
+            return old
+    m = _JS_TEST_CALL.match(added_line)
+    if m and js:
+        key = (m.group(1) + m.group(3)).strip()
+        if key in js and _JS_DISABLING_CALLEE.match(m.group(2)):
+            return "%s(%s" % (js[key], key.split("(", 1)[1][:60])
+    return ""
+
+
+
+
+def _renamed_tests(rows: list, diff: str, deadline: Optional[float]) -> list:
+    """Findings for test definitions removed from a test file and re-added there under a name the runner does not
+    collect. ``rows`` are ``_iter_new_side`` rows of the same diff."""
+    removed_by_path = {}
+    for path, body in _iter_removed(diff, deadline):
+        if path and is_test_path(path) and ("def " in body or "class " in body or "func " in body or "(" in body):
+            removed_by_path.setdefault(path, []).append(body)
+    if not removed_by_path:
+        return []
+    added_by_path = {}
+    for path, _line, text, added, _hunk in rows:
+        if added and path in removed_by_path:
+            added_by_path.setdefault(path, []).append(text[1:])
+    net_by_path = {}
+    for path, removed in removed_by_path.items():
+        py, go, js = _test_definitions(removed)
+        still_py, still_go, still_js = _test_definitions(added_by_path.get(path, []))
+        net = ({p.lower(): p for p in py - still_py}, {g.lower(): g for g in go - still_go},
+               {k: v for k, v in js.items() if k not in still_js})
+        if any(net):
+            net_by_path[path] = net
+    found = []
+    for i, (path, line, text, added, _hunk) in enumerate(rows):
+        net = net_by_path.get(path) if added else None
+        if not net:
+            continue
+        old = disabled_by_rename(path, net, text[1:])
+        if old:
+            after = [r[2][1:] for r in rows[i + 1:i + 3] if r[0] == path]
+            found.append(finding("test-skipped", path, line, "renamed from `%s`, so the runner no longer collects it"
+                                 % old, allowed=MARKER in text, content=text[1:], following=next_nonempty(after)))
+    return found
 
 
 def added_from_name_status(name_status: str) -> list:
@@ -512,6 +680,8 @@ def detect(diff: str, deleted: Iterable[str] = (), history: str = "", renamed: I
         f = _line_finding(path, line, text, new_files=new_files, before=before, after=after, version_of=version)
         if f:
             found.append(f)
+    at = {(f.file, f.line) for f in found}
+    found += [f for f in _renamed_tests(rows, diff, deadline) if (f.file, f.line) not in at]
     for path in deleted:
         if is_test_code(path):
             found.append(finding("test-deleted", path, 0, allowed=path in allowed_paths, version="deleted"))
@@ -594,6 +764,157 @@ def check_changed(command: Optional[str], paths: Iterable[str], is_file: Callabl
 
     return [finding("check-changed", p, 0, detail(p), allowed=p in allowed_paths,
                     version=version_of(p) if version_of else "") for p in targets if touched(p)]
+
+
+# ─── Check protection without configuration ──────────────────────────────────
+
+DEFAULT_SCRIPTS = ("test", "check", "lint")       # package.json scripts
+DEFAULT_TARGETS = ("test", "check", "ci")         # Makefile targets
+MAKEFILE = re.compile(r"(^|/)(GNUmakefile|[Mm]akefile)$")
+TOX_INI = re.compile(r"(^|/)tox\.ini$")
+_MAKE_RULE = re.compile(r"^([^\s:=#][^:=#]*)::?(?!=)(.*)$")  # greedy: a lazy name before \s* is quadratic
+_MAKE_VAR = re.compile(r"^(?:export\s+|override\s+)?([A-Za-z_][\w.-]*)\s*(?::{1,3}|\?|\+|!)?=(.*)$")
+_MAKE_REF = re.compile(r"\$[({]([A-Za-z_][\w.-]*)[)}]")
+_MAKE_DIRECTIVE = re.compile(r"^\s*(?:ifeq|ifneq|ifdef|ifndef|else|endif)\b")
+_SCRIPT_RUN = re.compile(r"\b(?:npm|pnpm|yarn|bun)\s+(?:run(?:-script)?\s+)?([\w:.@/-]+)")
+_SCRIPT_FAMILY = re.compile(r"^(?:test|check|lint)[:_.-]")
+
+
+def _protected_scripts(scripts: dict) -> list:
+    """The package.json scripts that make up the test entry points: test, check, lint, their ``test:*`` family, and
+    every script they run with ``npm run``/``yarn``/``pnpm``/``bun``, transitively."""
+    todo = [k for k in scripts if k in DEFAULT_SCRIPTS or _SCRIPT_FAMILY.match(k)]
+    seen = []
+    while todo:
+        k = todo.pop()
+        if k in seen or k not in scripts:
+            continue
+        seen.append(k)
+        todo += [m.group(1) for m in _SCRIPT_RUN.finditer(str(scripts[k]))]
+    return sorted(seen)
+
+
+def _make_rules(text: Optional[str]) -> tuple:
+    """(target -> (prerequisites, recipe lines), variable -> value) of a Makefile text. Recipe lines continue
+    after a backslash and across conditional directives."""
+    rules, variables, current, continued = {}, {}, [], False
+    for raw in (text or "").splitlines():
+        if raw.startswith("\t") or (continued and current):
+            for t in current:
+                rules[t][1].append(raw.strip())
+            continued = raw.rstrip().endswith("\\")
+            continue
+        continued = False
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        if _MAKE_DIRECTIVE.match(raw):
+            continue  # ifeq/else/endif inside or around a recipe: the recipe goes on
+        v = _MAKE_VAR.match(raw)
+        if v and ":" not in raw.split("=", 1)[0].rstrip(":?+!"):
+            variables.setdefault(v.group(1), []).append(" ".join(v.group(2).split()))
+            current = []
+            continue
+        m = _MAKE_RULE.match(raw)
+        current = []
+        if m:
+            prereq, _, inline = m.group(2).partition(";")
+            for t in m.group(1).split():
+                rules.setdefault(t, ([], []))[0].append(" ".join(prereq.split()))
+                if inline.strip():
+                    rules[t][1].append(inline.strip())
+                current.append(t)
+    return ({t: (tuple(p), tuple(r)) for t, (p, r) in rules.items()},
+            {k: tuple(v) for k, v in variables.items()})
+
+
+_TESTISH_TARGET = re.compile(r"(?i)test|check|lint|unit|e2e|spec|integration|verify")
+
+
+def _make_protected(rules: dict, variables: dict) -> tuple:
+    """(targets, variables) behind the test, check and ci targets: their prerequisites that are test targets
+    themselves (``test: unit lint``; not ``build``, whose flags change in normal work), transitively, and the
+    variables their recipes reference."""
+    todo, targets, names = [t for t in DEFAULT_TARGETS if t in rules], [], []
+    while todo:
+        t = todo.pop()
+        if t in targets or t not in rules:
+            continue
+        targets.append(t)
+        prereqs, recipe = rules[t]
+        todo += [p for line in prereqs for p in line.split() if p in rules and _TESTISH_TARGET.search(p)]
+        names += [m.group(1) for line in recipe + prereqs for m in _MAKE_REF.finditer(line)]
+    return targets, sorted(n for n in set(names) if n in variables)
+
+
+def _tox_settings(text: Optional[str]) -> Optional[dict]:
+    """"[section] key" -> value for the test settings of a tox.ini text (``envlist`` of ``[tox]``, and
+    ``commands``, ``commands_pre`` and ``setenv`` of every ``[testenv*]`` section); None when it cannot be parsed."""
+    import configparser
+    parser = configparser.RawConfigParser(strict=False, interpolation=None)
+    try:
+        parser.read_string(text or "")
+    except configparser.Error:
+        return None
+    out = {}
+    for section in parser.sections():
+        if section == "tox":
+            keys = ("envlist", "env_list")
+        elif section == "testenv" or section.startswith("testenv:"):
+            keys = ("commands", "commands_pre", "setenv", "set_env")
+        else:
+            continue
+        for key in keys:
+            if parser.has_option(section, key):
+                out["[%s] %s" % (section, key)] = " ".join((parser.get(section, key) or "").split())
+    return out
+
+
+def default_check_changes(path: str, old: Optional[str], new: Optional[str]) -> list:
+    """What the change does to the usual test entry points of ``path`` with no .foreman.json: the ``test``,
+    ``check`` and ``lint`` scripts of a package.json (with their ``test:*`` family and the scripts they run), the
+    ``test``, ``check`` and ``ci`` targets of a Makefile (with the targets they depend on and the variables they
+    use), tox's ``envlist`` and its test environments' ``commands`` and ``setenv``. Only what exists at the base
+    counts: a new script is not a finding. ``new`` None means the file is gone. One description per change."""
+    name = path.rsplit("/", 1)[-1]
+    if old is None:
+        return []
+    if name == "package.json":
+        before, after = scripts_of(old), scripts_of(new)
+        if not isinstance(before, dict):
+            return []
+        after = after if isinstance(after, dict) else {}
+        return ["`scripts.%s` in %s" % (k, path) for k in _protected_scripts(before)
+                if new is None or after.get(k) != before[k]]
+    if MAKEFILE.search(path):
+        (rules, variables), (new_rules, new_variables) = _make_rules(old), _make_rules(new)
+        targets, names = _make_protected(rules, variables)
+        changed = ["the `%s` target of %s" % (t, path) for t in sorted(targets)
+                   if new is None or new_rules.get(t) != rules[t]]
+        return changed + ["`%s`, which the test targets use, in %s" % (n, path) for n in names
+                          if new is None or new_variables.get(n) != variables[n]]
+    if TOX_INI.search(path):
+        before, after = _tox_settings(old), _tox_settings(new)
+        if not before:
+            return []
+        after = after or {}
+        return ["`%s` in %s" % (k, path) for k in sorted(before) if new is None or after.get(k) != before[k]]
+    return []
+
+
+def default_check_findings(paths: Iterable[str], contents: Callable[[str], tuple], allowed_paths: Iterable[str] = (),
+                           version_of: Optional[Callable[[str], str]] = None, skip: Iterable[str] = ()) -> list:
+    """``check-changed`` findings for :func:`default_check_changes`, one per file; ``skip`` are files already
+    reported by the configured check."""
+    allowed_paths, skip, out = set(allowed_paths or ()), set(skip or ()), []
+    for p in sorted(set(paths)):
+        if p in skip or not (p.rsplit("/", 1)[-1] == "package.json" or MAKEFILE.search(p) or TOX_INI.search(p)):
+            continue
+        old, new = contents(p)
+        changes = default_check_changes(p, old, new)
+        if changes:
+            out.append(finding("check-changed", p, 0, "changes " + ", ".join(changes), allowed=p in allowed_paths,
+                               version=version_of(p) if version_of else ""))
+    return out
 
 
 # ─── Git ─────────────────────────────────────────────────────────────────────
@@ -777,11 +1098,12 @@ def _check_findings(repo: Repo, base_rev: Optional[str], check: Optional[str], p
     # A report the base's configuration points to is part of the gate: editing it (adding a suppression) is rigging.
     reports = [p for p in _config_sarif_paths(config_at(repo, base_rev)) if p not in protected and is_file(p)]
     protected += reports
-    if not check and not protected:
-        return []
-    return check_changed(check, paths, is_file, allowed_paths, protected,
-                         contents=lambda p: (repo.show(base_rev, p), new_text(p)), version_of=version_of,
-                         labels={p: "SARIF report that gates the change" for p in reports})
+    contents = lambda p: (repo.show(base_rev, p), new_text(p))
+    found = []
+    if check or protected:
+        found = check_changed(check, paths, is_file, allowed_paths, protected, contents=contents,
+                              version_of=version_of, labels={p: "SARIF report that gates the change" for p in reports})
+    return found + default_check_findings(paths, contents, allowed_paths, version_of, skip={f.file for f in found})
 
 
 # ─── SARIF sources ───────────────────────────────────────────────────────────
@@ -1046,6 +1368,21 @@ def scan_worktree(repo: Repo, staged_only: bool = False, include_untracked: bool
     return report
 
 
+def _same_header_path(rest: str) -> Optional[str]:
+    """The path of a ``diff --git a/X b/X`` header whose two sides are the same path (unquoted, or C-quoted as
+    ``"a/X" "b/X"``), else None. Split by length, not by a regex: lazy groups on a name full of " b/" are
+    quadratic."""
+    for quote in ("", '"'):
+        n = len(rest) - 2 * len(quote) * 2 - 5  # two prefixes "a/" "b/", one space, the quotes
+        if n <= 0 or n % 2:
+            continue
+        half = n // 2
+        a = rest[len(quote) + 2:len(quote) + 2 + half]
+        if rest == '%sa/%s%s %sb/%s%s' % (quote, a, quote, quote, a, quote):
+            return unquote_path('"%s"' % a) if quote or "\\" in a else a
+    return None
+
+
 def name_status_from_diff(diff: str) -> str:
     """``git diff --name-status`` rows (A, M, D, R100) built from the headers of a unified git diff, for a diff that
     comes without its name-status (``gh pr diff``)."""
@@ -1067,9 +1404,9 @@ def name_status_from_diff(diff: str) -> str:
         if text.startswith("diff --git "):
             close()
             cur, in_hunks = {"kind": "M", "old": None, "new": None}, False
-            m = re.match(r'^diff --git (?:"?a/(.+?)"?) (?:"?b/(.+?)"?)$', text)
-            if m and m.group(1) == m.group(2):
-                cur["old"] = cur["new"] = unquote_path('"%s"' % m.group(1)) if "\\" in m.group(1) else m.group(1)
+            same = _same_header_path(text[len("diff --git "):])
+            if same is not None:
+                cur["old"] = cur["new"] = same
             continue
         if cur is None or in_hunks:
             continue
@@ -1175,12 +1512,25 @@ def findings_from_diff(diff: str, name_status: str = "", check: Optional[str] = 
                    new_files=added_from_name_status(name_status), version_of=version_of, deadline=deadline)
     if base_is_file is not None:
         protected = [CONFIG_FILE] if base_is_file(CONFIG_FILE) else []
+
+        def contents(p):
+            old = base_text(p) if base_text else None
+            return old, apply_file_diff(old, per_file.get(p, ""))  # None (diff missing or not applying): changed
+
+        checked = []
         if check or protected:
-            def contents(p):
-                old = base_text(p) if base_text else None
-                return old, apply_file_diff(old, per_file.get(p, ""))
-            found += check_changed(check, paths, base_is_file, allowed_paths, protected, contents=contents,
-                                   version_of=version_of)
+            checked = check_changed(check, paths, base_is_file, allowed_paths, protected, contents=contents,
+                                    version_of=version_of)
+        gone = set(deleted)
+
+        def default_contents(p):
+            # The base text may be newer than the diff's own base (a remote verdict reads the base branch's tip):
+            # a diff that does not apply proves nothing about the scripts, so only a deletion counts then.
+            old, new = contents(p)
+            return (old, None) if p in gone else (old, new if new is not None else old)
+
+        found += checked + default_check_findings(paths, default_contents, allowed_paths, version_of,
+                                                  skip={f.file for f in checked})
     return found
 
 

@@ -119,12 +119,45 @@ class FileDiff:
 def _header_paths(line: str) -> tuple:
     """``diff --git a/x b/y`` → (x, y); only a fallback when no ---/+++ or rename lines follow."""
     rest = line[len("diff --git "):]
-    m = re.match(r'^(".*?"|\S+) (".*?"|\S+)$', rest)
-    if not m:
+    pair = _two_header_words(rest)
+    if pair is None:
         half = rest.split(" b/", 1)
         return (half[0][2:] if half[0].startswith("a/") else half[0]), (half[1] if len(half) > 1 else "")
-    a, b = detector.unquote_path(m.group(1)), detector.unquote_path(m.group(2))
+    a, b = detector.unquote_path(pair[0]), detector.unquote_path(pair[1])
     return (a[2:] if a.startswith("a/") else a), (b[2:] if b.startswith("b/") else b)
+
+
+def _two_header_words(rest: str) -> Optional[tuple]:
+    """``"x" "y"``, ``"x" y``, ``x "y"`` or ``x y`` (each a C-quoted string or a word with no space), in linear
+    time; None otherwise. A lazy regex for this is quadratic on a name full of quotes."""
+    if rest.startswith('"'):
+        end = _closing_quote(rest, 0)
+        if end < 0 or rest[end + 1:end + 2] != " ":
+            return None
+        first, second = rest[:end + 1], rest[end + 2:]
+    else:
+        first, space, second = rest.partition(" ")
+        if not first or not space:
+            return None
+    if second.startswith('"'):
+        if _closing_quote(second, 0) != len(second) - 1:
+            return None
+    elif not second or any(c.isspace() for c in second):
+        return None
+    return first, second
+
+
+def _closing_quote(text: str, start: int) -> int:
+    """Index of the quote that closes the C-quoted string opening at ``start``, or -1."""
+    i = start + 1
+    while i < len(text):
+        if text[i] == "\\":
+            i += 2
+            continue
+        if text[i] == '"':
+            return i
+        i += 1
+    return -1
 
 
 def split_diff(diff: str) -> list:
@@ -608,10 +641,11 @@ class Target:
 
 
 def slug_of(repo: Repo) -> str:
-    url = repo.try_git("remote", "get-url", "origin") or ""
-    m = re.search(r"[:/]([^/:\s]+)/([^/\s]+?)(?:\.git)?/?$", url)
-    if m:
-        return "%s/%s" % (m.group(1), m.group(2))
+    url = (repo.try_git("remote", "get-url", "origin") or "").rstrip("/")
+    url = url[:-4] if url.endswith(".git") else url
+    parts = re.split(r"[:/]", url)  # split, not a lazy search from every ":" or "/" (quadratic on a long value)
+    if len(parts) >= 3 and parts[-2] and parts[-1] and not re.search(r"\s", parts[-2] + parts[-1]):
+        return "%s/%s" % (parts[-2], parts[-1])
     return "local/%s" % os.path.basename(repo.root.rstrip("/\\"))
 
 
@@ -839,8 +873,10 @@ def _final_verdict(record: dict, det_blocked: bool, complete: bool) -> str:
         return "BLOCKED"
     from .verdicts import INCOMPLETE
     if kept or record.get("dropped_unverified") or not complete \
-            or record["deterministic"].get("verdict") == INCOMPLETE:
-        # An unverifiable finding is not a pass either: the diff may have steered the model into bad quotes.
+            or record["deterministic"].get("verdict") == INCOMPLETE \
+            or str(record.get("model_verdict") or "").strip().upper() == "BLOCK":
+        # An unverifiable finding is not a pass either: the diff may have steered the model into bad quotes. Nor is
+        # a model that asked to block and gave nothing that can be checked.
         return "PASS WITH NOTES"
     return "PASS"
 
@@ -1054,8 +1090,9 @@ def format_review(r: dict) -> str:
         if r.get("summary"):
             lines.append("Model summary: %s" % r["summary"])
         mv = r.get("model_verdict", "")
-        if mv == "BLOCK" and r["verdict"] != "BLOCKED":
-            lines.append("The model's own verdict was BLOCK, but none of its blocking findings could be verified.")
+        if str(mv).strip().upper() == "BLOCK" and r["verdict"] != "BLOCKED":
+            lines.append("The model asked to block without verifiable evidence (its own verdict was BLOCK, and no "
+                         "BLOCKING finding quoted the diff).")
     lines.append(ADVISORY)
     if r.get("saved"):
         lines.append("Saved: %s" % r["saved"])

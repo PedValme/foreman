@@ -19,8 +19,10 @@ Only results in files the change touches (or with ``baselineState`` new or updat
 Suppressed results (an accepted or status-less suppression) and results whose ``baselineState`` is ``absent`` never
 block and are not listed.
 
-``collect`` never raises: anything it cannot read becomes one non-blocking "could not read SARIF" note. ``parse_file``
-raises ``SarifError`` for the caller that asked for the file explicitly (the CLI), so CI does not pass silently.
+``collect`` never raises (but for ``GitTimeout``, the hook's time budget). A file it cannot read becomes one
+non-blocking "could not read SARIF" note, or, with ``unreadable="error"`` (what the detector always passes, for a
+report named in .foreman.json and for ``--sarif``), an entry of ``errors``: the caller then refuses a clean verdict
+(the hooks ask for approval, ``/foreman status`` says so, CI exits 2). ``parse_file`` raises ``SarifError``.
 """
 from __future__ import annotations
 

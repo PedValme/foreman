@@ -149,7 +149,15 @@ class EvidenceCheck(ReviewCase):
         self.assertEqual(r["verdict"], "PASS WITH NOTES")  # an unverifiable claim never blocks, never passes clean
         text = review.format_review(r)
         self.assertIn("Dropped: 4 finding(s)", text)
-        self.assertIn("none of its blocking findings could be verified", text)
+        self.assertIn("The model asked to block without verifiable evidence", text)
+
+    def test_a_block_verdict_without_findings_is_not_a_pass(self):
+        self.loosen_test()
+        r = self.review(FakeCtx(FakeLlm(parsed=answer([], verdict="BLOCK"))))
+        self.assertEqual(r["findings"], [])
+        self.assertEqual(r["dropped_unverified"], 0)
+        self.assertEqual(r["verdict"], "PASS WITH NOTES")
+        self.assertIn("The model asked to block without verifiable evidence", review.format_review(r))
 
     def test_whitespace_and_prefix_tolerant(self):
         files = review.split_diff("diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1,2 +1,2 @@\n"
@@ -341,9 +349,10 @@ class PinnedRepository(ReviewCase):
             self.review(FakeCtx(FakeLlm(parsed=answer([finding]))), args="6", fresh=True)  # replaces the first
         for root in (self.root, "/private" + self.root.replace("\\", "/")):
             self.assertEqual(review.review_path("Acme/Widgets", "pr", "6", root), r["saved"])
-        found = board.saved_review("Acme/Widgets", 6)
+        found = board.saved_review("Acme/Widgets", 6, "b" * 40)
         self.assertEqual(len(found), 1)
         self.assertIn("Assertion loosened", found[0])
+        self.assertEqual(board.saved_review("Acme/Widgets", 6, "d" * 40), [])  # a review of another commit is stale
 
     def test_host_default_model_is_not_named(self):
         self.loosen_test()

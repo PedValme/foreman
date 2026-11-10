@@ -383,7 +383,7 @@ class PullRequestVerdicts(BoardCase):
         os.makedirs(reviews)
         from foreman import review
         with open(review.review_path("acme/widgets", "pr", "7"), "w", encoding="utf-8") as fh:
-            json.dump({"schema": review.SCHEMA_VERSION,
+            json.dump({"schema": review.SCHEMA_VERSION, "head": OID,
                        "findings": [{"severity": "high", "file": "app.py", "line": 4,
                                      "title": "ask @someone about the empty catch"}, "plain finding"]}, fh)
         board.bind(FakeCtx(choice="close"))
@@ -397,12 +397,65 @@ class PullRequestVerdicts(BoardCase):
         self.assertIn("- **test-skipped** `tests/test_x.py:2`: test skipped or isolated.", body)
         self.assertIn("  Fix: Remove the marker", body)
         self.assertIn("#### Model review", body)
-        self.assertIn("- **high** `app.py:4` ask `@someone` about the empty catch", body)
+        self.assertIn("- **high** `app.py:4` ask @\u200bsomeone about the empty catch", body)
         self.assertIn("- plain finding", body)
         self.assertIn("#### Note from the reviewer\n\nplease fix the tests", body)
         self.assertIn(body, out)  # the exact text is shown in the chat
         self.assertIn("closed PR #7", out)
         self.assertEqual(os.listdir(os.path.join(grants.store_dir(), "outbox")), [])
+
+    def test_hostile_file_names_cannot_mention_link_or_break_out(self):
+        # git C-quotes a name with line breaks; Foreman decodes it back to the real name.
+        name = "tests/test_a\\n\\n@victim x #12 https://evil.example/p.py"
+        diff = ('diff --git "a/%s" "b/%s"\nnew file mode 100644\n--- /dev/null\n+++ "b/%s"\n'
+                "@@ -0,0 +1 @@\n+%s\n" % (name, name, name, SKIP))
+        self.gh.add(["pr", "view", "7"], pr_view(7))
+        self.gh.add(["pr", "diff", "7"], diff)
+        self.run_cmd("reject 7")
+        body = board._CTX.bodies[0]
+        findings = [l for l in body.splitlines() if l.startswith("- **")]
+        self.assertEqual(len(findings), 1)  # the file name stayed on its line
+        self.assertNotRegex(body, r"(?<![\w])@victim")
+        self.assertIn("@\u200bvictim", findings[0])
+        self.assertIn("#\u200b12", findings[0])
+        self.assertIn("https:\u200b//evil", findings[0])
+
+    def test_no_mentions_keeps_code_spans_closed(self):
+        self.assertEqual(board._no_mentions("`cc @octocat` and @org/team, GH-4, #9, mail a@b.io"),
+                         "`cc @\u200boctocat` and @\u200borg/team, GH\u200b-4, #\u200b9, mail a@\u200bb.io")
+        self.assertEqual(board._no_mentions("o/r#12 caf\u00e9@x _https://e.io_ &#64;u [a](//e) <b>"),
+                         "o/r#\u200b12 caf\u00e9@\u200bx _https:\u200b//e.io_ &amp;#\u200b64;u \\[a\\](//e) &lt;b&gt;")
+        self.assertEqual(board._no_mentions("a/[b] & @c", code=True), "a/[b] & @\u200bc")
+        self.assertEqual(board._no_mentions("a\r\nb\x00c\u2028d"), "a b c d")
+        self.assertEqual(board._no_mentions("see www.x.io and http://y"), "see www\u200b.x.io and http:\u200b//y")
+
+    def test_a_stale_saved_review_is_not_posted_and_a_branch_review_is(self):
+        self.blocked_pr()
+        from foreman import review
+        os.makedirs(os.path.join(grants.store_dir(), "reviews"))
+
+        def save(kind, ref, head, text, root=""):
+            with open(review.review_path("acme/widgets", kind, ref, root), "w", encoding="utf-8") as fh:
+                json.dump({"schema": review.SCHEMA_VERSION, "head": head, "findings": [text]}, fh)
+        save("pr", "7", "e" * 40, "from an older commit")
+        self.run_cmd("reject 7")
+        self.assertNotIn("older commit", board._CTX.bodies[0])
+        self.assertNotIn("#### Model review", board._CTX.bodies[0])
+        save("branch", "feature", OID, "reviewed on the branch", root=detector.find_repo(self.root))
+        board.bind(FakeCtx())
+        self.run_cmd("reject 7")
+        self.assertIn("- reviewed on the branch", board._CTX.bodies[0])
+
+    def test_a_merge_moved_to_the_background_is_not_reported_failed(self):
+        self.gh.add(["pr", "view", "7"], pr_view(7))
+        self.gh.add(["pr", "diff", "7"], clean_diff())
+        board.bind(FakeCtx(result={"output": "", "exit_code": None, "error": None,
+                                   "status": "yielded_to_background", "session_id": "proc_1"}))
+        out = self.run_cmd("merge 7 --yes")
+        self.assertNotIn("failed", out)
+        self.assertNotIn("nothing was changed", out)
+        self.assertIn("still running", out)
+        self.assertIn("`/foreman verdict 7` shows MERGED", out)
 
     def test_reject_of_a_mergeable_pull_request_needs_a_note(self):
         self.gh.add(["pr", "view", "7"], pr_view(7))
@@ -490,10 +543,13 @@ class StoreGuard(BoardCase):
         self.assertEqual(gate.on_pre_tool_call(tool_name="patch", args={"mode": "patch", "patch": patch})["action"],
                          "block")
 
-    def test_reject_s_own_comment_command_is_not_blocked(self):
+    def test_the_agent_cannot_post_an_outbox_file_either(self):
+        # /foreman reject's own `gh pr comment` runs through ctx.dispatch_tool, which does not fire pre_tool_call
+        # (tools.registry.dispatch calls the handler directly), so it needs no exemption; the same command from the
+        # agent names Foreman's store and is refused.
         path = os.path.join(grants.store_dir(), "outbox", "reject-7-abc_12.md").replace("\\", "/")
-        self.assertIsNone(gate.on_pre_tool_call(tool_name="terminal",
-                                                args={"command": 'gh pr comment 7 --body-file "%s"' % path}))
+        d = gate.on_pre_tool_call(tool_name="terminal", args={"command": 'gh pr comment 7 --body-file "%s"' % path})
+        self.assertEqual(d and d["action"], "block")
 
     def test_an_ordinary_reviews_folder_is_not_protected(self):
         d = gate.on_pre_tool_call(tool_name="write_file",

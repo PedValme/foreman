@@ -17,6 +17,22 @@ GHP = "ghp_"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+class _Both:
+    """Two context managers entered as one."""
+
+    def __init__(self, first, second):
+        self.first, self.second = first, second
+
+    def __enter__(self):
+        self.first.__enter__()
+        self.second.__enter__()
+        return self
+
+    def __exit__(self, *exc):
+        self.second.__exit__(*exc)
+        return self.first.__exit__(*exc)
+
+
 def terminal(command, workdir=None, **extra):
     args = {"command": command}
     if workdir:
@@ -306,16 +322,46 @@ class TerminalGate(GitRepoCase):
         self.assertEqual(d["action"], "block")
         self.assertIn("secret-history", d["message"])
 
-    def test_pr_merge_always_asks_a_person(self):
+    def test_pr_merge_by_the_agent_is_always_refused(self):
+        # Never `approve`: an "always" or session answer, or YOLO, would let every later merge through.
         self.git("checkout", "-q", "-b", "feature")
         self.write("app.py", "x = 5\n")
         self.commit("change")
-        d = terminal("gh pr merge --squash", self.root)
+        for command, n in (("gh pr merge --squash", "<n>"), ("gh pr merge 42", "42"),
+                           ("gh pr merge -t title --squash #42", "42"),
+                           ("gh -R acme/w pr merge https://github.com/acme/w/pull/9 --auto", "9"),
+                           ("bash -c 'gh pr merge 42'", "42"), ("git push && gh pr merge 42", "42"),
+                           ('pwsh -Command "gh pr merge 42"', "42"), ('pwsh -NoProfile -Command "cd x; gh pr merge 42"',
+                                                                       "42"),
+                           ('cmd /c "gh pr merge 42"', "42"), ('cmd /s /c "gh pr merge 42"', "42"),
+                           ("timeout 60 gh pr merge 42", "42"), ("timeout -k 5 60 gh pr merge 42", "42"),
+                           ("nice -n 5 gh pr merge 42", "42"), ("sudo -u me gh pr merge 42", "42"),
+                           ("env -i PATH=/bin gh pr merge 42", "42"), ("echo 42 | xargs -n 1 gh pr merge", "<n>"),
+                           ("gh pr -R o/r merge 42", "42"), ("gh pr --repo o/r merge 42", "42"),
+                           ("eval gh pr merge 42", "42"), ("eval 'gh pr merge 42'", "42"),
+                           ("some-wrapper --flag gh pr merge 42", "42")):
+            d = terminal(command, self.root)
+            self.assertEqual(d, {"action": "block", "message": "Merging is the user's decision. Ask them to run "
+                                                               "`/foreman merge %s`." % n}, command)
+        self.assertNotIn("rule_key", terminal("gh pr merge 42"))  # no workdir, no repository: still refused
+
+    def test_push_of_several_branches_is_approved_only_for_those_commits(self):
+        d = terminal("git push --all origin", self.root)
         self.assertEqual(d["action"], "approve")
-        self.assertIn("no blockers", d["message"])
-        d = terminal("gh pr merge 42", self.root)
-        self.assertEqual(d["action"], "approve")
-        self.assertIn("cannot inspect", d["message"])
+        self.assertEqual(terminal("git push --all origin", self.root)["rule_key"], d["rule_key"])
+        self.git("checkout", "-q", "-b", "other")
+        self.write("app.py", "x = 6\n")
+        self.commit("other branch moves")
+        self.git("checkout", "-q", "main")
+        moved = terminal("git push --all origin", self.root)
+        self.assertEqual(moved["message"], d["message"])
+        self.assertNotEqual(moved["rule_key"], d["rule_key"])  # "always" covered the earlier state only
+        two = terminal("git push origin main other", self.root)
+        self.git("checkout", "-q", "other")
+        self.write("app.py", "x = 7\n")
+        self.commit("again")
+        self.git("checkout", "-q", "main")
+        self.assertNotEqual(terminal("git push origin main other", self.root)["rule_key"], two["rule_key"])
 
     def test_pr_create_blocks_on_the_branch(self):
         self.git("checkout", "-q", "-b", "feature")
@@ -375,16 +421,18 @@ class SessionDirectory(GitRepoCase):
             fh.write(SKIP + "\n")
 
     def fake_hermes(self, configured, recorded=None, session=""):
+        """Hermes's modules, and the plugin context with the public ``ctx.session_cwd()``."""
         runtime = types.ModuleType("agent.runtime_cwd")
         runtime.resolve_agent_cwd = lambda: configured
-        runtime.scoped_session_cwd = lambda: session
         constants = types.ModuleType("hermes_constants")
         constants.get_hermes_home = lambda: self.hermes
         terminal_tool = types.ModuleType("tools.terminal_tool")
         terminal_tool.get_session_cwd = lambda key: recorded if key == "s1" else None
-        return mock.patch.dict(sys.modules, {"agent": types.ModuleType("agent"), "agent.runtime_cwd": runtime,
-                                             "hermes_constants": constants, "tools": types.ModuleType("tools"),
-                                             "tools.terminal_tool": terminal_tool})
+        modules = mock.patch.dict(sys.modules, {"agent": types.ModuleType("agent"), "agent.runtime_cwd": runtime,
+                                                "hermes_constants": constants, "tools": types.ModuleType("tools"),
+                                                "tools.terminal_tool": terminal_tool})
+        ctx = mock.patch.object(gate, "_CTX", types.SimpleNamespace(session_cwd=lambda: session))
+        return _Both(modules, ctx)
 
     def norm(self, p):
         return os.path.normpath(p)
@@ -452,6 +500,15 @@ class SessionDirectory(GitRepoCase):
         with self.fake_hermes(self.home, recorded=self.root), mock.patch.object(gate.os, "getcwd", return_value=other):
             out = commands.handle_slash("status", session_id="s1", platform="cli")
         self.assertIn("Repository: %s\n" % self.real(self.root), out)
+
+    def test_a_relative_path_is_never_resolved_against_the_gateway_directory(self):
+        parent = os.path.dirname(self.root)
+        relative = os.path.basename(self.root)
+        missing = os.path.join(self.tmp, "no-such-dir")
+        with self.fake_hermes(missing), mock.patch.object(gate.os, "getcwd", return_value=parent):
+            self.assertEqual(commands.handle_slash("status " + relative, platform="telegram"), gate.NO_REPOSITORY_HERE)
+        with self.fake_hermes(missing), mock.patch.object(gate.os, "getcwd", return_value=parent):
+            self.assertIn("Foreman: CLEAN", commands.handle_slash("status " + relative, platform="cli"))
 
     def test_an_explicit_path_is_accepted(self):
         with self.fake_hermes(self.home), mock.patch.object(gate.os, "getcwd", return_value=self.home):
@@ -569,6 +626,155 @@ class SlashCommandAndTool(GitRepoCase):
         self.assertEqual(data["blockers"][0]["rule"], "test-skipped")
         data = json.loads(commands.foreman_check_tool({"path": os.path.join(self.tmp)}))
         self.assertEqual(data["verdict"], "NO_REPOSITORY")
+
+
+class HookBypasses(GitRepoCase):
+    """Good-faith shortcuts around the repository's hooks."""
+
+    def setUp(self):
+        super().setUp()
+        self.write("app.py", "x = 1\n")
+        self.commit("base")
+        self.write("app.py", "x = 2\n")
+        self.git("add", "-A")
+
+    def test_hook_disabling_variables_in_front_of_a_commit_or_push(self):
+        for command in ("HUSKY=0 git commit -m x", "SKIP=flake8,mypy git commit -m x",
+                        "PRE_COMMIT_ALLOW_NO_CONFIG=1 git commit -m x", "env HUSKY=0 git commit -m x",
+                        "HUSKY_SKIP_HOOKS=1 git push", "LEFTHOOK=0 git commit -m x", "FOO=1 SKIP=lint git commit -m x",
+                        "GIT_CONFIG_PARAMETERS=\"'core.hooksPath=/dev/null'\" git commit -m x"):
+            d = terminal(command, self.root)
+            self.assertEqual(d and d["action"], "block", command)
+            self.assertIn("skips the repository's git hooks", d["message"], command)
+        for command in ("HUSKY=1 git commit -m x", "LANG=C git commit -m x", "SKIP= git commit -m x"):
+            self.assertIsNone(terminal(command, self.root), command)
+        d = terminal("HUSKY=0 bash -c 'git commit -m x'", self.root)
+        self.assertIn("skips the repository's git hooks", d["message"])
+
+    def test_exporting_a_hook_disabling_variable_is_refused(self):
+        # The terminal keeps exported variables between calls: every later commit would skip the hooks.
+        for command in ("export HUSKY=0", "export SKIP=flake8", "export LEFTHOOK=0 && npm test", "$env:HUSKY = 0",
+                        "$env:SKIP='lint'", "setx HUSKY 0", "set PRE_COMMIT_ALLOW_NO_CONFIG=1"):
+            d = terminal(command, self.root)
+            self.assertEqual(d and d["action"], "block", command)
+        for command in ("export HUSKY=1", "export PATH=$PATH:/x", "echo SKIP the intro", "export SKIP_TESTS_DOC=1",
+                        "grep -n 'git commit' notes.md", "man git commit"):
+            self.assertIsNone(terminal(command, self.root), command)
+
+    def test_wrapped_commits_are_still_inspected(self):
+        self.write("tests/test_app.py", SKIP + "\n")
+        self.git("add", "-A")
+        for command in ("timeout 60 git commit -m x", 'pwsh -Command "git commit -m x"', 'cmd /c "git commit -m x"',
+                        "nice -n 5 git commit -m x"):
+            d = terminal(command, self.root)
+            self.assertEqual(d and d["action"], "block", command)
+            self.assertIn("test-skipped", d["message"], command)
+
+    def test_git_config_core_hooks_path_is_refused(self):
+        for command in ("git config core.hooksPath .nohooks", "git config --unset core.hooksPath",
+                        "git config core.hooksPath /dev/null", "git config --local core.hookspath x",
+                        "git -C . config --global core.hooksPath ''", "git config unset core.hooksPath",
+                        "git config set core.hooksPath x"):
+            d = terminal(command, self.root)
+            self.assertEqual(d and d["action"], "block", command)
+            self.assertIn("core.hooksPath", d["message"], command)
+            self.assertNotIn("rule_key", d)
+        for command in ("git config core.hooksPath", "git config --get core.hooksPath", "git config user.name x"):
+            self.assertIsNone(terminal(command, self.root), command)
+
+
+class Performance(GitRepoCase):
+    """The hook runs on every tool call: an ordinary write costs no git, and no input makes it super-linear."""
+
+    def setUp(self):
+        super().setUp()
+        self.write("app.py", "x = 1\n")
+        self.commit("base")
+
+    def count_git(self):
+        calls = []
+        real = detector.subprocess.run
+
+        def counting(args, *a, **k):
+            if args and args[0] == "git":
+                calls.append(list(args))
+            return real(args, *a, **k)
+        return calls, mock.patch.object(detector.subprocess, "run", side_effect=counting)
+
+    def test_an_ordinary_write_runs_no_git(self):
+        calls, patch = self.count_git()
+        with patch:
+            for i in range(5):
+                self.assertIsNone(gate.on_pre_tool_call(tool_name="write_file", args={
+                    "path": os.path.join(self.root, "app.py"), "content": "x = %d\n" % i}))
+            self.assertIsNone(gate.on_pre_tool_call(tool_name="patch", args={
+                "mode": "patch", "patch": "*** Begin Patch\n*** Update File: %s\n@@\n-x = 1\n+x = 2\n*** End Patch\n"
+                % os.path.join(self.root, "app.py")}))
+        self.assertEqual(calls, [])
+
+    def test_a_config_that_names_reports_is_resolved_once_per_head(self):
+        self.write(detector.CONFIG_FILE, json.dumps({"sarif": ["reports/r.json"]}))
+        self.commit("config")
+        calls, patch = self.count_git()
+        target = os.path.join(self.root, "reports", "r.json")
+        with patch:
+            first = gate.on_pre_tool_call(tool_name="write_file", args={"path": target, "content": "{}"})
+            n = len(calls)
+            again = gate.on_pre_tool_call(tool_name="write_file", args={"path": target, "content": "{}"})
+        self.assertEqual(first["action"], "block")
+        self.assertEqual(again["action"], "block")
+        self.assertLess(len(calls) - n, n)  # the base is not resolved again for the same HEAD
+        self.write("app.py", "x = 2\n")
+        self.commit("move HEAD")
+        self.write(detector.CONFIG_FILE, json.dumps({"sarif": ["reports/r.json", "reports/s.json"]}))
+        self.commit("another report")
+        d = gate.on_pre_tool_call(tool_name="write_file", args={"path": os.path.join(self.root, "reports", "s.json"),
+                                                               "content": "{}"})
+        self.assertEqual(d and d["action"], "block")  # a new HEAD is resolved again
+
+    def test_a_long_command_naming_git_without_a_verb_is_fast(self):
+        heredoc = "cat > notes.txt <<'EOF'\n" + ("use git here\n" * 23000) + "EOF"  # about 300 KB
+        self.assertGreater(len(heredoc), 290_000)
+        start = time.perf_counter()
+        self.assertIsNone(terminal(heredoc, self.root))
+        self.assertLess(time.perf_counter() - start, 3.0)  # was quadratic: 106 s for 253 KB
+
+    def test_adversarial_inputs_stay_linear(self):
+        """Every regex applied to whole commands, diffs, diff lines or messages, on 300 KB inputs built to make a
+        backtracking pattern quadratic. Each must finish well inside the hook's budget."""
+        from foreman import review
+        n = 300_000
+        cases = {
+            "command of >": lambda: gate.parse_actions("git commit " + ">" * n, os.sep),
+            "command of gh pr": lambda: gate.on_pre_tool_call(tool_name="terminal", args={
+                "command": "gh pr " * (n // 6), "workdir": self.root}),
+            "command of quotes": lambda: gate.on_pre_tool_call(tool_name="terminal", args={
+                "command": "git commit -m '" + "'\"" * (n // 2), "workdir": self.root}),
+            "unknown runner of gh words": lambda: gate.parse_actions("runner " + "gh pr view " * (n // 11), os.sep),
+            "eval of quoted git words": lambda: gate.parse_actions("eval " + "'git log push' " * (n // 15), os.sep),
+            "exports of hook names": lambda: gate.on_pre_tool_call(tool_name="terminal", args={
+                "command": "export SKIP " * (n // 12)}),
+            "makefile of continuations": lambda: detector.default_check_changes(
+                "Makefile", "test:\n\tx \\\n" + "  y \\\n" * (n // 6), "test:\n\tz\n"),
+            "yaml value then spaces": lambda: detector.has_secret("+token: abcdefghij" + " " * n + "x", "c.yaml"),
+            "dotted run": lambda: detector.has_secret("+" + "a." * (n // 2) + "x", "app.py"),
+            "url-ish run": lambda: detector.has_secret("+" + "a-" * (n // 2) + "://u:p", "app.py"),
+            "jwt-ish run": lambda: detector.has_secret("+" + "eyJ-" * (n // 4) + "x", "app.py"),
+            "jwt-ish segments": lambda: detector.has_secret("+" + "eyJaaaaaaaaaaaa." * (n // 16), "app.py"),
+            "message of newlines": lambda: detector.allowed_paths_in(detector.MARKER + " " + "\n" * n),
+            "diff header of b/": lambda: detector.name_status_from_diff("diff --git a/" + "x b/" * (n // 4) + "\n"),
+            "diff header of quotes": lambda: review.split_diff("diff --git " + '"a" ' * (n // 4) + "x\n"),
+            "makefile line": lambda: detector.default_check_changes("Makefile", "test:\n\techo\n",
+                                                                     "a" + " " * n + "x\n"),
+            "long added line": lambda: detector.detect("+++ b/tests/test_a.py\n@@ -0,0 +1 @@\n+" + "x" * n + "\n"),
+            "test renames": lambda: detector.detect("+++ b/tests/test_a.py\n@@ -1,%d +1,%d @@\n%s%s" % (
+                n // 40, n // 40, "".join("-def test_%d():\n" % i for i in range(n // 40)),
+                "".join("+def _test_%d():\n" % i for i in range(n // 40)))),
+        }
+        for name, fn in cases.items():
+            start = time.perf_counter()
+            fn()
+            self.assertLess(time.perf_counter() - start, 3.0, name)
 
 
 class Registration(unittest.TestCase):

@@ -179,6 +179,8 @@ class SkipMarkers(unittest.TestCase):
         "@pytest.mark." + "skip" + "if(True, reason='x')", "@unittest." + "skip" + "If(True, 'x')",
         "it." + "skip" + "If(true)('x', f)", "@pytest.mark." + "skip" + "if(1, reason='x')",
         "@unittest." + "skip" + "Unless(False, 'x')",
+        "raise unittest." + "SkipTest('later')", "raise " + "SkipTest", "    raise unittest.case." + "SkipTest('x')",
+        "raise pytest." + "skip.Exception('x')",
     )
     CONDITIONAL = ("@pytest.mark." + "skipif(sys.platform == 'win32', reason='posix')",
                    "@unittest." + "skipIf(IS_WINDOWS, 'x')", "@unittest." + "skipUnless(HAS_GPU, 'gpu')",
@@ -301,6 +303,156 @@ class Fingerprints(unittest.TestCase):
         moved1 = detector.detect("", renamed=[("tests/test_x.py", "archive/x.py")], version_of=lambda p: "aaa")[0]
         moved2 = detector.detect("", renamed=[("tests/test_x.py", "archive/x.py")], version_of=lambda p: "bbb")[0]
         self.assertNotEqual(moved1.fingerprint, moved2.fingerprint)
+
+
+def change(path, removed, added, context=()):
+    """A one-hunk diff of ``path`` removing ``removed`` lines and adding ``added`` ones after ``context``."""
+    body = "".join(" " + l + "\n" for l in context) + "".join("-" + l + "\n" for l in removed) \
+        + "".join("+" + l + "\n" for l in added)
+    return "--- a/%s\n+++ b/%s\n@@ -1,%d +1,%d @@\n%s" % (path, path, len(context) + len(removed),
+                                                       len(context) + len(added), body)
+
+
+class RenamedTests(unittest.TestCase):
+    """A test renamed so its runner no longer collects it is a skipped test."""
+    DEF = "def " + "test_adds(self):"
+
+    def rules(self, diff):
+        return [(f.rule, f.line) for f in detector.detect(diff)]
+
+    def test_python_go_and_js_renames(self):
+        for prefix in ("_", "x", "disabled_", "skip_"):
+            diff = change("tests/test_calc.py", ["    " + self.DEF], ["    def " + prefix + "test_adds(self):"],
+                          context=["class T:"])
+            found = detector.detect(diff)
+            self.assertEqual([(f.rule, f.line) for f in found], [("test-skipped", 2)], prefix)
+            self.assertIn("renamed from `test_adds`", found[0].message)
+        go = change("pkg/calc_test.go", ["func " + "TestAdd(t *testing.T) {"], ["func " + "testAdd(t *testing.T) {"])
+        self.assertEqual(self.rules(go), [("test-skipped", 1)])
+        go2 = change("pkg/calc_test.go", ["func " + "TestAdd(t *testing.T) {"], ["func _" + "TestAdd(t *testing.T) {"])
+        self.assertEqual(self.rules(go2), [("test-skipped", 1)])
+        js = change("src/calc.test.js", ["it" + "('adds', () => {"], ["it" + ".todo('adds', () => {"])
+        self.assertEqual(self.rules(js), [("test-skipped", 1)])
+
+    def test_what_is_not_a_disabling_rename(self):
+        renamed_still_collected = change("tests/test_calc.py", [self.DEF], ["def " + "test_adds_numbers(self):"])
+        self.assertEqual(self.rules(renamed_still_collected), [])
+        moved = change("tests/test_calc.py", [self.DEF], ["def " + "_test_adds_helper(self):", self.DEF])
+        self.assertEqual(self.rules(moved), [])  # the test is still there, under its own name
+        outside_tests = change("app/calc.py", ["def " + "test_adds():"], ["def " + "_test_adds():"])
+        self.assertEqual(self.rules(outside_tests), [])
+        concurrent = change("src/calc.test.js", ["it" + "('adds', () => {"], ["it" + ".concurrent('adds', () => {"])
+        self.assertEqual(self.rules(concurrent), [])
+        marker = change("src/calc.test.js", ["it" + "('adds', () => {"], ["x" + "it('adds', () => {"])
+        self.assertEqual(self.rules(marker), [("test-skipped", 1)])  # one finding, not two
+        helper = change("tests/test_calc.py", ["def " + "test_data():"], ["def make_" + "test_data():"])
+        self.assertEqual(self.rules(helper), [])  # a helper, not a switched-off test
+        table = change("src/calc.test.js", ["it" + "('adds', () => {"], ["check('adds', () => {"])
+        self.assertEqual(self.rules(table), [])
+
+    def test_a_test_class_renamed_out_of_collection(self):
+        diff = change("tests/test_calc.py", ["class " + "TestCalc(unittest.TestCase):"],
+                      ["class _" + "TestCalc(unittest.TestCase):"])
+        self.assertEqual(self.rules(diff), [("test-skipped", 1)])
+
+
+class DefaultCheckProtection(unittest.TestCase):
+    """With no .foreman.json, the usual test entry points are still protected."""
+
+    def test_package_json_scripts(self):
+        base = json.dumps({"scripts": {"test": "jest", "build": "tsc"}})
+        f = lambda new: detector.default_check_changes("package.json", base, json.dumps(new))
+        self.assertEqual(f({"scripts": {"test": "jest --passWithNoTests", "build": "tsc"}}),
+                         ["`scripts.test` in package.json"])
+        self.assertEqual(f({"scripts": {"build": "tsc"}}), ["`scripts.test` in package.json"])  # removed
+        self.assertEqual(f({"scripts": {"test": "jest", "build": "vite build"}}), [])
+        self.assertEqual(f({"scripts": {"test": "jest", "build": "tsc", "lint": "true"}}), [])  # new: not a finding
+        self.assertEqual(detector.default_check_changes("web/package.json", base, "{broken"),
+                         ["`scripts.test` in web/package.json"])
+
+    def test_what_the_entry_points_delegate_to(self):
+        base = json.dumps({"scripts": {"test": "npm run test:unit && yarn e2e", "test:unit": "jest", "e2e": "playwright",
+                                       "build": "tsc", "lint": "eslint ."}})
+        f = lambda **changes: detector.default_check_changes(
+            "package.json", base, json.dumps({"scripts": dict(json.loads(base)["scripts"], **changes)}))
+        self.assertEqual(f(**{"test:unit": "jest -t nothing"}), ["`scripts.test:unit` in package.json"])
+        self.assertEqual(f(e2e="true"), ["`scripts.e2e` in package.json"])
+        self.assertEqual(f(build="vite build"), [])
+        make = "PYTEST_ARGS = -q\nCC = gcc\n\ntest: unit\n\tpytest $(PYTEST_ARGS)\n\nunit:\n\tpytest tests/unit\n"
+        g = lambda new: detector.default_check_changes("Makefile", make, new)
+        self.assertEqual(g(make.replace("-q", "-q -k nothing")),
+                         ["`PYTEST_ARGS`, which the test targets use, in Makefile"])
+        self.assertEqual(g(make.replace("tests/unit", "tests/none")), ["the `unit` target of Makefile"])
+        self.assertEqual(g(make.replace("CC = gcc", "CC = clang")), [])
+        cont = "test:\n\tpytest \\\n  --cov=x \\\n  -q\n\techo done\n"
+        self.assertEqual(detector.default_check_changes("Makefile", cont, cont.replace("echo done", "exit 0")),
+                         ["the `test` target of Makefile"])
+        cond = "test:\nifeq ($(CI),1)\n\tpytest --ci\nelse\n\tpytest\nendif\n"
+        self.assertEqual(detector.default_check_changes("Makefile", cond, cond.replace("\tpytest\n", "\ttrue\n")),
+                         ["the `test` target of Makefile"])
+        tox = "[tox]\nenvlist = py, lint\n\n[testenv]\nsetenv = PYTEST_ADDOPTS=-q\ncommands = pytest\n"
+        h = lambda new: detector.default_check_changes("tox.ini", tox, new)
+        self.assertEqual(h(tox.replace("py, lint", "py")), ["`[tox] envlist` in tox.ini"])
+        self.assertEqual(h(tox.replace("-q", "-k nothing")), ["`[testenv] setenv` in tox.ini"])
+
+    def test_a_remote_diff_that_does_not_apply_is_not_a_finding(self):
+        # The base text is the base branch's tip, newer than the diff's base: a dependency bump does not apply.
+        base = '{\n  "scripts": {"test": "jest"},\n  "dependencies": {"a": "3"}\n}\n'
+        bump = ("diff --git a/package.json b/package.json\n--- a/package.json\n+++ b/package.json\n"
+                "@@ -1,4 +1,4 @@\n {\n   \"scripts\": {\"test\": \"jest\"},\n-  \"dependencies\": {\"a\": \"1\"}\n"
+                "+  \"dependencies\": {\"a\": \"2\"}\n }\n")
+        kw = dict(base_is_file=lambda p: p == "package.json", base_text=lambda p: base)
+        self.assertEqual(detector.findings_from_diff(bump, **kw), [])
+        deleted = ("diff --git a/package.json b/package.json\ndeleted file mode 100644\n--- a/package.json\n"
+                   "+++ /dev/null\n@@ -1,4 +0,0 @@\n-{\n-  \"scripts\": {\"test\": \"jest\"},\n"
+                   "-  \"dependencies\": {\"a\": \"1\"}\n-}\n")
+        self.assertEqual([f.rule for f in detector.findings_from_diff(deleted, **kw)], ["check-changed"])
+
+    def test_makefile_targets(self):
+        base = "build:\n\tcc x.c\n\ntest check: build\n\tpytest -q\n\nci:\n\tmake test\n"
+        f = lambda new: detector.default_check_changes("Makefile", base, new)
+        self.assertEqual(f(base.replace("pytest -q", "true")),
+                         ["the `check` target of Makefile", "the `test` target of Makefile"])
+        self.assertEqual(f(base.replace("cc x.c", "cc -O2 x.c")), [])
+        self.assertEqual(f(base.replace("ci:\n\tmake test\n", "ci:\n\t@echo ok\n")), ["the `ci` target of Makefile"])
+        self.assertEqual(f(base + "\nlint:\n\truff .\n"), [])
+        self.assertEqual(detector.default_check_changes("Makefile", "build:\n\tcc\n", "build:\n\tcc\ntest:\n\ttrue\n"),
+                         [])  # a new target where none existed
+
+    def test_tox_commands(self):
+        base = "[tox]\nenvlist = py\n\n[testenv]\ndeps = pytest\ncommands = pytest {posargs}\n"
+        f = lambda new: detector.default_check_changes("tox.ini", base, new)
+        self.assertEqual(f(base.replace("pytest {posargs}", "python -c 'pass'")), ["`[testenv] commands` in tox.ini"])
+        self.assertEqual(f(base.replace("deps = pytest", "deps = pytest\n    hypothesis")), [])
+        self.assertEqual(f(base + "\n[testenv:lint]\ncommands = ruff .\n"), [])
+
+
+class InRealRepositories(GitRepoCase):
+    def test_a_rename_in_a_real_change_blocks(self):
+        head = "import unittest\n\n\nclass T(unittest.TestCase):\n    "
+        self.write("tests/test_calc.py", head + RenamedTests.DEF + "\n        pass\n")
+        self.commit("base")
+        self.write("tests/test_calc.py", head + "def _" + RenamedTests.DEF[4:] + "\n        pass\n")
+        report = detector.scan_worktree(detector.Repo(self.root))
+        self.assertEqual([(f.rule, f.file) for f in report.blockers], [("test-skipped", "tests/test_calc.py")])
+
+    def test_check_protection_without_configuration(self):
+        self.write("package.json", json.dumps({"scripts": {"test": "jest"}}))
+        self.write("Makefile", "test:\n\tpytest\n")
+        self.commit("base")
+        base = self.git("rev-parse", "HEAD").strip()
+        self.write("package.json", json.dumps({"scripts": {"test": "jest || true"}}))
+        self.write("Makefile", "test:\n\ttrue\n")
+        report = detector.scan_worktree(detector.Repo(self.root))
+        self.assertEqual(sorted((f.rule, f.file) for f in report.blockers),
+                         [("check-changed", "Makefile"), ("check-changed", "package.json")])
+        self.commit("rig")
+        report = detector.scan_range(detector.Repo(self.root), base)
+        self.assertEqual(sorted(f.file for f in report.blockers), ["Makefile", "package.json"])
+        # With a configured check that runs package.json, one finding per file, not two.
+        both = detector._check_findings(detector.Repo(self.root), base, "npm test", ["package.json"], (),
+                                        lambda p: self.git("show", "HEAD:" + p), lambda p: "v")
+        self.assertEqual([f.file for f in both], ["package.json"])
 
 
 class TimeBudget(unittest.TestCase):

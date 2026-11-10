@@ -12,6 +12,7 @@ from .foreman import board, commands, finish, gate, review
 
 def register(ctx):
     board.bind(ctx)   # ask_choice and dispatch_tool, from /foreman use, merge and reject only
+    gate.bind(ctx)    # ctx.session_cwd(), to find the session's repository
     review.bind(ctx)  # ctx.llm: /foreman review, /foreman merge (auto_review: merge) and foreman_review (finish)
     ctx.register_hook("pre_tool_call", gate.on_pre_tool_call)
     ctx.register_hook("pre_verify", gate.on_pre_verify)
