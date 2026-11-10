@@ -1011,18 +1011,15 @@ MAX_REVIEW_FINDINGS = 20
 
 
 def saved_review(name_with_owner: str, number: int) -> list:
-    """Findings of a saved model review for this pull request, as Markdown bullet texts; [] when there is none.
-    The reviewer stores ``reviews/<owner>__<repo>__<pr>.json`` in Foreman's data directory with a ``findings``
-    list."""
-    owner, _, repo = (name_with_owner or "").partition("/")
-    if not owner or not repo:
+    """Findings of the last ``/foreman review`` of this pull request (``review.load``), as Markdown bullet texts;
+    [] when there is none."""
+    if "/" not in (name_with_owner or ""):
         return []
-    safe = lambda s: re.sub(r"[^A-Za-z0-9_.-]", "_", s)
-    path = os.path.join(grants.store_dir(), "reviews", "%s__%s__%d.json" % (safe(owner), safe(repo), number))
     try:
-        with open(path, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-    except (OSError, ValueError):
+        from . import review
+        data = review.load(name_with_owner, "pr", str(number))
+    except Exception:
+        logger.warning("foreman: cannot read the saved review", exc_info=True)
         return []
     findings = data.get("findings") if isinstance(data, dict) else None
     out = []
@@ -1035,6 +1032,8 @@ def saved_review(name_with_owner: str, number: int) -> list:
                 where = "%s:%s" % (where, f["line"])
             sev = f.get("severity") or f.get("level") or ""
             msg = f.get("message") or f.get("title") or f.get("description") or ""
+            if f.get("why"):
+                msg = "%s: %s" % (msg, f["why"]) if msg else f["why"]
             fix = f.get("fix") or f.get("suggestion") or ""
             text = "".join(("**%s** " % sev if sev else "", "`%s` " % where if where else "", str(msg),
                             " Fix: %s" % fix if fix else ""))

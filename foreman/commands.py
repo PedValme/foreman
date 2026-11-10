@@ -12,7 +12,7 @@ import os
 import time
 from typing import Callable, Optional
 
-from . import detector, grants
+from . import detector, grants, review
 from .detector import MARKER, GitError, Repo
 from .gate import HOW, NO_REPOSITORY_HERE, RECORDED, locate
 
@@ -179,6 +179,7 @@ def cmd_help(args: str = "", keys: tuple = (), platform: Optional[str] = None) -
 SUBCOMMANDS: dict = {
     "status": (cmd_status, "[path]  verdict for the current repository: CLEAN or BLOCKED, with reasons"),
     "allow": (cmd_allow, "[id]  list findings the agent marked, or allow one of them (you only)"),
+    **review.SUBCOMMANDS,
     "help": (cmd_help, "this help"),
 }
 

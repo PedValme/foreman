@@ -332,9 +332,11 @@ class PullRequestVerdicts(BoardCase):
         self.blocked_pr()
         reviews = os.path.join(grants.store_dir(), "reviews")
         os.makedirs(reviews)
-        with open(os.path.join(reviews, "acme__widgets__7.json"), "w", encoding="utf-8") as fh:
-            json.dump({"findings": [{"severity": "high", "file": "app.py", "line": 4,
-                                     "message": "ask @someone about the empty catch"}, "plain finding"]}, fh)
+        from foreman import review
+        with open(review.review_path("acme/widgets", "pr", "7"), "w", encoding="utf-8") as fh:
+            json.dump({"schema": review.SCHEMA_VERSION,
+                       "findings": [{"severity": "high", "file": "app.py", "line": 4,
+                                     "title": "ask @someone about the empty catch"}, "plain finding"]}, fh)
         board.bind(FakeCtx(choice="close"))
         out = self.run_cmd("reject 7 --close please fix the tests")
         ctx = board._CTX
