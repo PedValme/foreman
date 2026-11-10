@@ -234,6 +234,8 @@ SUBCOMMANDS.update(_notify.SUBCOMMANDS)
 
 
 def handle_slash(raw_args: str = "", session_id: str = "", session_key: str = "", **kwargs) -> str:
+    if (raw_args or "").split()[:2] != ["notify", "off"]:  # turning them off must not send the queue first
+        _flush()  # outside any hook: send what hooks queued
     try:
         parts = (raw_args or "").strip().split(None, 1)
         name = parts[0].lower() if parts else "board"
@@ -273,7 +275,16 @@ TOOL_SCHEMA = {
 }
 
 
+def _flush() -> None:
+    try:
+        from . import pipeline
+        pipeline.flush_notifications()
+    except Exception:
+        logger.warning("foreman: cannot send queued notifications", exc_info=True)
+
+
 def foreman_check_tool(args: dict = None, task_id: str = "", **kwargs) -> str:
+    _flush()  # outside any hook: send what hooks queued
     try:
         path = (args or {}).get("path")
         keys = (task_id,) if isinstance(task_id, str) and task_id else ()

@@ -1,6 +1,7 @@
 # Draft catalog pull request for NousResearch/hermes-agent (not opened)
 
-Before opening: replace `<SHA>` below and in `trabajo/catalog/foreman.yaml` (the `sha` and every `screenshots` URL)
+Before opening: replace `<SHA>` below and `REPLACE_WITH_40_CHAR_COMMIT_SHA_OF_PEDVALME_FOREMAN` in
+`trabajo/catalog/foreman.yaml` (the `sha` and every `screenshots` URL)
 with the full 40-character commit of PedValme/foreman being listed; run `hermes plugins validate plugin
 --install-deps` on a checkout at that commit and `python scripts/validate_plugin_catalog.py plugin-catalog/foreman.yaml`
 in the Hermes checkout; the PR adds one file, `plugin-catalog/foreman.yaml`.
@@ -14,7 +15,9 @@ in the Hermes checkout; the PR adds one file, `plugin-catalog/foreman.yaml`.
 A green check the agent did not rig. Foreman reads the real diff before `git commit`, `git push`, `gh pr create` and
 `gh pr merge` and blocks a coding agent that skips, deletes or moves tests, edits or weakens what the check runs,
 bypasses git hooks or commits a secret. A second model (by default the user's Hermes fallback model) reviews what
-rules cannot see, such as a loosened assertion. Only a person allows an exception or merges.
+rules cannot see, such as a loosened assertion. Only a person allows an exception, and Foreman never merges for the
+agent: an agent-run `gh pr merge` is blocked (a merge through `gh api` or a direct push to the base branch is not;
+the README says to protect the base branch on GitHub).
 
 - Repository: https://github.com/PedValme/foreman (public, MIT), plugin in `plugin/` (`subdir: plugin`)
 - Pinned commit: `<SHA>`, version `0.1.0`, `requires_hermes: ">=0.22.6"` (also in `plugin.yaml`)
@@ -45,23 +48,30 @@ rules cannot see, such as a loosened assertion. Only a person allows an exceptio
   --delete-branch` deletes the merged branch on GitHub and locally.
 - **Reads outside its own data.** Files of the repository the agent works in (untracked files up to 500 × 512 KB,
   `package.json`, `Makefile`, `tox.ini`, `.foreman.json`, named SARIF reports, a commit message file); a non-ignored
-  `.env` only to warn before it is committed, values never printed or stored. The user's main model and the first
-  fallback's provider and model names, through Hermes's config reader. `/foreman use` lists the directories directly
-  inside the session's directories to find git repositories.
+  `.env` only to warn before it is committed, values never printed or stored. Through Hermes's config reader: the
+  user's main model and provider, the first fallback's provider and model names (and whether a fallback entry sets a
+  `base_url`, value unused), and `agent.max_verify_nudges`; through
+  `ctx.get_config`, its own plugin settings. `/foreman use` lists the directories directly inside the session's
+  directories to find git repositories.
+- **Config writes.** Only `/foreman notify on|to|off`, typed by the user, saves the plugin's own `notify` and
+  `notify_to` settings with `ctx.set_config` (Hermes writes them under `plugins.entries.foreman.settings` in
+  `config.yaml`). Nothing else changes the user's config.
 - **Network.** No calls of its own and no telemetry. Three paths, all user-initiated or user-enabled: the user's own
   `gh` (above); the review's model call through `ctx.llm` (the bounded diff, title, commit subjects and detector
   findings go to the user's configured provider; it spends tokens, once per exact diff, on `/foreman review`, before
   `/foreman merge` by default, or inside the turn with `auto_review: finish`); notifications with `hermes send`, off
   until the user runs `/foreman notify on`.
-- **Writes.** Only in its plugin data directory: pending findings and exceptions, the pinned repository, stored
-  reviews (up to 300 cached), the pipeline state (at most 200 changes), the notification log, and short-lived reject
-  comment and message files.
+- **File writes.** In its plugin data directory: pending findings and exceptions, the pinned repository, stored
+  reviews (up to 300 cached), the pipeline state (at most 200 changes) with notifications queued from hooks, the
+  notification log, and short-lived reject comment and message files. Outside it only a temporary copy of a SARIF
+  report committed in a pull request that is not checked out (system temp directory, deleted after reading).
 - **Credentials.** None stored or read; models through `ctx.llm`, GitHub through `gh`'s own login, messages through
   the user's Hermes and bot.
 - **Background processes.** None. The Desktop pane polls the read-only route every 2 s while visible, 15 s otherwise.
 - **Approvals (rule 12).** It never auto-approves. A merge or close needs a person's confirmation or typed `--yes`;
-  with nobody to ask (cron, a chat without choices, a timeout) nothing merges. An agent-run `gh pr merge` is always
-  refused. A command Foreman cannot inspect goes to Hermes's approval prompt.
+  with nobody to ask (cron, a chat without choices, a timeout) nothing merges. An agent-run `gh pr merge` is
+  blocked; other ways to merge (`gh api`, a direct push to the base branch) are not, and the README says so. A command
+  Foreman cannot inspect goes to Hermes's approval prompt. No notification is sent from inside a hook.
 
 ### The one `hermes plugins validate` warning
 

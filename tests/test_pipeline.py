@@ -610,6 +610,86 @@ class FinishLoop(FinishBase):
         self.assertEqual(pipeline.items_for(root=self.root)[0]["stage"], "gate")
 
 
+class ReviewBudget(FinishBase):
+    def test_passing_reviews_are_capped_too_and_only_a_person_resets_the_budget(self):
+        llm = FakeLlm(parsed=answer())
+        for i in range(6):  # six edits, six tool calls, every review passes
+            self.write("app/calc.py", "def add(a, b):\n    return a + b + %d\n" % (i + 10))
+            out = self.tool(llm)
+        self.assertEqual(len(llm.calls), pipeline.review_budget())  # max_bounces + 1 = 4
+        self.assertIn("review budget for this change is used up", out["next"])
+        self.assertIn("/foreman review --fresh", out["next"])
+        self.assertEqual(out["verdict"], review.NOT_REVIEWED)  # the current diff is not reviewed...
+        self.assertIn("earlier diff", out["last_review"]["note"])  # ...the last stored result, said for what it is
+        self.assertEqual(out["last_review"]["verdict"], "PASS")
+        self.assertIsNone(self.verify(0))  # and the hook does not ask for another review
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "commit", env={"GIT_COMMITTER_DATE": "@%d +0000" % NOW,
+                                                     "GIT_AUTHOR_DATE": "@%d +0000" % NOW})
+        self.write("app/calc.py", "def add(a, b):\n    return a + b + 99\n")
+        self.assertEqual(self.tool(llm)["verdict"], review.NOT_REVIEWED)  # a commit does not reset it
+        self.assertEqual(len(llm.calls), 4)
+        board.pin(self.root)
+        review._CTX = FakeCtx(llm)
+        review.cmd_review("")  # a person's review: one call, and the budget starts again
+        self.assertEqual(len(llm.calls), 5)
+        self.assertEqual(pipeline.model_calls(pipeline.local_ref(self.root)), 0)
+
+
+class BudgetFollowsTheChange(PipelineCase):
+    def test_a_pull_request_taking_over_its_branch_keeps_the_count(self):
+        branch = self.ref("branch", branch="feat")
+        for _ in range(4):
+            pipeline.count_model_call(branch)
+        pipeline.record_gate(self.ref("pr", number=7, branch="feat"), "pass", "CLEAN")  # e.g. /foreman verdict 7
+        self.assertEqual([i["id"] for i in pipeline.snapshot()["items"]], ["acme/widgets#pr:7"])
+        self.assertEqual(pipeline.model_calls(branch), 4)
+        self.assertEqual(pipeline.model_calls(self.ref("pr", number=7, branch="feat")), 4)
+        pipeline.record_merged(self.ref("pr", number=7, branch="feat"), "squash")
+        self.assertEqual(pipeline.model_calls(branch), 0)
+
+
+class HookNotifications(FinishBase):
+    def test_a_long_queue_is_sent_a_few_at_a_time_and_not_when_turning_them_off(self):
+        seen = []
+        pipeline.NOTIFIER = seen.append
+        with pipeline.hook_context():
+            for n in range(5):
+                pipeline.record_rejected(self.ref(number=20 + n, branch="b%d" % n), "x")
+        commands.handle_slash("notify off")
+        self.assertEqual(seen, [])  # turning notifications off does not send the queue first
+        commands.handle_slash("help")
+        self.assertEqual(len(seen), pipeline.MAX_SEND_PER_CALL)
+        commands.handle_slash("help")
+        self.assertEqual(len(seen), 5)
+
+
+    def test_a_hook_queues_and_the_next_command_sends_once(self):
+        seen = []
+        pipeline.NOTIFIER = lambda e: seen.append((e["kind"], pipeline.in_hook()))
+        ref = pipeline.local_ref(self.root)
+        for _ in range(pipeline.review_budget()):
+            pipeline.count_model_call(ref)
+        self.assertIsNone(self.verify(0))  # inside pre_verify: the budget is used up -> needs the owner
+        self.assertEqual(seen, [])  # nothing sent inside the hook
+        self.assertEqual([e["kind"] for e in pipeline._load_meta()["pending_notifications"]], ["needs_owner"])
+        json.loads(commands.foreman_check_tool({"path": self.root}))  # a non-hook entry point
+        self.assertEqual(seen, [("needs_owner", False)])
+        commands.handle_slash("help")
+        self.assertEqual(len(seen), 1)  # once per item and head
+        self.assertEqual(pipeline._load_meta()["pending_notifications"], [])
+
+    def test_the_hook_flag_is_explicit(self):
+        self.assertFalse(pipeline.in_hook())
+        with pipeline.hook_context():
+            self.assertTrue(pipeline.in_hook())
+        self.assertFalse(pipeline.in_hook())
+        flags = []
+        with mock.patch.object(gate, "_pre_tool_call", side_effect=lambda *a: flags.append(pipeline.in_hook())):
+            gate.on_pre_tool_call("terminal", {"command": "ls"})
+        self.assertEqual(flags, [True])
+
+
 class ToolOutsideFinish(FinishBase):
     def test_the_tool_never_calls_a_model_outside_finish(self):
         for lvl in ("merge", "off"):

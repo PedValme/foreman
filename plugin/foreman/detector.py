@@ -1598,17 +1598,25 @@ def main(argv=None) -> int:
     if args.json:
         print(json.dumps(dict(report.to_dict(), strict=args.strict, verdict=label), indent=2))
     else:
-        print("foreman: %s (%d blocker(s), %d marked %s)" % (label, len(blocking), len(marked), MARKER))
+        from .verdicts import NEEDS_OK
+        # There is no /foreman allow in CI: a marked finding waits for a reviewer of the pull request. The JSON
+        # verdict keeps the vocabulary's value (NEEDS YOUR OK); the text says what it means here.
+        shown = CI_NEEDS_OK if label == NEEDS_OK else label
+        print("foreman: %s (%d blocker(s), %d marked %s)" % (shown, len(blocking), len(marked), MARKER))
         if blocking:
             print(format_findings(blocking))
         if marked:
-            print("Marked %s by the author; they do not fail this run, review them (or use --strict):" % MARKER)
+            print("Marked %s: needs a reviewer's OK in the pull request; they do not fail this run (--strict makes "
+                  "them fail):" % MARKER)
             print(format_findings(marked))
         if report.notes:
             print("Notes (they do not block):")
             for n in report.notes:
                 print("  [%s] %s  %s" % (n.rule, n.location, n.message))
     return 2 if report.errors else (1 if blocking else 0)
+
+
+CI_NEEDS_OK = "marked `foreman:allow`: needs a reviewer's OK in the pull request"
 
 
 def _escape_annotation(text: str, prop: bool = False) -> str:

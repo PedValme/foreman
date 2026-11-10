@@ -163,7 +163,9 @@ class Sending(GitRepoCase):
         self.assertEqual(args["timeout"], notify.SEND_TIMEOUT)
         self.assertEqual(ctx.sent_texts, [notify.render(event(), "telegram")])
         self.assertFalse(os.path.exists(ctx.paths[0]))  # the message file is removed
-        self.assertIsNone(gate.on_pre_tool_call("terminal", {"command": args["command"]}))  # the gate lets it run
+        # Foreman's own send runs through ctx.dispatch_tool, which never fires pre_tool_call (tools.registry.dispatch
+        # calls the handler directly), so it needs no exemption; the same command typed by the agent is refused.
+        self.assertEqual(gate.on_pre_tool_call("terminal", {"command": args["command"]})["action"], "block")
         again = notify.send(event())
         self.assertEqual((again["sent"], again["why_not"]), (False, "already sent"))
         self.assertEqual(len(ctx.dispatched), 1)

@@ -33,7 +33,7 @@ config_schema:
     choices: [merge, finish, "off"]
     default: merge
     label: "Automatic review"
-    description: "merge: /foreman merge first gets the second-model review of the pull request's exact head (one model call per new diff). finish: every coding turn is reviewed through the foreman_review tool and sent back to the agent until it is clean or max_bounces is reached. off: the review runs only when you type /foreman review. A person always merges."
+    description: "merge: /foreman merge first gets the second-model review of the pull request's exact head (one model call per new diff). finish: every coding turn is reviewed through the foreman_review tool and sent back to the agent until it is clean, max_bounces is reached or its review budget (max_bounces + 1 model calls per change, renewed when you merge, reject or review it yourself) is used. off: the review runs only when you type /foreman review. Foreman never merges for the agent: /foreman merge waits for you."
   max_bounces:
     type: int
     default: 3

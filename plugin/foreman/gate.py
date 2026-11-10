@@ -899,6 +899,15 @@ def directive(what: str, outcome: Outcome) -> Optional[dict]:
 # ─── pre_tool_call ───────────────────────────────────────────────────────────
 
 def on_pre_tool_call(tool_name: str = "", args=None, task_id: str = "", **kwargs) -> Optional[dict]:
+    """The hook Hermes calls. Inside it nothing is sent anywhere (``pipeline.hook_context``)."""
+    if tool_name not in TERMINAL_TOOLS and tool_name not in WRITE_TOOLS:
+        return None  # the common case, before anything else
+    from . import pipeline
+    with pipeline.hook_context():
+        return _pre_tool_call(tool_name, args, task_id)
+
+
+def _pre_tool_call(tool_name: str = "", args=None, task_id: str = "") -> Optional[dict]:
     if tool_name not in TERMINAL_TOOLS and tool_name not in WRITE_TOOLS:
         return None
     if not isinstance(args, dict):
@@ -907,7 +916,7 @@ def on_pre_tool_call(tool_name: str = "", args=None, task_id: str = "", **kwargs
         command = args.get("command")
         if not isinstance(command, str):
             return None
-        if _names_store(command) and not _OWN_NOTIFY.match(command.strip()):
+        if _names_store(command):
             return _store_guard()
         exported = _exported_hook_env(command)
         if exported:
@@ -938,13 +947,11 @@ STORE_FILES = (grants.GRANTS_FILE, "foreman-board.json", "foreman-notify.json")
 STORE_DIRS = ("outbox", "reviews", "notify", "pipeline.json", "pipeline-meta.json")
 _STORE_DIR_TEXT = re.compile(r"(?:plugin-data/foreman|\.foreman)/(?:%s)(?:/|$|[\s\"'])"
                              % "|".join(re.escape(d) for d in STORE_DIRS))
-# /foreman reject's own `gh pr comment --body-file <outbox file>` needs no exemption: it runs through
-# ctx.dispatch_tool -> tools.registry.dispatch, which calls the tool's handler without firing pre_tool_call (that
-# hook fires in model_tools, on the agent's own tool calls only). The same holds for a notification's
-# `hermes send`; its exemption below is the notifier's and stays as it wrote it.
-# What a notification runs: hermes send reading the message file Foreman wrote (only reads it).
-_OWN_NOTIFY = re.compile(r'^hermes send --to "[a-z][a-z0-9_]*(?::[^\s"\'`$;&|<>\\%!]+)?" '
-                         r'--file "[^"$`%!\n\r]*/notify/msg-[A-Za-z0-9_]+\.txt" --quiet$')
+# Foreman's own commands that name the store (/foreman reject's `gh pr comment --body-file <outbox file>`, a
+# notification's `hermes send --file <notify/msg file>`) need no exemption: they run through ctx.dispatch_tool ->
+# tools.registry.dispatch, which calls the tool's handler without firing pre_tool_call (that hook fires in
+# model_tools, on the agent's own tool calls only; checked in Hermes 0.23.0). The same command from the agent is
+# refused like any other that names the store.
 
 
 def _store_dirs_text() -> list:
@@ -1279,10 +1286,21 @@ def gate_write(tool_name: str, args: dict, task_id: str = "") -> Optional[dict]:
 def on_pre_verify(coding: bool = False, attempt: int = 0, changed_paths=None, session_id: str = "",
                   **kwargs) -> Optional[dict]:
     """The deterministic gate first (one nudge per turn, as always); with ``auto_review: finish`` and a CLEAN gate,
-    the review loop (``finish.step``), which only reads stored reviews: the model runs in the tool, never here."""
+    the review loop (``finish.step``), which only reads stored reviews: the model runs in the tool, never here.
+    Inside it nothing is sent anywhere: a notification is queued and sent from the next /foreman command or tool."""
     try:
         if not coding:
             return None
+        from . import pipeline
+        with pipeline.hook_context():
+            return _pre_verify(attempt, changed_paths, session_id)
+    except Exception:
+        logger.warning("foreman: pre_verify failed", exc_info=True)
+        return None
+
+
+def _pre_verify(attempt, changed_paths, session_id) -> Optional[dict]:
+    try:
         attempt = attempt if isinstance(attempt, int) else 0
         sid = session_id if isinstance(session_id, str) else ""
         from . import pipeline

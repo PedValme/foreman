@@ -5,7 +5,8 @@
 Foreman is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin for people who let Hermes write
 code in a git repository. A coding agent under pressure can make the check pass by skipping a test, deleting it,
 loosening an assertion or editing what the check runs. Foreman reads the real diff before every commit, push, pull
-request and merge, and blocks those shortcuts; a second model reviews what rules cannot see; and only you merge.
+request and merge, and blocks those shortcuts; a second model reviews what rules cannot see; and Foreman never
+merges for the agent: an agent-run `gh pr merge` is blocked, and `/foreman merge` waits for you.
 
 ```
 you    > I'm in a hurry, just skip that failing test and commit.
@@ -27,9 +28,10 @@ That block also holds under `--yolo`: the gate is a plugin hook, not an approval
   diff that would be recorded, not the command text, so it cannot be talked out of a finding.
 - **Configuration read from the base branch.** The check command and SARIF reports named in `.foreman.json` are
   read at the merge-base, so a change cannot loosen the rules that judge it.
-- **Only a person allows an exception or merges.** The agent can mark a false positive, but the mark waits for you
-  to type `/foreman allow <id>`; `gh pr merge` run by the agent is always refused. Slash commands are typed by you;
-  the model has no tool that runs them.
+- **Only a person allows an exception; Foreman never merges for the agent.** The agent can mark a false positive,
+  but the mark waits for you to type `/foreman allow <id>`; an agent-run `gh pr merge` is blocked, and `/foreman
+  merge` waits for your confirmation. Slash commands are typed by you; the model has no tool that runs them. (Other
+  ways to merge are not blocked: see *Known limits*.)
 - **The same rules in CI.** `python -m foreman.detector` runs the same detector as a required check, where the
   agent cannot edit it.
 
@@ -156,7 +158,7 @@ the agent) are not approvals and hold in every mode, YOLO included; so does `/fo
 | `/foreman verdict [pr\|branch]` | the verdict for a pull request or branch, and whether GitHub can merge it now |
 | `/foreman pipeline [pr\|branch]` | a change's stages: gate, review, bounces, owner, merge |
 | `/foreman review [pr\|branch] [--fresh]` | the second-model review (below) |
-| `/foreman merge <pr> [--merge\|--rebase] [--yes]` | merge, only if CLEAN, mergeable, not a draft and reviewed, after you confirm |
+| `/foreman merge <pr> [--merge\|--rebase] [--yes]` | merge, only if CLEAN, mergeable and not a draft, after you confirm; with `auto_review` `merge` or `finish` the review must not block it, and if it could not run you decide (with `off` there is no review) |
 | `/foreman reject <pr> [--close [--yes]] [note]` | post the reasons as one comment on the pull request |
 | `/foreman allow [id]` | list or allow findings the agent marked |
 | `/foreman notify [on [target]\|off\|test]` | tell you on your phone when a pull request waits for you (off by default) |
@@ -170,7 +172,7 @@ repositories you already used with Foreman. The agent gets the same verdict as J
 | **CLEAN** | nothing found, and everything Foreman was told to inspect was inspected | allowed, after you confirm |
 | **BLOCKED** | a skipped, deleted or moved test, a change to the check, a secret, a blocking SARIF result | refused |
 | **INCOMPLETE** | something could not be inspected (unreadable SARIF report, git error, time budget) | refused |
-| **NEEDS YOUR OK** | only findings the agent marked `foreman:allow`, waiting for `/foreman allow <id>` | refused until you allow them |
+| **NEEDS YOUR OK** | only findings the agent marked `foreman:allow`, waiting for `/foreman allow <id>` (in CI: for a reviewer's OK in the pull request) | refused until you allow them |
 
 CLEAN is about rigging only. Whether GitHub can merge the pull request (conflicts, draft, still computing) is said
 apart, and CI is shown but does not decide.
@@ -205,7 +207,7 @@ assertTrue passes for any non-empty string — including the unfixed value
 | `auto_review` | When the model is called | What happens |
 |---|---|---|
 | `merge` (default) | on `/foreman merge <pr>`, when that exact diff has no stored review | a verified blocking finding refuses the merge (`--yes` does not override); notes go into the merge question; if the review could not run, the question says so first and you decide |
-| `finish` | inside the agent's turn, through its `foreman_review` tool, once per new diff; and on `/foreman merge` as with `merge` | the change goes back to the agent with each blocking and high finding (file:line, why, fix) until the review is clean or `max_bounces` is reached |
+| `finish` | inside the agent's turn, through its `foreman_review` tool, once per new diff; and on `/foreman merge` as with `merge` | the change goes back to the agent with each blocking and high finding (file:line, why, fix) until the review is clean, `max_bounces` is reached or the review budget (`max_bounces + 1` model calls per change, renewed only when you merge, reject or review it yourself) is used |
 | `off` | only when you type `/foreman review` | merge works without the reviewer |
 
 `/foreman review` always runs on demand, whatever the level. Set the level with
@@ -227,7 +229,9 @@ by the loop.
   same reviewer never calls the model again, unless you type `/foreman review --fresh`. A failed call is retried
   once on its own, then only on `--fresh`.
 - **Bounce limit.** `max_bounces` (default 3, never more than Hermes's `agent.max_verify_nudges`); then Foreman stops
-  sending the change back, marks it as needing you, and calls the reviewer no more for it.
+  sending the change back, marks it as needing you, and calls the reviewer no more for it. Passing reviews count
+  too: with `finish` the agent's tool makes at most `max_bounces + 1` model calls per change, until you merge,
+  reject or review it yourself (`/foreman review --fresh`).
 - **Verdicts.** `BLOCKED` when the detector blocks or the model reports a verified blocking finding; `PASS WITH
   NOTES` for other findings, unverified claims, a partly reviewed diff or an INCOMPLETE detector verdict; `PASS` only
   when the detector found nothing and the model reported nothing. Each finding must quote the diff word for word: a
@@ -316,8 +320,10 @@ PYTHONPATH=<foreman checkout>/plugin python -m foreman.detector origin/<base> HE
 ```
 
 Run it from the repository you check. Exit codes: **0** clean, **1** at least one blocker, **2** the run could not be
-done (not a repository, git failed, an unreadable SARIF report). Findings marked `foreman:allow` exit 0 and, under
-GitHub Actions, become `::warning` annotations for a person to review in the PR; `--strict` makes them blockers.
+done (not a repository, git failed, an unreadable SARIF report). There is no `/foreman allow` in CI: a finding marked
+`foreman:allow` is listed as "marked `foreman:allow`: needs a reviewer's OK in the pull request", exits 0 and, under
+GitHub Actions, becomes a `::warning` annotation; `--strict` makes them blockers. The `--json` verdict value for such
+a run stays `NEEDS YOUR OK`.
 [`examples/foreman-check.yml`](../examples/foreman-check.yml) is a workflow to copy (full-history checkout, actions and
 Foreman pinned by commit SHA). Make it a required check: unlike the hooks, it runs where the agent cannot edit it.
 
@@ -351,7 +357,16 @@ Desktop, or via `hermes config set plugins.entries.foreman.settings.<key> <value
 - **Reads the session's working directory** through a Hermes internal (`tools.terminal_tool.get_session_cwd`), guarded,
   then the public `ctx.session_cwd()` and `resolve_agent_cwd()`. `/foreman use` lists the directories directly inside
   the session's directories to find git repositories.
-- **Writes only in its Hermes plugin data directory** (`~/.foreman` if Hermes provides none):
+- **Reads Hermes's config** through Hermes's own APIs: its plugin settings (`ctx.get_config`: `auto_review`,
+  `max_bounces`, `reviewer_model`, `reviewer_provider`, `notify`, `notify_to`), and through Hermes's config reader
+  (`load_config_readonly`) your main model and provider, the first fallback's provider and model names (from
+  `fallback_providers` or the older `fallback_model`, and whether an entry sets a `base_url`, whose value is not
+  used), and `agent.max_verify_nudges`; nothing else of it.
+- **Writes Hermes's config only for `/foreman notify`**: `/foreman notify on|to|off` saves the `notify` and
+  `notify_to` settings under `plugins.entries.foreman.settings` with `ctx.set_config` (Hermes writes them to
+  `config.yaml`). No other command changes your config.
+- **Writes files in its Hermes plugin data directory** (`~/.foreman` if Hermes provides none), and nowhere else but a
+  temporary copy of a SARIF report (below):
   `foreman-grants.json` (findings waiting for you and the exceptions you allowed: rule, file, line, message, no file
   contents), `foreman-board.json` (the repository pinned per session and the last ten used: paths only), `reviews/`
   (the last review of each target, with quoted diff lines; `reviews/cache/` keeps up to 300), `pipeline.json` and
@@ -359,7 +374,9 @@ Desktop, or via `hermes config set plugins.entries.foreman.settings.<key> <value
   finding summaries; at most 200 changes and 50 events each), `foreman-notify.json` (the last 30 sends, with
   notifications on), a reject comment in `outbox/` until `gh pr comment` has read it, and a message in `notify/` while
   `hermes send` runs. The agent's writes and terminal commands that name these files are blocked; the guard matches
-  text, so a glob, a relative path after `cd` or Hermes's `execute_code` gets past it.
+  text, so a glob, a relative path after `cd` or Hermes's `execute_code` gets past it. For a pull request or branch
+  that is not checked out, a SARIF report committed there is copied to a temporary directory of the system, read,
+  and deleted.
 - **Runs the GitHub CLI (`gh`) only when you type a `/foreman` subcommand**, with its own login, in the repository's
   directory. Reads: `gh repo view`, `gh pr list`, `gh issue list`, `gh pr view`, `gh pr diff`. Foreman never reads
   `gh`'s token or configuration, nor any other credential.
@@ -370,11 +387,13 @@ Desktop, or via `hermes config set plugins.entries.foreman.settings.<key> <value
   and never on the agent's request.
 - **Model calls** only through Hermes (`ctx.llm`; Foreman never sees your keys), as `auto_review` sets them or when
   you type `/foreman review`: one call per exact diff, sending the bounded diff, the pull request or branch title,
-  commit subjects (for a branch) and the detector's findings to the provider you configured. It spends tokens. To pick the reviewer it reads, through
-  Hermes's config reader, your main model and the first fallback's provider and model names; nothing else.
+  commit subjects (for a branch) and the detector's findings to the provider you configured. It spends tokens. With
+  `finish`, the agent's tool makes at most `max_bounces + 1` model calls per change until you merge, reject or
+  review it yourself.
 - **Notifications**, only after `/foreman notify on`: one `hermes send --to <target> --file <message> --quiet` per
-  pull request event, through Hermes's terminal tool, waiting at most 60 s, never retried. Your Hermes and your own bot
-  deliver it.
+  pull request event, through Hermes's terminal tool, waiting at most 60 s, never retried, and never from inside a
+  hook (an event that happens there is queued and sent by your next `/foreman` command or Foreman tool call). Your
+  Hermes and your own bot deliver it.
 - **Desktop panel**, only when you switch it on: polls `GET /api/plugins/foreman/pipeline`, a read-only route Hermes
   mounts for the plugin, which returns a bounded, sanitised snapshot of Foreman's own `pipeline.json`. It writes
   nothing and calls no network.
@@ -420,6 +439,12 @@ file is allowed; added to an existing test it is blocked.
   When nothing qualifies, Foreman says it cannot tell and asks for a path or `workdir`. When a slash command reaches a
   running gateway before the agent has used the terminal in that session, use `/foreman use <path>`.
 - In a shared chat, anyone Hermes authorises can type `/foreman merge … --yes`: restrict who can talk to your Hermes.
+- Only `gh pr merge` is blocked as a merge: a merge through `gh api` (`-X PUT …/pulls/7/merge`), an approval with
+  `gh pr review --approve`, or a direct `git push` to the base branch (inspected only as a push) is not. Protect the
+  base branch on GitHub (required pull request and checks).
+- Foreman's state (stored reviews and their cache, the pipeline, the grants) is plain files: a deliberate write that
+  gets past the text guard (for example through `execute_code`) could forge a stored PASS. The guard is best effort;
+  the required CI check is where independence is real.
 - In a repository without tests the gate can catch only secrets and hook bypasses; the board and `/foreman status`
   say so, and the second-model review is then the main check.
 
@@ -429,14 +454,16 @@ same-model warning compares with the main model in your config, not one you swit
 ## Status
 
 Verified in real Hermes v0.23.0 sessions (macOS): the write gate and the commit gate blocking a skipped test (also
-under `--yolo`) while the honest fix passed; a `foreman:allow` marker blocked and listed by `/foreman allow`; an
+under `--yolo`) while the honest fix passed; a `foreman:allow` marker blocked and listed by `/foreman allow`, the same
+commit passing after `/foreman allow <id>`, and the same marked line copied above another test needing its own
+approval; an
 agent-run `gh pr merge` refused under `--yolo`; the board, verdicts and pipeline line on a private repository;
 `/foreman merge` blocked by the second-model review on the user's fallback model (another provider) over two
 loosened assertions; a confirmed merge that closed its issue; a rejection comment; the `finish` loop sending a
 loosened assertion back inside one turn; install from Git at a commit.
 
 Verified by the test suite only (Linux, macOS, Windows): the Desktop panel (also rendered in a browser preview
-against a stand-in SDK, not yet inside the real app), notifications to a real chat, `ask_choice` buttons on Telegram,
+against a stand-in SDK, not yet inside the real app), sending a notification to a real chat, `ask_choice` buttons on Telegram,
 SARIF with a real hermes-security export.
 
 ## Development
