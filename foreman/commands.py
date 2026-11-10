@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from typing import Callable, Optional
 
 from . import detector, grants
 from .detector import MARKER, GitError, Repo
-from .gate import session_cwd
+from .gate import HOW, RECORDED, locate
 
 logger = logging.getLogger(__name__)
 
@@ -30,14 +31,20 @@ def _dedupe(findings: list) -> list:
     return out
 
 
-def verdict(path: Optional[str] = None, *keys: str) -> dict:
+def verdict(path: Optional[str] = None, *keys: str, platform: Optional[str] = None) -> dict:
     """The verdict for the repository that contains ``path`` (default: the session's directory): the branch against
-    its base plus the uncommitted changes."""
-    where = path or session_cwd(*keys)
+    its base plus the uncommitted changes. ``chosen_from`` says how the repository was found."""
+    if path and os.path.isabs(os.path.expanduser(path)):
+        where, how = os.path.expanduser(path), "given"
+    else:
+        where, how = locate(*keys, platform=platform)
+        if path:
+            where, how = os.path.normpath(os.path.join(where, path)), "given"
     root = detector.find_repo(where)
     if not root:
-        return {"verdict": "NO_REPOSITORY", "path": where,
-                "message": "%s is not inside a git repository. Give a path: `/foreman status <path>`." % where}
+        return {"verdict": "NO_REPOSITORY", "path": where, "chosen_from": how,
+                "message": "%s (%s) is not inside a git repository. Give a path: `/foreman status <path>`."
+                           % (where, HOW.get(how, how))}
     repo = Repo(root, budget=STATUS_BUDGET_SECONDS)
     try:
         branch = detector.scan_branch(repo)
@@ -61,6 +68,7 @@ def verdict(path: Optional[str] = None, *keys: str) -> dict:
     return {
         "verdict": "BLOCKED" if blockers or marked else "CLEAN",
         "repo": root,
+        "chosen_from": how,
         "branch": repo.branch(),
         "base": branch.base_label,
         "base_sha": branch.base,
@@ -81,7 +89,8 @@ def _format_finding(d: dict, with_id: bool = False) -> str:
 def format_verdict(v: dict) -> str:
     if v["verdict"] in ("NO_REPOSITORY", "ERROR"):
         return "Foreman: %s. %s" % (v["verdict"].replace("_", " ").lower(), v.get("message", ""))
-    lines = ["Foreman: %s" % v["verdict"], "Repository: %s" % v["repo"]]
+    hint = "" if v.get("chosen_from") in (None, RECORDED, "given") else " (from %s)" % HOW.get(v["chosen_from"], "?")
+    lines = ["Foreman: %s" % v["verdict"], "Repository: %s%s" % (v["repo"], hint)]
     if v.get("base"):
         ahead = v.get("commits_ahead")
         lines.append("Branch: %s vs %s%s" % (v["branch"], v["base"],
@@ -107,11 +116,11 @@ def format_verdict(v: dict) -> str:
 
 # ─── /foreman ────────────────────────────────────────────────────────────────
 
-def cmd_status(args: str, keys: tuple = ()) -> str:
-    return format_verdict(verdict(args.strip() or None, *keys))
+def cmd_status(args: str, keys: tuple = (), platform: Optional[str] = None) -> str:
+    return format_verdict(verdict(args.strip() or None, *keys, platform=platform))
 
 
-def cmd_allow(args: str, keys: tuple = ()) -> str:
+def cmd_allow(args: str, keys: tuple = (), platform: Optional[str] = None) -> str:
     short_id = args.strip().split()[0] if args.strip() else ""
     if not short_id:
         items = grants.pending()
@@ -148,7 +157,7 @@ def _covers(rule: str) -> str:
     return "It covers that exact line only: any change to it is checked again."
 
 
-def cmd_help(args: str = "", keys: tuple = ()) -> str:
+def cmd_help(args: str = "", keys: tuple = (), platform: Optional[str] = None) -> str:
     lines = ["Foreman: a green check the agent did not rig.", "", "Usage: /foreman <subcommand>"]
     lines += ["  %-14s %s" % (name, doc) for name, (_fn, doc) in SUBCOMMANDS.items()]
     lines += ["",
@@ -176,7 +185,8 @@ def handle_slash(raw_args: str = "", session_id: str = "", session_key: str = ""
             return "Unknown subcommand `%s`.\n\n%s" % (name, cmd_help())
         fn: Callable[..., str] = entry[0]
         keys = tuple(k for k in (session_key, session_id) if isinstance(k, str) and k)
-        return fn(rest, keys)
+        platform = kwargs.get("platform")
+        return fn(rest, keys, platform if isinstance(platform, str) else None)
     except Exception as e:
         logger.warning("foreman: /foreman failed", exc_info=True)
         return "Foreman failed: %s: %s" % (type(e).__name__, e)

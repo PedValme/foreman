@@ -126,10 +126,12 @@ Requires Hermes Agent >= 0.22.6 and git on the PATH.
   `check-weakened` patterns above.
 - Secrets are found by pattern: real credential formats reliably, key/value guesses with false negatives (and none
   inside test files).
-- Repository resolution: Foreman tries, in order, the directory the terminal tool recorded for the session, Hermes's
-  `resolve_agent_cwd()` and the process directory, and uses the first one inside a git repository. The first is read
-  from a Hermes internal (`tools.terminal_tool.get_session_cwd`) guarded by a fallback: if Hermes moves it, Foreman
-  falls back to the others. An explicit `workdir`, `cd` or `git -C` always wins. When a command does not say where
+- Repository resolution: Foreman tries, in order, the directory the terminal tool recorded for the session, then
+  (in the CLI and TUI only) the directory Hermes was started in, then Hermes's `resolve_agent_cwd()`, and uses the
+  first one inside a git repository. The Hermes home is never picked unless the terminal recorded it. The first is
+  read from a Hermes internal (`tools.terminal_tool.get_session_cwd`) guarded by a fallback: if Hermes moves it,
+  Foreman falls back to the others. `/foreman status` says "(from the current directory)" or "(from Hermes's working
+  directory)" when it did not use the terminal's directory. An explicit path, `workdir`, `cd` or `git -C` always wins. When a command does not say where
   it runs and no candidate is a repository, Foreman asks the agent to re-run it with `workdir` or `git -C`.
 - With a remote terminal backend (Docker, SSH, …) the repository is not on the Hermes host: Foreman asks for
   approval on every gated command.

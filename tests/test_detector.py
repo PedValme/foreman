@@ -218,6 +218,17 @@ class CheckWeakened(unittest.TestCase):
                      "        continue-on-error: true", added=[2])
         self.assertEqual(detector.detect(other), [])
         self.assertEqual(one("        run: npm ci || true", ".github/workflows/ci.yml"), [])
+        # A one-line run is its own command: the next step's test runner does not count.
+        cleanup = hunk(".github/workflows/ci.yml", "      - run: docker rm -f old || true", "      - run: pytest",
+                       added=[0])
+        self.assertEqual(detector.detect(cleanup), [])
+        # Inside a `run: |` block the rest of the step counts, but not the next step.
+        block = hunk(".github/workflows/ci.yml", "      - name: Tests", "        run: |", "          pytest -q",
+                     "          echo done || true", added=[3])
+        self.assertEqual([f.rule for f in detector.detect(block)], ["check-weakened"])
+        block = hunk(".github/workflows/ci.yml", "      - name: Build", "        run: |", "          make dist",
+                     "          echo done || true", "      - name: Tests", "        run: pytest", added=[3])
+        self.assertEqual(detector.detect(block), [])
         for runner in ("go test ./...", "cargo test", "make check", "tox -e py", "python -m unittest", "yarn run test",
                        "pnpm test", "vitest run", "jest --ci"):
             self.assertTrue(one("        run: %s || true" % runner, ".github/workflows/ci.yml"), runner)

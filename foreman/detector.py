@@ -125,7 +125,9 @@ PYTEST_CONFIG = re.compile(r"(^|/)(pytest\.ini|setup\.cfg|pyproject\.toml|tox\.i
 PYTEST_DROP = re.compile(r"--(?:deselect|ignore|ignore-glob)(?:=|\s+)([^\s\"',\]]+)")
 JS_TEST_CONFIG = re.compile(r"(^|/)(jest|vitest)\.config\.[cm]?[jt]s$", re.I)
 JS_TEST_DROP = re.compile(r"\btestPathIgnorePatterns\b|\bexclude\s*:")
-_STEP_WINDOW = 6  # new-side lines around a workflow line that belong to the same step, roughly
+_STEP_WINDOW = 8  # at most this many new-side lines around a workflow line, within the same step
+STEP_START = re.compile(r"^\s*-\s")                         # a new step (or list item) in the YAML
+SINGLE_LINE_RUN = re.compile(r"^\s*(?:-\s+)?run:\s*[^|>\s]")  # `run: cmd`, not the `run: |` block opener
 
 FIXES = {
     "secret": ("possible secret in an added line",
@@ -278,8 +280,22 @@ def weakens_check(text: str, path: Optional[str], before: Iterable[str] = (), af
     if WORKFLOW.search(path):
         if not WORKFLOW_SOFT.search(text):
             return False
-        window = [text] + before[:_STEP_WINDOW] + after[:_STEP_WINDOW]
-        return any(TEST_RUNNER.search(t) for t in window)
+        if TEST_RUNNER.search(text):
+            return True
+        if SINGLE_LINE_RUN.search(text):
+            return False  # `- run: docker rm -f old || true`: that line is the whole command
+        # continue-on-error, or a line inside a `run: |` block: look at the rest of the same step only.
+        step = []
+        for t in before[:_STEP_WINDOW]:
+            step.append(t)
+            if STEP_START.match(t):
+                break
+        if not STEP_START.match(text):
+            for t in after[:_STEP_WINDOW]:
+                if STEP_START.match(t):
+                    break
+                step.append(t)
+        return any(TEST_RUNNER.search(t) for t in step)
     if PYTEST_CONFIG.search(path):
         return any(TEST_PATH.search(v.strip("'\"")) or "test" in v.lower() for v in PYTEST_DROP.findall(text))
     if JS_TEST_CONFIG.search(path):

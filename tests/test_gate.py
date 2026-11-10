@@ -281,9 +281,11 @@ class TerminalGate(GitRepoCase):
 
     def test_store_guard_spellings(self):
         store = grants.store_path()
-        upper = os.path.join(os.path.dirname(store), "Foreman-Grants.JSON. ")
-        self.assertEqual(gate.on_pre_tool_call(tool_name="write_file", args={"path": upper, "content": "{}"})["action"],
-                         "block")
+        for spelling in ("Foreman-Grants.JSON. ", "foreman-grants.json" + os.sep + ".", "foreman-grants.json\\. ",
+                         "foreman-grants.json/"):
+            path = os.path.join(os.path.dirname(store), spelling)
+            d = gate.on_pre_tool_call(tool_name="write_file", args={"path": path, "content": "{}"})
+            self.assertEqual(d and d["action"], "block", spelling)
         self.assertEqual(terminal("cat FOREMAN-GRANTS.json", self.root)["action"], "block")
 
     def test_the_hook_deadline_covers_the_repository_lookup(self):
@@ -353,8 +355,8 @@ class TerminalGate(GitRepoCase):
 
 
 class SessionDirectory(GitRepoCase):
-    """The CLI case seen in a real session: Hermes's configured directory is the home folder, the process runs in
-    the repository. Every candidate is tried; the first one inside a repository wins."""
+    """Real sessions: the process runs in the user's repository, Hermes's configured directory is the home folder
+    or the Hermes home, and the Hermes home may itself be a git repository."""
 
     def setUp(self):
         super().setUp()
@@ -362,26 +364,66 @@ class SessionDirectory(GitRepoCase):
         self.commit("base")
         self.home = os.path.join(self.tmp, "home")
         os.makedirs(self.home)
+        # A Hermes home that is a git repository, with a dirty skip so picking it would show.
+        self.hermes = os.path.join(self.tmp, "hermes-home")
+        os.makedirs(os.path.join(self.hermes, "tests"))
+        self.git("init", "-q", cwd=self.hermes)
+        with open(os.path.join(self.hermes, "tests", "test_h.py"), "w", encoding="utf-8") as fh:
+            fh.write(SKIP + "\n")
 
-    def fake_runtime(self, path):
+    def fake_hermes(self, configured, recorded=None):
         runtime = types.ModuleType("agent.runtime_cwd")
-        runtime.resolve_agent_cwd = lambda: path
-        return mock.patch.dict(sys.modules, {"agent": types.ModuleType("agent"), "agent.runtime_cwd": runtime})
+        runtime.resolve_agent_cwd = lambda: configured
+        constants = types.ModuleType("hermes_constants")
+        constants.get_hermes_home = lambda: self.hermes
+        terminal_tool = types.ModuleType("tools.terminal_tool")
+        terminal_tool.get_session_cwd = lambda key: recorded if key == "s1" else None
+        return mock.patch.dict(sys.modules, {"agent": types.ModuleType("agent"), "agent.runtime_cwd": runtime,
+                                             "hermes_constants": constants, "tools": types.ModuleType("tools"),
+                                             "tools.terminal_tool": terminal_tool})
 
-    def test_a_later_candidate_inside_a_repository_wins(self):
-        with self.fake_runtime(self.home), mock.patch.object(gate.os, "getcwd", return_value=self.root):
-            self.assertEqual(gate.cwd_candidates()[:2], [os.path.normpath(self.home), os.path.normpath(self.root)])
-            self.assertEqual(gate.session_cwd(), os.path.normpath(self.root))
-            self.assertIn("Foreman: CLEAN", commands.handle_slash("status"))
+    def norm(self, p):
+        return os.path.normpath(p)
+
+    def test_on_the_cli_the_process_directory_comes_before_the_configured_one(self):
+        with self.fake_hermes(self.home), mock.patch.object(gate.os, "getcwd", return_value=self.root):
+            self.assertEqual([p for p, _ in gate.cwd_candidates(platform="cli")],
+                             [self.norm(self.root), self.norm(self.home)])
+            out = commands.handle_slash("status", session_id="s1", platform="cli")
+            self.assertIn("Foreman: CLEAN", out)
+            self.assertIn("(from the current directory)", out)
             self.assertEqual(json.loads(commands.foreman_check_tool({}))["verdict"], "CLEAN")
 
-    def test_without_any_repository_the_first_candidate_is_named(self):
+    def test_the_hermes_home_is_never_picked_even_when_it_is_a_repository(self):
+        inside = os.path.join(self.hermes, "tests")
+        with self.fake_hermes(inside), mock.patch.object(gate.os, "getcwd", return_value=self.root):
+            self.assertEqual(gate.session_cwd(platform="cli"), self.norm(self.root))
         elsewhere = os.path.join(self.tmp, "elsewhere")
         os.makedirs(elsewhere)
-        with self.fake_runtime(self.home), mock.patch.object(gate.os, "getcwd", return_value=elsewhere):
-            out = commands.handle_slash("status")
-        self.assertIn(os.path.normpath(self.home), out)
+        with self.fake_hermes(self.hermes), mock.patch.object(gate.os, "getcwd", return_value=elsewhere):
+            out = commands.handle_slash("status", platform="cli")
         self.assertIn("not inside a git repository", out)
+        self.assertIn(self.norm(elsewhere), out)
+        self.assertNotIn(self.norm(self.hermes), out)
+
+    def test_on_a_messaging_platform_the_process_directory_is_ignored(self):
+        with self.fake_hermes(self.home), mock.patch.object(gate.os, "getcwd", return_value=self.root):
+            self.assertEqual([p for p, _ in gate.cwd_candidates(platform="telegram")], [self.norm(self.home)])
+            self.assertIn("not inside a git repository", commands.handle_slash("status", platform="telegram"))
+
+    def test_the_recorded_terminal_directory_wins_and_needs_no_hint(self):
+        other = os.path.join(self.tmp, "other")
+        os.makedirs(other)
+        self.git("init", "-q", cwd=other)
+        with self.fake_hermes(self.home, recorded=self.root), mock.patch.object(gate.os, "getcwd", return_value=other):
+            out = commands.handle_slash("status", session_id="s1", platform="cli")
+        self.assertIn("Repository: %s\n" % self.norm(self.root), out)
+
+    def test_an_explicit_path_is_accepted(self):
+        with self.fake_hermes(self.home), mock.patch.object(gate.os, "getcwd", return_value=self.home):
+            out = commands.handle_slash("status " + self.root, platform="cli")
+        self.assertIn("Foreman: CLEAN", out)
+        self.assertNotIn("(from", out)
 
 
 class WriteGate(GitRepoCase):
@@ -483,7 +525,7 @@ class SlashCommandAndTool(GitRepoCase):
         self.assertIn("tests/test_a.py:1", out)
         self.assertIn("/foreman", commands.handle_slash("help"))
         self.assertIn("Unknown subcommand", commands.handle_slash("review"))
-        with mock.patch.object(commands, "session_cwd", return_value=self.root):
+        with mock.patch.object(commands, "locate", return_value=(self.root, gate.RECORDED)):
             self.assertIn("Foreman: BLOCKED", commands.handle_slash(""))
 
     def test_tool_returns_json(self):

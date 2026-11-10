@@ -367,50 +367,98 @@ def _option_values(args: list, short: str, long: str) -> list:
 
 # ─── Where the session runs ──────────────────────────────────────────────────
 
-def cwd_candidates(*keys: str) -> list:
-    """Where the session may be working, most specific first, existing directories only:
+# Surfaces where the Hermes process was started by the user in a directory, so that directory means something.
+# Messaging platforms and the Desktop app start from wherever the service or the app was launched.
+LOCAL_PLATFORMS = {"", "cli", "tui", "local"}
+RECORDED, PROCESS, CONFIGURED = "recorded", "process", "configured"
+HOW = {RECORDED: "the terminal's directory for this session", PROCESS: "the current directory",
+       CONFIGURED: "Hermes's working directory", "given": "the given path"}
 
-    1. the directory the terminal tool recorded for this session (it follows ``cd`` between calls), under the session
-       key Hermes exposes and the keys the caller passes — a Hermes internal, read guarded;
-    2. Hermes's documented ``resolve_agent_cwd()`` (the configured terminal directory, or the launch directory);
-    3. the process directory."""
-    keys_in_order = []
+
+def _session_env(name: str) -> str:
     try:
         from gateway.session_context import get_session_env
-        keys_in_order.append(get_session_env("HERMES_SESSION_KEY", "") or "")
+        return get_session_env(name, "") or ""
     except Exception:
-        pass
-    keys_in_order += [k for k in keys if isinstance(k, str)]
+        return ""
+
+
+def hermes_home() -> Optional[str]:
+    """The active Hermes home, through Hermes's documented helper."""
+    try:
+        from hermes_constants import get_hermes_home
+        return os.path.normcase(os.path.realpath(str(get_hermes_home())))
+    except Exception:
+        return None
+
+
+def _inside(path: str, home: Optional[str]) -> bool:
+    if not home or not path:
+        return False
+    p = os.path.normcase(os.path.realpath(path))
+    return p == home or p.startswith(home.rstrip(os.sep) + os.sep)
+
+
+def cwd_candidates(*keys: str, platform: Optional[str] = None) -> list:
+    """(directory, how it was found) in order of trust for the surface, existing directories only:
+
+    1. the directory the terminal tool recorded for this session's keys (it follows ``cd`` between calls) — a Hermes
+       internal, read guarded;
+    2. on local surfaces (CLI, TUI), the process directory, where the user started Hermes;
+    3. Hermes's documented ``resolve_agent_cwd()`` (the configured terminal directory).
+    Anything inside the Hermes home is dropped unless the terminal recorded it: it is Hermes's own data, not the
+    user's project, even when it happens to be a git repository."""
+    if platform is None:
+        platform = _session_env("HERMES_SESSION_PLATFORM")
+    keys_in_order = [k for k in (*keys, _session_env("HERMES_SESSION_KEY")) if isinstance(k, str) and k]
     out = []
     try:
         from tools.terminal_tool import get_session_cwd  # not a documented plugin surface: guarded
-        for key in dict.fromkeys(k for k in keys_in_order if k):
-            out.append(get_session_cwd(key))
+        for key in dict.fromkeys(keys_in_order):
+            out.append((get_session_cwd(key), RECORDED))
     except Exception:
         pass
+    process = None
     try:
-        from agent.runtime_cwd import resolve_agent_cwd
-        out.append(str(resolve_agent_cwd()))
-    except Exception:
-        pass
-    try:
-        out.append(os.getcwd())
+        process = os.getcwd()
     except OSError:
         pass
-    return list(dict.fromkeys(os.path.normpath(p) for p in out if isinstance(p, str) and p and os.path.isdir(p)))
+    if str(platform or "").lower() in LOCAL_PLATFORMS:
+        out.append((process, PROCESS))
+    try:
+        from agent.runtime_cwd import resolve_agent_cwd
+        out.append((str(resolve_agent_cwd()), CONFIGURED))
+    except Exception:
+        pass
+    home, seen, result = hermes_home(), set(), []
+    for path, how in out:
+        if not isinstance(path, str) or not path or not os.path.isdir(path):
+            continue
+        path = os.path.normpath(path)
+        if path in seen or (how != RECORDED and _inside(path, home)):
+            continue
+        seen.add(path)
+        result.append((path, how))
+    return result
 
 
-def session_cwd(*keys: str, deadline: Optional[float] = None) -> str:
-    """The first candidate directory that is inside a git repository; when none is, the first candidate (so the
-    message names where Foreman looked)."""
-    candidates = cwd_candidates(*keys)
-    for c in candidates:
+def locate(*keys: str, platform: Optional[str] = None, deadline: Optional[float] = None) -> tuple:
+    """(directory, how) of the first candidate inside a git repository that is not the Hermes home; when none is,
+    the first candidate, so the message names where Foreman looked."""
+    candidates = cwd_candidates(*keys, platform=platform)
+    home = hermes_home()
+    for path, how in candidates:
         try:
-            if detector.find_repo(c, deadline=deadline):
-                return c
+            root = detector.find_repo(path, deadline=deadline)
         except GitError:
             break
-    return candidates[0] if candidates else os.path.expanduser("~")
+        if root and (how == RECORDED or not _inside(root, home)):
+            return path, how
+    return candidates[0] if candidates else (os.path.expanduser("~"), CONFIGURED)
+
+
+def session_cwd(*keys: str, platform: Optional[str] = None, deadline: Optional[float] = None) -> str:
+    return locate(*keys, platform=platform, deadline=deadline)[0]
 
 
 # ─── Evaluating an action ────────────────────────────────────────────────────
@@ -645,7 +693,7 @@ def _is_store_path(path) -> bool:
     """The grant store, however the path is spelt (case, trailing dots or spaces that Windows drops)."""
     if not isinstance(path, str) or not path:
         return False
-    name = os.path.basename(path.replace("\\", "/").rstrip("/")).rstrip(". ")
+    name = os.path.basename(os.path.normpath(path.replace("\\", "/").rstrip("/ "))).rstrip(". ")
     return os.path.normcase(name).lower() == grants.GRANTS_FILE.lower()
 
 
