@@ -5,8 +5,8 @@ import types
 import unittest
 from unittest import mock
 
+from tests_support import GitRepoCase  # first: it puts plugin/ on sys.path
 from foreman import board, commands, review
-from tests_support import GitRepoCase
 
 SKIP = "@pytest.mark." + "skip"
 GHP = "ghp_"  # a GitHub token prefix, completed at runtime

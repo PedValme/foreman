@@ -53,5 +53,6 @@ jobs:
           BASE: ${{ github.base_ref }}
         run: |
           git worktree add ../base "origin/$BASE"
-          cd ../base
+          # The plugin lives in plugin/; a base from before that move has the foreman package at its root.
+          if [ -d ../base/plugin/foreman ]; then cd ../base/plugin; else cd ../base; fi
           python -m foreman.detector "origin/$BASE" HEAD --repo "$GITHUB_WORKSPACE"

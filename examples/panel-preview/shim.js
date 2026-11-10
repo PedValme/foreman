@@ -1,4 +1,4 @@
-// A stand-in for the few @hermes/plugin-sdk pieces Foreman's panel uses, so the real desktop/plugin.js runs in a
+// A stand-in for the few @hermes/plugin-sdk pieces Foreman's panel uses, so the real plugin/desktop/plugin.js runs in a
 // plain browser. It is NOT the SDK: Button is a plain <button>, the composer is the fake chat box on the left, toasts
 // are the preview's own. What it records (commands sent, drafts, clipboard, links) shows in the chat box.
 (function () {

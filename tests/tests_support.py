@@ -1,9 +1,18 @@
-"""Temporary git repositories for the tests (stdlib only)."""
+"""Temporary git repositories for the tests (stdlib only).
+
+Import this module before anything from ``foreman``: the plugin Hermes installs lives in ``plugin/``, and this puts
+that directory on ``sys.path`` (the one place the tests do so)."""
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # the repository
+PLUGIN_DIR = os.path.join(ROOT, "plugin")  # what Hermes installs: plugin.yaml, __init__.py, foreman/, desktop/...
+if PLUGIN_DIR not in sys.path:
+    sys.path.insert(0, PLUGIN_DIR)
 
 
 class GitRepoCase(unittest.TestCase):

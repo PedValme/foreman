@@ -6,6 +6,7 @@ import shutil
 import tempfile
 import unittest
 
+import tests_support  # noqa: F401  first: it puts plugin/ on sys.path
 from foreman import panel_api
 
 SHA = "a" * 40

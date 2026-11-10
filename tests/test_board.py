@@ -4,8 +4,8 @@ import json
 import os
 import unittest
 
+from tests_support import GitRepoCase  # first: it puts plugin/ on sys.path
 from foreman import board, commands, detector, gate, grants, pipeline
-from tests_support import GitRepoCase
 
 SKIP = "@pytest.mark." + "skip"
 OID = "f" * 40

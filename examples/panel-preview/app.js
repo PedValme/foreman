@@ -1,4 +1,4 @@
-// The preview page: loads the real panel (out/plugin.classic.js, generated from desktop/plugin.js), feeds it the
+// The preview page: loads the real panel (out/plugin.classic.js, generated from plugin/desktop/plugin.js), feeds it the
 // scripted snapshots from mock.js through a fake ctx.rest, and plays them. URL hash options, for screenshots:
 //   #s=3&step=4&theme=dark&w=360&motion=reduce&still=1&open=1&shot=1&go=5&delay=1500
 (function () {

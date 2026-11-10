@@ -7,8 +7,8 @@ import time
 import unittest
 from unittest import mock
 
+from tests_support import GitRepoCase  # first: it puts plugin/ on sys.path
 from foreman import commands, detector, gate, sarif
-from tests_support import GitRepoCase
 
 SKIP = "@pytest.mark." + "skip"
 

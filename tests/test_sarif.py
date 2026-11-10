@@ -11,8 +11,8 @@ import os
 import unittest
 from unittest import mock
 
+from tests_support import GitRepoCase  # first: it puts plugin/ on sys.path
 from foreman import commands, detector, gate, sarif
-from tests_support import GitRepoCase
 
 SKIP = "@pytest.mark." + "skip"
 NEVER_STALE = 4_000_000_000  # a report modified in 2096: newer than any change a test makes

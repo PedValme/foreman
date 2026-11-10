@@ -68,7 +68,9 @@ jobs:
       - name: Foreman
         env:
           BASE: ${{ github.base_ref }}
-          PYTHONPATH: ${{ runner.temp }}/foreman
+          # The download's plugin/ folder holds the foreman package. A Foreman commit from before plugin/ existed has
+          # it at the root: use ${{ runner.temp }}/foreman for that one.
+          PYTHONPATH: ${{ runner.temp }}/foreman/plugin
         run: python -m foreman.detector "origin/$BASE" HEAD
         # Variants:
         #   python -m foreman.detector "origin/$BASE" HEAD --strict
