@@ -1,12 +1,12 @@
 # Draft issue for NousResearch/hermes-agent (not opened)
 
-**Title:** Plugin API: three seams a test-integrity plugin needed (terminal cwd, approval for dispatched commands,
-owner notifications with choices)
+**Title:** Plugin API: four seams a test-integrity plugin needed (terminal cwd, approval for dispatched commands,
+owner notifications with choices, button captions)
 
 Hi, and thanks for the plugin surface: hooks, `ctx.dispatch_tool`, `ctx.ask_choice` and `ctx.llm` covered almost
 everything [Foreman](https://github.com/PedValme/foreman) needed. It is a plugin that blocks a coding agent from
 rigging its own check (skipped or deleted tests, a changed check, secrets) and leaves merges to the user. Following
-the catalog guide ("open an issue describing it: we would rather add the seam than list a patch"), here are the three
+the catalog guide ("open an issue describing it: we would rather add the seam than list a patch"), here are the four
 places where we found no public seam, each with the workaround we ship today. Line numbers are Foreman's `main` and
 Hermes v0.23.0.
 
@@ -111,5 +111,17 @@ result = ctx.notify(
   plugin never receives raw callback data or SDK objects.
 - Without a live gateway (CLI only, cron with a bot-token platform) the text is delivered like `hermes send` and the
   choices are rendered as text commands.
+
+## 4. A short button caption on a choice
+
+**What.** Let a choice passed to `ctx.ask_choice` carry an optional short `button` caption that messaging adapters use
+as the button text.
+
+**Why.** Telegram always renders numeric buttons ("1", "2") and prints each choice above them as
+`<n>. <label> — <description>` (`plugins/platforms/telegram/adapter.py:4290` `send_clarify`; the text is built in
+`hermes_cli/plugin_choices.py:58-70`). A plugin can only keep its labels short; it cannot make the buttons say
+"Merge" and "Cancel".
+
+**Consumer.** `plugin/foreman/board.py` `_confirm`: `{"value": "merge", "label": "Merge PR #2", "button": "Merge"}`.
 
 Happy to test any of these against Foreman, or to send a PR for the first one if you agree on its shape.

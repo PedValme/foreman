@@ -319,8 +319,69 @@ class PullRequestVerdicts(BoardCase):
         self.assertIn("Closes: #3 · no CI checks", question)
         self.assertTrue(question.startswith("WARNING: no CI checks."), question)
         self.assertIn("Change things", question)
-        self.assertEqual([c["label"] for c in choices], ["Merge", "Cancel"])
+        self.assertEqual([c["label"] for c in choices], ["Merge PR #7", "Cancel"])
         self.assertEqual(board._CTX.dispatched, [])
+
+    def test_pr_number_forms(self):
+        for token in ("2", "#2", "2.", "2,", "2;", "2:", "2!", "2?", "#2.", "https://github.com/a/b/pull/2"):
+            self.assertEqual(board._pr_number(token), 2, token)
+        for token in ("2..", "2.,", "..2", "#", ".", "##2", "2a", "pr2", "PR 2", "--yes.", "-2", ""):
+            self.assertIsNone(board._pr_number(token), token)
+
+    def test_merge_accepts_a_trailing_full_stop_but_not_a_flag_with_one(self):
+        self.mergeable()
+        board.bind(FakeCtx(choice="cancel"))
+        self.assertIn("cancelled; PR #7 was not merged", self.run_cmd("merge 7."))
+        self.assertIn("Usage: /foreman merge", self.run_cmd("merge 7 --yes."))
+
+    def test_merge_card_is_short_labels_with_the_detail_in_the_question(self):
+        self.mergeable()
+        board.bind(FakeCtx(choice="cancel"))
+        self.run_cmd("merge 7")
+        question, choices = board._CTX.asked[0]
+        self.assertEqual(choices, [{"value": "merge", "label": "Merge PR #7"},
+                                   {"value": "cancel", "label": "Cancel"}])
+        self.assertFalse(any("description" in c for c in choices))
+        lines = question.split("\n")
+        self.assertEqual(lines[0], "WARNING: no CI checks.")
+        self.assertIn("Will run: gh pr merge 7 --squash --delete-branch (pinned to fffffff)", lines)
+        self.assertNotIn(OID, question)  # the short SHA only
+        self.assertEqual(lines[-1], "Choose Merge PR #7 to merge, or Cancel.")
+        print("\n" + question + "\n" + "\n".join("%d. %s" % (i, c["label"]) for i, c in enumerate(choices, 1)))
+
+    def test_typed_values_and_labels_are_unambiguous(self):
+        self.mergeable()
+        board.bind(FakeCtx(choice="cancel"))
+        self.run_cmd("merge 7")
+        merge_choices = board._CTX.asked[0][1]
+        self.blocked_pr()
+        board.bind(FakeCtx(choice="cancel"))
+        self.run_cmd("reject 7 --close bad")
+        for choices in (merge_choices, board._CTX.asked[0][1]):
+            owner = {}  # a typed word (value or label, any case) must name exactly one choice
+            for c in choices:
+                for word in {c["value"].lower(), c["label"].lower()}:
+                    self.assertNotIn(owner.setdefault(word, c["value"]), (None,) + tuple(
+                        x["value"] for x in choices if x is not c), word)
+            self.assertTrue(all(" " not in c["value"] for c in choices))
+
+    def test_reject_close_card(self):
+        self.blocked_pr()
+        board.bind(FakeCtx(choice="cancel"))
+        self.run_cmd("reject 7 --close bad")
+        question, choices = board._CTX.asked[0]
+        self.assertEqual(choices, [{"value": "close", "label": "Post and close PR #7"},
+                                   {"value": "post", "label": "Post only"},
+                                   {"value": "cancel", "label": "Cancel"}])
+        self.assertIn("Will run: gh pr comment 7, then gh pr close 7", question)
+        self.assertTrue(question.endswith("Choose Post and close PR #7, Post only (leave it open), or Cancel."))
+
+    def test_the_dispatched_merge_keeps_the_full_sha(self):
+        self.mergeable()
+        board.bind(FakeCtx(choice="merge"))
+        self.run_cmd("merge 7")
+        self.assertEqual(board._CTX.dispatched[0][1]["command"],
+                         "gh pr merge 7 --squash --delete-branch --match-head-commit " + OID)
 
     def test_merge_without_an_answer_does_not_merge(self):
         self.mergeable()
@@ -350,7 +411,7 @@ class PullRequestVerdicts(BoardCase):
         self.assertIn("nothing was posted on PR #7", out)
         self.assertIn("/foreman reject 7 --close --yes bad", out)
         self.assertEqual(board._CTX.dispatched, [])
-        board.bind(FakeCtx(choice="comment"))
+        board.bind(FakeCtx(choice="post"))
         self.run_cmd("reject 7 --close bad")
         self.assertEqual([a["command"].split(" --")[0] for _n, a in board._CTX.dispatched], ["gh pr comment 7"])
 
