@@ -345,22 +345,22 @@ def known_repository(value: str) -> tuple:
     one of the recently used ones (``/foreman use`` adds it), matched by its path or by its remote's
     ``owner/name``. A command that arrives from a chat can never point Foreman at any other directory."""
     value = (value or "").strip().strip('"').strip("'")
-    known = []
+    known, spellings = [], {}  # a root as git gives it, and also as it was pinned (8.3 names, symlinked temp dirs)
     for r in recent():
         if os.path.isdir(r):
             root = detector.find_repo(r)
             if root:
                 known.append(os.path.normpath(root))
+                for spelt in (r, root):
+                    spellings[os.path.normcase(os.path.normpath(spelt))] = os.path.normpath(root)
     refuse = ("Foreman: `--repo %s` is not a repository Foreman knows on this machine. Pin it once with "
               "`/foreman use <path>` where it lives; then `--repo` can name it." % trim(value, 60))
     if not value:
         return None, refuse
     path = os.path.expanduser(value)
-    if os.path.isabs(path):
-        root = detector.find_repo(path) if os.path.isdir(path) else None
-        if root and any(os.path.normcase(os.path.normpath(root)) == os.path.normcase(k) for k in known):
-            return os.path.normpath(root), None
-        return None, refuse
+    if os.path.isabs(path):  # compared as text first: a typed path is never opened unless it is a known root
+        match = spellings.get(os.path.normcase(os.path.normpath(path)))
+        return (match, None) if match else (None, refuse)
     if not _REPO_NAME.match(value):
         return None, refuse
     matches = [k for k in known if value.lower() in remote_names(k)]

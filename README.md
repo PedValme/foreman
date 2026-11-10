@@ -285,15 +285,16 @@ change introduces.
 
 ## Notifications
 
-Off by default: nothing is sent anywhere until you type `/foreman notify on <target>`. The target is where Hermes's
+Off by default: nothing is sent anywhere until you type `/foreman notify on <target>` (or ask for a sample with
+`/foreman notify test`). The target is where Hermes's
 own `hermes send` would deliver: `telegram` (your Telegram home channel, the chat where you ran `/sethome`),
 `telegram:<chat id>`, `discord:#channel`, `slack:<channel id>`, and the other platforms your Hermes is set up for.
 Typed in a chat, `/foreman notify on` uses that platform's home channel. `/foreman notify test` sends a sample now,
 `/foreman notify` shows the state and the last message, `/foreman notify off` stops them. The same two settings
 (`notify`, `notify_to`) are on the plugin's page in the Desktop.
 
-**What is sent.** One short plain-text message when a pull request is ready for you or needs your decision (and,
-when Foreman's caller reports it, when one was merged or rejected): the repository, the pull request's number and
+**What is sent.** One short plain-text message each time Foreman's pipeline reports that a pull request is ready
+for you or needs your decision (or was merged or rejected), once per pull request head: the repository, the pull request's number and
 title, its branch and head commit, the one-line verdict, the link, and the commands to act on it. On Telegram:
 
 ```
@@ -318,15 +319,18 @@ Hermes media directive, so a crafted pull request title cannot ping people, add 
 back to the plugin, so the message carries commands, not buttons. When you send `/foreman merge 6 --repo
 acme/widgets` in the chat, it is exactly the command described in *Merge and reject*: a fresh verdict, refused when
 BLOCKED, conflicting, a draft or still being computed, and then Hermes's own **Merge** / **Cancel** buttons (on
-Telegram, Discord and Slack; a numbered list elsewhere). `--repo` accepts only a repository Foreman already knows on
-this machine (one you pinned with `/foreman use`, or one Foreman's caller reported with its path), by its remote's
-`owner/name` or its path; any other value is refused, so a message cannot point Foreman at another directory.
+Telegram, Discord and Slack; a numbered list elsewhere). `--repo` accepts only a repository you already used on this
+machine (pinned with `/foreman use`, or reported with its path by Foreman's pipeline), by its remote's `owner/name`
+or its exact path; any other value is refused before Foreman opens it, so a command copied from a message only acts
+on repositories you already work with.
 
 **The network path.** Foreman runs `hermes send --to <target> --file <message> --quiet` through Hermes's own
 terminal tool. Your Hermes and your own bot deliver it; Foreman never reads a token or a credential file. The
 message file lives in Foreman's data directory for the moment the command runs. With a Docker or remote terminal
 backend `hermes` is not there, and the message is not sent (the reason is returned and shown by `/foreman notify`).
-A send that fails or times out (60 s) is reported, never retried, and never blocks the agent.
+A send waits for `hermes send` for at most 60 s; one that fails or times out is reported, never retried. The
+message file and the log of sends are Foreman's state: the agent's commands and writes that name them are blocked,
+like the rest of its data directory.
 
 ## Install
 
@@ -349,7 +353,8 @@ Requires Hermes Agent >= 0.22.6 and git on the PATH.
   exceptions you allowed: rule, file, line, message; no file contents), `foreman-board.json` (the repository pinned
   per session and the last ten you used: paths only), `reviews/*.json` (the last `/foreman review` of each target;
   its findings quote lines of the diff, and `/foreman reject` includes them), and, for a moment, the text of a
-  `/foreman reject` comment in `outbox/` (deleted once `gh pr comment` has read it). Foreman blocks the agent's
+  `/foreman reject` comment in `outbox/` (deleted once `gh pr comment` has read it), and, with notifications on,
+  `foreman-notify.json` and, for a moment, a message in `notify/`. Foreman blocks the agent's
   `write_file`, `patch` and terminal commands that name these files or directories. This guard is best effort: it
   matches text, so a glob, a relative path after `cd`, or Hermes's `execute_code` gets past it.
 - **Runs the GitHub CLI (`gh`) only when you type a `/foreman` subcommand**, as a subprocess with its own login, in

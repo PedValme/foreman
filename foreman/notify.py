@@ -62,7 +62,7 @@ def enabled() -> bool:
     return isinstance(value, str) and value.strip().lower() in ("on", "true", "yes")
 
 
-_TARGET = re.compile(r"^[a-z][a-z0-9_]{1,31}(?::[^\s\"'`$;&|<>\\]{1,200})?$")
+_TARGET = re.compile(r"^[a-z][a-z0-9_]{1,31}(?::[^\s\"'`$;&|<>\\%!]{1,200})?$")
 
 
 def destination() -> str:
@@ -181,8 +181,8 @@ def render(event: dict, platform: str = "") -> str:
     if event.get("summary"):
         lines.append("Verdict: %s" % clean(event["summary"], 300))
     url = target.get("url")
-    if repo and isinstance(url, str) and re.fullmatch(r"https://[A-Za-z0-9.-]{1,100}/%s/pull/%d" % (re.escape(repo), number),
-                                                   url):
+    if repo and isinstance(url, str) and re.fullmatch(r"https://github\.com/%s/pull/%d" % (re.escape(repo), number),
+                                                   url, flags=re.IGNORECASE):
         lines.append(url)
     if kind in ("ready", "needs_owner"):
         actions = _actions(event, number, repo)
@@ -230,7 +230,10 @@ def _append_log(entry: dict) -> None:
 
 
 def _key(event: dict) -> str:
-    return "%s|%s|%s" % (event.get("kind"), event.get("id"), event.get("head"))
+    """What makes an event new: its kind, repository, pull request and head (never the caller's free-form id)."""
+    target = event.get("target") if isinstance(event.get("target"), dict) else {}
+    return "%s|%s|%s|%s" % (event.get("kind"), str(event.get("repo") or "").lower(), target.get("number"),
+                            event.get("head"))
 
 
 def _deliver(text: str, target: str) -> tuple:
@@ -346,13 +349,14 @@ def cmd_notify(args: str = "", keys: tuple = (), platform: Optional[str] = None)
             e = last[0]
             lines.append("Last: %s %s, %s" % (e.get("kind"), e.get("id"), "sent" if e.get("sent")
                                               else "not sent (%s)" % e.get("why_not")))
-        lines.append("Usage: /foreman notify on [telegram|discord:#ops|...] · off · test")
+        lines.append("Usage: /foreman notify on [telegram|discord:#ops|...] · to <target> · off · test")
         return "\n".join(lines)
     if sub == "off":
         problem = _set("notify", "off")
         return "Foreman: notifications are off." if problem is None else "Foreman: cannot save it: %s" % problem
     if sub in ("on", "to"):
-        new = words[1] if len(words) > 1 else (target or (platform or ""))
+        here = (platform or "").lower()
+        new = words[1] if len(words) > 1 else (here if valid_target(here) else target)
         head, sep, chat = new.partition(":")
         new = head.lower() + sep + chat
         if not valid_target(new):
@@ -374,7 +378,7 @@ def cmd_notify(args: str = "", keys: tuple = (), platform: Optional[str] = None)
         if sent:
             return "Foreman: sent this to %s:\n%s\n%s\n%s" % (target, "-" * 40, text, "-" * 40)
         return "Foreman: the test was NOT sent to %s: %s" % (target, why)
-    return "Usage: /foreman notify [on [target] | off | test]"
+    return "Usage: /foreman notify [on [target] | to <target> | off | test]"
 
 
 SUBCOMMANDS: dict = {

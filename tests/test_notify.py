@@ -34,6 +34,11 @@ class NotifyCtx(FakeCtx):
         return super().dispatch_tool(name, args, **kwargs)
 
 
+def same(a, b):
+    """One directory, however the platform spells it (8.3 names on Windows, /private/var on macOS)."""
+    return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+
+
 def event(kind="ready", number=6, repo="acme/widgets", **extra):
     e = {"kind": kind, "id": "%s#pr:%d" % (repo, number), "repo": repo,
          "target": {"kind": "pr", "number": number, "branch": "feat/x", "title": "Add retries",
@@ -95,7 +100,7 @@ class Render(unittest.TestCase):
                            {"label": "x", "command": "/foreman merge 6; rm -rf /"},
                            {"label": "y", "command": "/foreman allow abc"},
                            {"label": "Reject", "command": "/foreman reject 6 --close --yes"}])
-        e["target"]["url"] = "https://evil.example/acme/widgets/pull/7"
+        e["target"]["url"] = "https://evil.example/acme/widgets/pull/6"  # right repo and number, wrong host
         text = notify.render(e)
         self.assertNotIn("merge 7", text)
         self.assertNotIn("rm -rf", text)
@@ -163,6 +168,19 @@ class Sending(GitRepoCase):
         self.assertEqual((again["sent"], again["why_not"]), (False, "already sent"))
         self.assertEqual(len(ctx.dispatched), 1)
         self.assertTrue(notify.send(event(head="b" * 40))["sent"])  # a new head is a new event
+        self.assertTrue(notify.send(event(number=7, id=None))["sent"])  # another PR, whatever the caller's id
+        self.assertTrue(notify.send(event(number=8, id=None))["sent"])
+
+    def test_the_agent_cannot_touch_the_notify_state(self):
+        store = notify.grants.store_dir().replace("\\", "/")
+        for command in ('echo [] > "%s/foreman-notify.json"' % store,
+                        'hermes send --to "telegram" --file "%s/notify/msg-abc.txt" --quiet; rm x' % store,
+                        'cp evil.txt "%s/notify/msg-abc.txt"' % store,
+                        'rm "%s/notify/msg-abc.txt"' % store, 'cat "%s/foreman-notify.json"' % store,
+                        'hermes send --to "telegram:%%X%%" --file "%s/notify/msg-abc.txt" --quiet' % store):
+            self.assertEqual(gate.on_pre_tool_call("terminal", {"command": command})["action"], "block", command)
+        self.assertEqual(gate.on_pre_tool_call("write_file", {"path": store + "/foreman-notify.json",
+                                                              "content": "[]"})["action"], "block")
 
     def test_failures_are_reported_never_raised(self):
         ctx = self.ctx(settings={"notify": "on", "notify_to": "discord:#ops"},
@@ -193,7 +211,7 @@ class Sending(GitRepoCase):
         notify.send(event(root=self.root))
         root, problem = board.known_repository("acme/widgets")
         self.assertIsNone(problem)
-        self.assertEqual(os.path.normcase(root), os.path.normcase(os.path.normpath(self.root)))
+        self.assertTrue(same(root, self.root))
         notify.send(event(repo="other/thing", root=self.tmp, head="c" * 40))  # a root whose remote differs: ignored
         self.assertEqual(len(board.recent()), 1)
 
@@ -226,7 +244,10 @@ class Subcommands(GitRepoCase):
         self.assertEqual(board._CTX.dispatched, [])
 
     def test_on_in_a_chat_defaults_to_that_platform(self):
+        board._CTX.settings["notify_to"] = "slack:C1"
         self.run_cmd("notify on", platform="discord")
+        self.assertEqual(board._CTX.settings["notify_to"], "discord")
+        self.run_cmd("notify on", platform="cli")  # from a terminal: keeps the saved target
         self.assertEqual(board._CTX.settings["notify_to"], "discord")
         self.assertIn("say where", self.run_cmd("notify on cli").lower())
 
@@ -260,15 +281,16 @@ class RepoOption(BoardCase):
         out = self.chat("merge 7 --repo acme/widgets")
         self.assertIn("merged PR #7", out)
         self.assertEqual(len(board._CTX.dispatched), 1)
-        self.assertEqual(os.path.normcase(board._CTX.dispatched[0][1]["workdir"]),
-                         os.path.normcase(os.path.normpath(self.root)))
+        self.assertTrue(same(board._CTX.dispatched[0][1]["workdir"], self.root))
         self.assertIn("Foreman verdict for PR #7: CLEAN", self.chat("verdict 7 --repo=acme/widgets"))
 
     def test_path_of_a_known_repository(self):
         self.assertIn("Foreman verdict for PR #7: CLEAN", self.chat("verdict 7 --repo %s" % self.root))
 
     def test_unknown_names_and_paths_are_refused(self):
-        for value in ("other/widgets", self.tmp, os.path.expanduser("~"), "../repo", "acme/widgets;x"):
+        os.makedirs(os.path.join(self.root, "sub"), exist_ok=True)
+        for value in ("other/widgets", self.tmp, os.path.expanduser("~"), "../repo", "acme/widgets;x",
+                      os.path.join(self.root, "sub")):
             board.bind(FakeCtx(choice="merge"))
             out = self.chat("merge 7 --repo %s" % value)
             self.assertIn("is not a repository Foreman knows", out)
