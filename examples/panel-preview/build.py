@@ -36,7 +36,7 @@ REACT_FILES = {
 
 
 def classic(source: str) -> str:
-    """``desktop/plugin.js`` as a classic script. Raises when the file grew an import or export this does not know."""
+    """``plugin/desktop/plugin.js`` as a classic script. Raises when the file grew an import or export this does not know."""
     def one(match: re.Match) -> str:
         names, module = match.group(1), match.group(2)
         if module not in MODULES:

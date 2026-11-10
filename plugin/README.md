@@ -347,7 +347,7 @@ row does not show it yet). The **Foreman** pane opens beside the chat; **Ctrl/‚å
 back.
 
 - It reads only Foreman's own state file (`pipeline.json` in its plugin data directory), through a read-only route
-  Hermes mounts for enabled plugins (`GET /api/plugins/foreman/pipeline`, `plugin/dashboard/plugin_api.py`). It polls that
+  Hermes mounts for enabled plugins (`GET /api/plugins/foreman/pipeline`, `dashboard/plugin_api.py`). It polls that
   route every 2 s while the pane is on screen and every 15 s otherwise, never while the window is hidden; no network
   calls, nothing written.
 - Its buttons only put a Foreman command into the chat, the same text you would type: **Merge #6** sends
