@@ -26,6 +26,8 @@ agent cannot write them (``gate.STORE_FILES``).
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import hashlib
 import json
 import logging
@@ -46,6 +48,8 @@ VERSION = 1
 MAX_ITEMS = 200
 MAX_EVENTS = 50
 MAX_NOTIFIED = 2000
+MAX_PENDING = 100
+MAX_SEND_PER_CALL = 3
 STAGES = ("gate", "review", "bounced", "ready", "awaiting_owner", "merged", "rejected")
 STATUSES = {"gate": ("pass", "fail", "pending", "skipped"),
             "review": ("pass", "notes", "fail", "pending", "skipped", "error"),
@@ -165,11 +169,17 @@ def _load_meta() -> dict:
     notified = data.get("notified")
     nudged = data.get("nudged")
     counted = data.get("counted")
+    pending = data.get("pending_notifications")
+    calls = data.get("model_calls")
     return {"notified": [n for n in notified if isinstance(n, str)] if isinstance(notified, list) else [],
             "nudged": {k: v for k, v in nudged.items() if isinstance(k, str) and isinstance(v, str)}
             if isinstance(nudged, dict) else {},
             "counted": {k: [x for x in v if isinstance(x, str)] for k, v in counted.items()
-                        if isinstance(k, str) and isinstance(v, list)} if isinstance(counted, dict) else {}}
+                        if isinstance(k, str) and isinstance(v, list)} if isinstance(counted, dict) else {},
+            "pending_notifications": [e for e in pending if isinstance(e, dict)][-MAX_PENDING:]
+            if isinstance(pending, list) else [],
+            "model_calls": {k: v for k, v in calls.items() if isinstance(k, str) and isinstance(v, int)
+                            and not isinstance(v, bool)} if isinstance(calls, dict) else {}}
 
 
 def _prune(data: dict, meta: dict) -> None:
@@ -183,7 +193,47 @@ def _prune(data: dict, meta: dict) -> None:
     meta["nudged"] = dict(list(meta["nudged"].items())[-MAX_ITEMS * 2:])
     ids = {i["id"] for i in data["items"]}
     meta["counted"] = {k: v[-20:] for k, v in meta["counted"].items() if k in ids}
+    budgets = {_budget_key(i) for i in data["items"]}
+    meta["model_calls"] = {k: v for k, v in meta["model_calls"].items() if k in budgets}
     meta["notified"] = meta["notified"][-MAX_NOTIFIED:]
+    if len(meta["pending_notifications"]) > MAX_PENDING:
+        logger.warning("foreman: %d queued notification(s) dropped (more than %d waiting)",
+                       len(meta["pending_notifications"]) - MAX_PENDING, MAX_PENDING)
+        meta["pending_notifications"] = meta["pending_notifications"][-MAX_PENDING:]
+
+
+# ─── Inside a hook ───────────────────────────────────────────────────────────
+
+# Set by the hook wrappers (gate.on_pre_tool_call, gate.on_pre_verify) for the duration of the hook call. Inside a
+# hook nothing is sent: a notification runs `hermes send` (up to 60 s) and Hermes gives a hook callback about 30 s.
+_IN_HOOK: contextvars.ContextVar = contextvars.ContextVar("foreman_in_hook", default=False)
+
+
+@contextlib.contextmanager
+def hook_context():
+    token = _IN_HOOK.set(True)
+    try:
+        yield
+    finally:
+        _IN_HOOK.reset(token)
+
+
+def in_hook() -> bool:
+    return bool(_IN_HOOK.get())
+
+
+def flush_notifications() -> None:
+    """Send the notifications queued inside hooks. Called from non-hook entry points (every /foreman command, the
+    tool handlers) and by every non-hook update. Never raises; does nothing inside a hook."""
+    if in_hook():
+        return
+    try:
+        with _lock:
+            waiting = bool(_load_meta()["pending_notifications"])
+    except Exception:
+        return
+    if waiting:
+        _mutate(lambda data, meta: None)
 
 
 def snapshot() -> dict:
@@ -201,6 +251,12 @@ def _mutate(fn: Callable[[dict, dict], Any]) -> Any:
             meta["_outbox"] = []
             result = fn(data, meta)
             outbox = meta.pop("_outbox")
+            if in_hook():  # queued, sent later from outside the hook (each event was de-duplicated when queued)
+                meta["pending_notifications"].extend(outbox)
+                outbox = []
+            else:  # a few at a time, so one command never waits on a long backlog of `hermes send`
+                waiting = meta["pending_notifications"] + outbox
+                outbox, meta["pending_notifications"] = waiting[:MAX_SEND_PER_CALL], waiting[MAX_SEND_PER_CALL:]
             _prune(data, meta)
             _write(PIPELINE_FILE, data)
             _write(META_FILE, meta)
@@ -521,6 +577,7 @@ def record_merged(ref: Ref, method: str) -> None:
         stage_of(item, "owner").update(status="approved", at=at)
         stage_of(item, "merge").update(status="done", detail=method, at=at)
         item["stage"] = "merged"
+        meta["model_calls"].pop(_budget_key(item), None)
         _event(item, "Merged (%s) after your approval" % method, at)
         _queue(meta, item, "merged", "%s merged (%s)" % (_label(item), method))
     _mutate(apply)
@@ -533,6 +590,7 @@ def record_rejected(ref: Ref, note: str = "", closed: bool = False) -> None:
         stage_of(item, "owner").update(status="rejected", detail=_one_line(note, 200), at=at)
         stage_of(item, "merge").update(status="skipped", detail="", at=at)
         item["stage"] = "rejected"
+        meta["model_calls"].pop(_budget_key(item), None)
         _event(item, "Rejected%s%s" % (" and closed" if closed else "", ": " + note if note else ""), at)
         _queue(meta, item, "rejected", "%s rejected%s" % (_label(item), ": " + note if note else ""))
     _mutate(apply)
@@ -567,6 +625,50 @@ def event_in_repo(root: str, text: str) -> None:
                 _event(item, text, at)
     if root:
         _mutate(apply)
+
+
+# ─── The agent's review budget (auto_review: finish) ─────────────────────────
+# Every model call the agent's foreman_review tool makes for a change counts, passing or failing. Only a person
+# resets it: a merge, a rejection, or a review they type (/foreman review). Editing files, committing or a passing
+# review does not, so the agent cannot buy more calls.
+
+def review_budget() -> int:
+    return max_bounces() + 1
+
+
+def _budget_key(item: dict) -> str:
+    """The budget belongs to the change's branch, so it survives the branch item becoming its pull request's."""
+    branch = item["target"].get("branch") or ""
+    return "%s#branch:%s" % (item.get("repo"), branch) if branch else item["id"]
+
+
+def _ref_budget_key(ref: Ref) -> str:
+    return "%s#branch:%s" % (ref.slug, ref.branch) if ref.branch else ref.id
+
+
+def model_calls(ref: Ref) -> int:
+    item = find(ref)
+    try:
+        with _lock:
+            calls = _load_meta()["model_calls"]
+    except Exception:
+        return 0
+    return int(calls.get(_budget_key(item) if item else _ref_budget_key(ref), 0))
+
+
+def count_model_call(ref: Ref) -> int:
+    def apply(data, meta):
+        key = _budget_key(_ensure(data, ref, now_iso()))
+        meta["model_calls"][key] = meta["model_calls"].get(key, 0) + 1
+        return meta["model_calls"][key]
+    return _mutate(apply) or 0
+
+
+def reset_model_calls(ref: Ref) -> None:
+    def apply(data, meta):
+        item = _find(data, ref)
+        meta["model_calls"].pop(_budget_key(item) if item else _ref_budget_key(ref), None)
+    _mutate(apply)
 
 
 def nudge_mark(item: str, key: str) -> bool:

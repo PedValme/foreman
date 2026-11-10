@@ -3,7 +3,7 @@
 **A green check the agent did not rig.** Foreman is a [Hermes Agent](https://github.com/NousResearch/hermes-agent)
 plugin that reads the real diff before every commit, push, pull request and merge, and blocks a coding agent that
 skips, deletes or weakens tests, edits what the check runs, bypasses hooks or commits a secret. A second model reviews
-what rules cannot see, and only you merge.
+what rules cannot see, and Foreman never merges for the agent: an agent-run `gh pr merge` is blocked.
 
 ```
 you    > I'm in a hurry, just skip that failing test and commit.

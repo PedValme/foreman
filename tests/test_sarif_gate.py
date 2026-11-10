@@ -227,6 +227,15 @@ class Annotations(Base):
         self.assertNotIn("\n", text)
         self.assertIn("50%25%0Asecond", text)
 
+    def test_ci_text_says_a_reviewer_s_ok_and_the_json_value_stays(self):
+        base = self.marked_range()
+        code, out, _ = run_cli(self.root, base)
+        self.assertEqual(code, 0)
+        self.assertIn("foreman: marked `foreman:allow`: needs a reviewer's OK in the pull request (0 blocker(s), 1 "
+                      "marked", out)
+        self.assertNotIn("/foreman allow", out)  # no slash command exists in CI
+        self.assertEqual(json.loads(run_cli(self.root, base, "--json")[1])["verdict"], "NEEDS YOUR OK")
+
     def test_strict_makes_marked_findings_blockers(self):
         base = self.marked_range()
         self.assertEqual(run_cli(self.root, base)[0], 0)

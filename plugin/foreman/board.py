@@ -1605,8 +1605,8 @@ SUBCOMMANDS: dict = {
     "prs": (cmd_prs, "open PRs: head, CI, the issues each one closes"),
     "issues": (cmd_issues, "open issues and the PR that closes each"),
     "verdict": (cmd_verdict, "[pr|branch] [--repo r]  the verdict, with reasons"),
-    "merge": (cmd_merge, "<pr> [--merge|--rebase] [--yes] [--repo r]  if CLEAN, ready and reviewed, after you "
-                         "confirm"),
+    "merge": (cmd_merge, "<pr> [--merge|--rebase] [--yes] [--repo r]  if CLEAN and ready, after you confirm; "
+                         "with auto_review on, the review must not block it"),
     "reject": (cmd_reject, "<pr> [--close [--yes]] [--repo r] [note]  post the reasons on the PR"),
     "status": (cmd_status, "[path]  this repository's verdict (CLEAN, BLOCKED, INCOMPLETE, NEEDS YOUR OK)"),
 }

@@ -93,6 +93,11 @@ def step(root: str, session_id: str, attempt: int, deadline: Optional[float] = N
         pipeline.record_needs_owner(ref, "bounce limit reached (%d of %d): the latest changes are not reviewed; "
                                          "Foreman stops sending it back" % (bounces, limit))
         return None
+    calls, budget = pipeline.model_calls(ref), pipeline.review_budget()
+    if calls >= budget:
+        pipeline.record_needs_owner(ref, "review budget used up (%d model calls): the latest changes are not "
+                                         "reviewed; `/foreman review --fresh` reviews them" % calls)
+        return None
     if not pipeline.nudge_mark(turn, key):
         return None  # this turn was already nudged for this exact diff; the agent did not call the tool
     return {"action": "continue", "message": REVIEW_FIRST}
@@ -133,6 +138,7 @@ def _summary(rec: dict) -> dict:
 
 
 def foreman_review_tool(args: dict = None, task_id: str = "", **kwargs) -> str:
+    pipeline.flush_notifications()  # outside any hook: send what hooks queued
     try:
         return json.dumps(_tool(args or {}, task_id if isinstance(task_id, str) else ""))
     except Exception as e:  # noqa: BLE001 — a tool result, never a crash
@@ -155,18 +161,34 @@ def _tool(args: dict, task_id: str) -> dict:
         return {"verdict": "NO_REPOSITORY", "message": NO_REPOSITORY_HERE, "advisory": TOOL_ADVISORY}
     lvl = pipeline.level()
     allow, limit_note = lvl == "finish", ""
+    ref = pipeline.local_ref(root)
     if allow:
-        item = pipeline.find(pipeline.local_ref(root))
+        item = pipeline.find(ref)
         bounces, limit = int((item or {}).get("bounces") or 0), pipeline.max_bounces()
+        calls, budget = pipeline.model_calls(ref), pipeline.review_budget()
         if bounces >= limit:
             allow = False
             limit_note = ("The bounce limit is reached (%d of %d): Foreman will not call the reviewer again for this "
                           "change. Tell the user; they decide." % (bounces, limit))
+        elif calls >= budget:
+            allow = False
+            limit_note = ("The review budget for this change is used up (%d model calls): Foreman will not call the "
+                          "reviewer again for it. Tell the user; they can run `/foreman review --fresh`." % calls)
     rec = review.run_review("", keys, where=root, allow_model=allow)
     if rec.get("verdict") in ("NO_REPOSITORY", "ERROR"):
         return {"verdict": rec["verdict"], "message": rec.get("message", ""), "advisory": TOOL_ADVISORY}
+    if allow and not rec.get("cached") and rec.get("model") is not None:
+        pipeline.count_model_call(ref)  # a model call was made for this change
+    last_review = None
+    if rec["verdict"] == review.NOT_REVIEWED and limit_note:
+        last = review.load(rec.get("slug") or ref.slug, "worktree", ref.branch, root)
+        if last and not last.get("error"):  # the last stored result, of an earlier diff of this change
+            last_review = dict(_summary(last), note="the last stored review, of an earlier diff of this change; "
+                                                    "the current diff is not reviewed")
     state = review.record_in_pipeline(rec, bounce=lvl == "finish") or {}
     out = _summary(rec)
+    if last_review:
+        out["last_review"] = last_review
     out["auto_review"] = lvl
     out["advisory"] = TOOL_ADVISORY
     bad = pipeline.blocking_findings(rec)

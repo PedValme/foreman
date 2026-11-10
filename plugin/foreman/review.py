@@ -1109,21 +1109,34 @@ def cmd_review(args: str = "", keys: tuple = (), platform: Optional[str] = None)
     fresh = "--fresh" in words
     r = run_review(" ".join(words), keys, platform, where=root, fresh=fresh)
     record_in_pipeline(r)
+    try:  # a person reviewed this change: the agent's review budget for it starts again
+        from . import pipeline
+        ref = _pipeline_ref(r)
+        if ref is not None:
+            pipeline.reset_model_calls(ref)
+    except Exception:
+        logger.warning("foreman: cannot reset the review budget", exc_info=True)
     return format_review(r)
+
+
+def _pipeline_ref(r: dict):
+    if r.get("verdict") in ("NO_REPOSITORY", "ERROR", NOT_REVIEWED) or not isinstance(r.get("target"), dict):
+        return None
+    from . import pipeline
+    t = r["target"]
+    if t["kind"] == "pr":
+        return pipeline.Ref(r["slug"], r["repo"], "pr", int(t["ref"]), head=r.get("head"),
+                            branch=_pr_branch(t.get("title") or ""))
+    return pipeline.Ref(r["slug"], r["repo"], "branch", branch=t["ref"], head=r.get("head"))
 
 
 def record_in_pipeline(r: dict, then: str = "ready", bounce: bool = False) -> Optional[dict]:
     """Put a review record on the pipeline (never raises)."""
-    if r.get("verdict") in ("NO_REPOSITORY", "ERROR", NOT_REVIEWED) or not isinstance(r.get("target"), dict):
-        return None
     try:
         from . import pipeline
-        t = r["target"]
-        if t["kind"] == "pr":
-            ref = pipeline.Ref(r["slug"], r["repo"], "pr", int(t["ref"]), head=r.get("head"),
-                               branch=_pr_branch(t.get("title") or ""))
-        else:
-            ref = pipeline.Ref(r["slug"], r["repo"], "branch", branch=t["ref"], head=r.get("head"))
+        ref = _pipeline_ref(r)
+        if ref is None:
+            return None
         return pipeline.record_review(ref, r, then=then, bounce=bounce)
     except Exception:
         logger.warning("foreman: cannot record the review on the pipeline", exc_info=True)
