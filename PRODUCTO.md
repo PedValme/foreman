@@ -39,6 +39,25 @@ not skip, delete or weaken the tests, change what the check runs, or commit a se
 14. **A merge needs a person.** `/foreman merge` asks before merging; with nobody to ask it merges nothing and
     prints the command to confirm by typing it. Refusals (BLOCKED, conflicts, draft) cannot be overridden.
 
+15. **One line for every change.** write → gate → second-model review → bounce → the owner approves → merge. Each
+    change has one persisted state with its stages and events; the board, `/foreman pipeline`, the notifications
+    and the Desktop panel all read that same state.
+16. **Review levels.** `auto_review`: `merge` (default — the second model reviews when someone asks to merge),
+    `finish` (the loop inside the agent's turn: review, bounce, fix, re-review, at most `max_bounces`), `off`.
+    A review is bound to the exact diff: the same diff never calls the model twice. Verified blocking findings
+    refuse a merge and cannot be overridden.
+17. **One vocabulary.** CLEAN, BLOCKED, INCOMPLETE (something it was told to inspect could not be read) and NEEDS
+    YOUR OK (waiting for `/foreman allow`), the same in every view, the tool and CI.
+18. **The agent never merges.** An agent-run `gh pr merge` is blocked in every approval mode; only a person's
+    `/foreman merge` merges.
+19. **Notices are off until asked for.** A notification is plain text through the user's own Hermes gateway, sent
+    only after `/foreman notify on`; the commands in it pass every check again.
+20. **The panel only shows and submits.** The Desktop panel reads Foreman's own state and its buttons send the
+    same `/foreman` commands a person would type; it never calls `gh` or merges.
+21. **Only the plugin is installed.** The plugin lives in `plugin/`; the method documents, tests and examples
+    stay in the repository and never reach a user's machine.
+
 ## Out of this delivery
-Publishing GitHub checks from the agent, the owner's decisions and pending items, rework metrics, a Desktop panel
-(unless the core is done early).
+Publishing GitHub checks from the agent, the owner's decisions and pending items, rework metrics. Buttons on the
+pushed notification itself and Hermes's own approval prompt for a plugin's commands need seams Hermes does not
+offer yet (requested upstream).
