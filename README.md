@@ -15,8 +15,8 @@ command text.
 | `test-deleted` | a test code file deleted (snapshots, JSON and fixtures do not count) |
 | `test-moved` | a test code file renamed out of the tests |
 | `check-changed` | a change to a file the check command runs, or to `.foreman.json`; for `package.json`, only its `scripts` |
-| `check-weakened` | `\|\| true` or `continue-on-error: true` in `.github/workflows/*`; `--deselect` / `--ignore=` in pytest config; `testPathIgnorePatterns` / `exclude` in jest or vitest config |
-| `secret`, `env-file` | real credential formats (cloud, GitHub, model APIs, Slack, Stripe, private keys…) everywhere; key/value guesses (passwords in code, config, shell, YAML, `.env`) outside the tests |
+| `check-weakened` | `\|\| true` or `continue-on-error: true` in `.github/workflows/*` next to a test runner; `--deselect` / `--ignore=` pointing at tests in pytest config; `testPathIgnorePatterns` / `exclude` in jest or vitest config (not in coverage settings) |
+| `secret`, `env-file` | real credential formats (cloud, GitHub, model APIs, Slack, Stripe, private keys…) everywhere; key/value guesses (passwords in code, config, shell, YAML, `.env`) outside the tests, and in tests only long values mixing upper case, lower case and digits |
 | `secret-history` | a secret in any commit of what is pushed, even if a later commit removed it |
 
 It also refuses `git commit --no-verify` / `-n`, `git push --no-verify` and `git -c core.hooksPath=…`.
@@ -41,11 +41,12 @@ short id, and the agent is told to ask you. You review it and run:
 
 ```
 /foreman allow           list what is waiting
-/foreman allow <id>      allow that exact line for 24 hours
+/foreman allow <id>      allow that exact finding for 24 hours
 ```
 
-The exception is bound to the rule, the file and the marked line's content: any other change to that line is checked
-again. Slash commands are typed by you; the model has no tool that runs them. This works the same in every approval
+An exception covers exactly what you reviewed. For a marked line: that line's content and the next non-empty line
+(the test it skips), so the same line copied above another test needs its own decision. For a file (a changed or
+weakened check, a moved or deleted test): that version of the file, so any later change to it is checked again. Slash commands are typed by you; the model has no tool that runs them. This works the same in every approval
 mode, YOLO included.
 
 ### When Foreman asks for approval instead
@@ -110,10 +111,13 @@ Requires Hermes Agent >= 0.22.6 and git on the PATH.
 ## Known limits
 
 - It sees the tree as it is **before** the gated command runs; that is why it asks for the gated command on its own.
-- Commits made by an interpreter (a Python or Node script calling git), by git aliases or by other tools are not
-  inspected at that moment; the next `git push` or `gh pr create` still sees what they committed.
-- It does not detect emptied test bodies, removed asserts or commented-out tests: only markers, deletions, moves
-  and changes to the check.
+- Commits made by an interpreter (a Python or Node script calling git, Hermes's `execute_code`), by git aliases or
+  by other tools are not inspected at that moment; the next `git push` or `gh pr create` still sees what they
+  committed. Foreman also does not model `GIT_INDEX_FILE` or `GIT_DIR` set in the environment of a git command.
+- It does not detect emptied test bodies, removed asserts, commented-out tests, or a test function deleted from a
+  file that still exists: only markers, whole-file deletions and moves, and changes to the check.
+- Tests switched off by selection are not detected: `-k 'not x'` in pytest `addopts`, or a `jest` section with
+  `testPathIgnorePatterns` inside `package.json`.
 - Markers covered: pytest (`skip`, `xfail`, `skipif`), unittest (`skip*`, `expectedFailure`, `skipTest`),
   Jest/Vitest/Mocha/Jasmine (`.skip`, `.only`, `.concurrent`, `.each`, `.skipIf`, `xit`, `xtest`, `xdescribe`,
   `fit`, `fdescribe`, `this.skip()`), Go (`t.Skip*`), Rust (`#[ignore]`), JUnit (`@Disabled`, `@Ignore`). A
@@ -122,9 +126,11 @@ Requires Hermes Agent >= 0.22.6 and git on the PATH.
   `check-weakened` patterns above.
 - Secrets are found by pattern: real credential formats reliably, key/value guesses with false negatives (and none
   inside test files).
-- Repository resolution: Foreman uses the directory the terminal last recorded for the session. When a command does
-  not say where it runs and that directory is not a repository, Foreman asks the agent to re-run it with `workdir`
-  or `git -C`.
+- Repository resolution: Foreman tries, in order, the directory the terminal tool recorded for the session, Hermes's
+  `resolve_agent_cwd()` and the process directory, and uses the first one inside a git repository. The first is read
+  from a Hermes internal (`tools.terminal_tool.get_session_cwd`) guarded by a fallback: if Hermes moves it, Foreman
+  falls back to the others. An explicit `workdir`, `cd` or `git -C` always wins. When a command does not say where
+  it runs and no candidate is a repository, Foreman asks the agent to re-run it with `workdir` or `git -C`.
 - With a remote terminal backend (Docker, SSH, …) the repository is not on the Hermes host: Foreman asks for
   approval on every gated command.
 - In YOLO mode or with approvals off, the cases in *When Foreman asks for approval instead* pass without a person.

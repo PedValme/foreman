@@ -118,17 +118,34 @@ def cmd_allow(args: str, keys: tuple = ()) -> str:
         if not items:
             return "Foreman: nothing is waiting for your approval."
         lines = ["Marked `%s` by the agent and waiting for you. Review each one; `/foreman allow <id>` lets that "
-                 "exact line through for 24 hours:" % MARKER]
+                 "exact finding through for 24 hours:" % MARKER]
         for e in items:
-            age = int((time.time() - e.get("created", time.time())) // 60)
-            lines.append("  %s  [%s] %s — %s (%d min ago%s)" % (e["id"], e["rule"], e["location"], e["message"], age,
-                                                              ", " + e["repo"] if e.get("repo") else ""))
+            age = int((time.time() - (e.get("created") or time.time())) // 60)
+            lines.append("  %s  [%s] %s — %s (%d min ago%s)" % (e.get("id", "?"), e.get("rule", "?"),
+                                                              e.get("location", "?"), e.get("message", ""), age,
+                                                              ", " + str(e["repo"]) if e.get("repo") else ""))
         return "\n".join(lines)
     ok, entry = grants.grant(short_id)
     if not ok:
         return "Foreman: %s Run `/foreman allow` to list what is waiting." % entry
-    return ("Foreman: allowed %s [%s] %s for 24 hours. It covers this exact line only; any other change to it is "
-            "checked again." % (entry["id"], entry["rule"], entry["location"]))
+    return "Foreman: allowed %s [%s] %s for 24 hours. %s" % (entry.get("id", short_id), entry.get("rule", "?"),
+                                                            entry.get("location", "?"), _covers(entry.get("rule", "")))
+
+
+_FILE_RULES = {"check-changed", "check-weakened", "test-moved", "test-deleted"}
+
+
+def _covers(rule: str) -> str:
+    """What a grant really covers, said plainly."""
+    if rule in ("test-deleted",):
+        return "It covers deleting that file only."
+    if rule in _FILE_RULES:
+        return ("It covers this version of that file only: any further change to the file is checked again and "
+                "needs a new decision.")
+    if rule == "test-skipped":
+        return ("It covers that marked line above that same test only: the line changed, or copied above another "
+                "test, is checked again.")
+    return "It covers that exact line only: any change to it is checked again."
 
 
 def cmd_help(args: str = "", keys: tuple = ()) -> str:

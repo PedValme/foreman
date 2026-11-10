@@ -98,6 +98,8 @@ SKIPPED_TEST = tuple(re.compile(x) for x in (
     r"\bt\.Skip(?:f|Now)?\s*\(",          # Go
     r"#\[ignore\b",                       # Rust
     r"@(?:Disabled|Ignore)\b",            # JUnit
+    # A "conditional" skip whose condition is a constant is unconditional.
+    r"\b(?:skipif|skipIf)\s*\(\s*(?:True|true|1)\s*[,)]", r"\bskipUnless\s*\(\s*(?:False|false|0)\s*[,)]",
 ))
 # A conditional skip in a test file that is new in this change is legitimate (a platform-only test); added to an
 # existing test it switches that test off.
@@ -115,14 +117,15 @@ TEST_CODE = re.compile(r"(?i)\.(py|pyw|js|jsx|mjs|cjs|ts|tsx|mts|cts|go|rs|java|
                        r"svelte|feature)$")
 NOT_TEST_CODE = re.compile(r"(?i)(^|/)(fixtures?|__fixtures__|__snapshots__|snapshots|testdata|__mocks__)/")
 # Lines that neutralise a check, in well-known places only.
-WEAKENERS = (
-    (re.compile(r"(^|/)\.github/workflows/[^/]+\.ya?ml$", re.I),
-     re.compile(r"\|\|\s*true\b|\bcontinue-on-error:\s*true\b")),
-    (re.compile(r"(^|/)(pytest\.ini|setup\.cfg|pyproject\.toml|tox\.ini)$", re.I),
-     re.compile(r"--deselect\b|--ignore(?:-glob)?=")),
-    (re.compile(r"(^|/)(jest|vitest)\.config\.[cm]?[jt]s$", re.I),
-     re.compile(r"\btestPathIgnorePatterns\b|\bexclude\s*:")),
-)
+WORKFLOW = re.compile(r"(^|/)\.github/workflows/[^/]+\.ya?ml$", re.I)
+WORKFLOW_SOFT = re.compile(r"\|\|\s*true\b|\bcontinue-on-error:\s*true\b")
+TEST_RUNNER = re.compile(r"(?i)\b(?:pytest|py\.test|jest|vitest|mocha|tox|nox|unittest|(?:npm|yarn|pnpm)\s+(?:run\s+)?"
+                         r"test|go\s+test|cargo\s+test|make\s+(?:test|check))\b")
+PYTEST_CONFIG = re.compile(r"(^|/)(pytest\.ini|setup\.cfg|pyproject\.toml|tox\.ini)$", re.I)
+PYTEST_DROP = re.compile(r"--(?:deselect|ignore|ignore-glob)(?:=|\s+)([^\s\"',\]]+)")
+JS_TEST_CONFIG = re.compile(r"(^|/)(jest|vitest)\.config\.[cm]?[jt]s$", re.I)
+JS_TEST_DROP = re.compile(r"\btestPathIgnorePatterns\b|\bexclude\s*:")
+_STEP_WINDOW = 6  # new-side lines around a workflow line that belong to the same step, roughly
 
 FIXES = {
     "secret": ("possible secret in an added line",
@@ -170,17 +173,26 @@ class Finding:
         return d
 
 
-def fingerprint(rule: str, path: str, content: str = "") -> str:
-    """Identity of a finding for a one-time exception: the rule family, the file and the marked line's content (not
-    its line number, so moving the line keeps it; changing it does not)."""
-    raw = "\0".join((_FAMILY.get(rule, rule), path or "", " ".join((content or "").split())))
+def _norm(text: Optional[str]) -> str:
+    return " ".join((text or "").split())
+
+
+def fingerprint(rule: str, path: str, content: str = "", following: str = "", version: str = "") -> str:
+    """Identity of a finding for a one-time exception, never its line number:
+
+    - a line finding: the rule family, the file, the marked line and the next non-empty line (normally the test it
+      skips), so the same marked line placed above another test needs its own exception;
+    - a file finding: the rule, the file and ``version``, the id of the file's new content (or "deleted"), so an
+      exception for one change does not cover later changes to the same file."""
+    raw = "\0".join((_FAMILY.get(rule, rule), path or "", _norm(content), _norm(following), version or ""))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def finding(rule: str, path: str, line: int, detail: str = "", allowed: bool = False, content: str = "") -> Finding:
+def finding(rule: str, path: str, line: int, detail: str = "", allowed: bool = False, content: str = "",
+            following: str = "", version: str = "") -> Finding:
     message, fix = FIXES[rule]
     return Finding(rule, path or "", line, message + (" (%s)" % detail if detail else ""), fix, allowed=allowed,
-                   fingerprint=fingerprint(rule, path, content or detail))
+                   fingerprint=fingerprint(rule, path, content or detail, following, version))
 
 
 # ─── Line rules ──────────────────────────────────────────────────────────────
@@ -193,6 +205,15 @@ def plausible_secret(value: str, allow_spaces: bool = False) -> bool:
     if not allow_spaces and (re.search(r"\s", value) or ":" in value):
         return False
     return True
+
+
+FICTITIOUS = re.compile(r"(?i)(synthetic|fake|dummy|example)[-_]")
+
+
+def _generated_looking(value: str) -> bool:
+    return (plausible_secret(value) and not FICTITIOUS.match(value) and len(value) >= 16
+            and bool(re.search(r"[a-z]", value))
+            and bool(re.search(r"[A-Z]", value)) and bool(re.search(r"\d", value)))
 
 
 def _url_secret(text: str) -> bool:
@@ -228,7 +249,8 @@ def has_secret(text: str, path: Optional[str]) -> bool:
     if any(r.search(text) for r in SECRET_FORMATS):
         return True
     if path and TEST_PATH.search(path):
-        return False
+        # Fixtures are full of made-up passwords; only a long, mixed value that looks generated counts here.
+        return any(_generated_looking(m.group("value")) for m in SECRET_KEY_VALUE.finditer(text))
     return (bool(BEARER.search(text))
             or _value_rule(SECRET_KEY_VALUE, text, allow_spaces=False)
             or _url_secret(text)
@@ -247,8 +269,29 @@ def has_skip_marker(text: str) -> Optional[str]:
     return None
 
 
-def weakens_check(text: str, path: Optional[str]) -> bool:
-    return bool(path) and any(where.search(path) and what.search(text) for where, what in WEAKENERS)
+def weakens_check(text: str, path: Optional[str], before: Iterable[str] = (), after: Iterable[str] = ()) -> bool:
+    """``text`` neutralises a check. ``before``/``after`` are the new-side lines around it in the same hunk (nearest
+    first), used to tell a test step from any other step and a test block from a coverage block."""
+    if not path:
+        return False
+    before, after = list(before), list(after)
+    if WORKFLOW.search(path):
+        if not WORKFLOW_SOFT.search(text):
+            return False
+        window = [text] + before[:_STEP_WINDOW] + after[:_STEP_WINDOW]
+        return any(TEST_RUNNER.search(t) for t in window)
+    if PYTEST_CONFIG.search(path):
+        return any(TEST_PATH.search(v.strip("'\"")) or "test" in v.lower() for v in PYTEST_DROP.findall(text))
+    if JS_TEST_CONFIG.search(path):
+        if not JS_TEST_DROP.search(text) or re.search(r"(?i)coverage", text):
+            return False
+        for t in before[:8]:  # the nearest enclosing key decides: coverage { exclude } is not about tests
+            if re.search(r"(?i)\bcoverage\b", t):
+                return False
+            if re.search(r"\btest\s*:", t):
+                break
+        return True
+    return False
 
 
 def is_test_path(path: str) -> bool:
@@ -323,13 +366,24 @@ def allowed_paths_in(messages: Optional[str]) -> set:
 _HUNK = re.compile(r"^(@{2,}) (.*?) @{2,}")
 
 
-def _iter_added(diff: str):
-    """Yield (path, line number in the new file, added text with a single leading +).
+_CHECK_EVERY = 2000  # lines between two looks at the clock
+
+
+def _check_deadline(deadline: Optional[float]) -> None:
+    if deadline is not None and time.monotonic() > deadline:
+        raise GitTimeout("time budget exhausted while reading the diff")
+
+
+def _iter_new_side(diff: str, deadline: Optional[float] = None):
+    """Yield (path, line number in the new file, text with a one-character prefix, added?, hunk number) for every
+    line of the new side: added lines (prefix +) and context lines (prefix space).
 
     Hunk lengths are tracked, so an added line whose content starts with "++ " is never taken for a file header.
     Combined diffs of merges (``--cc``, ``@@@`` hunks) carry one prefix column per parent."""
-    path, line, new_left, old_left, ncols = None, 0, 0, 0, 1
-    for text in diff.splitlines():
+    path, line, new_left, old_left, ncols, hunk = None, 0, 0, 0, 1, 0
+    for count, text in enumerate(diff.splitlines()):
+        if count % _CHECK_EVERY == 0:
+            _check_deadline(deadline)
         if (new_left > 0 or old_left > 0) and text[:1] in (" ", "+", "-", "\\", ""):
             if text.startswith("\\"):  # "\ No newline at end of file"
                 continue
@@ -337,10 +391,10 @@ def _iter_added(diff: str):
             if "-" in prefix:
                 old_left -= 1
                 continue
-            if "+" in prefix:
-                yield path, line, "+" + body
-            else:
+            added = "+" in prefix
+            if not added:
                 old_left -= 1
+            yield path, line, ("+" if added else " ") + body, added, hunk
             new_left -= 1
             line += 1
             continue
@@ -350,6 +404,7 @@ def _iter_added(diff: str):
             continue
         m = _HUNK.match(text)
         if m:
+            hunk += 1
             ncols = len(m.group(1)) - 1
             for sign, start, count in re.findall(r"([-+])(\d+)(?:,(\d+))?", m.group(2)):
                 n = int(count) if count else 1
@@ -369,7 +424,23 @@ def added_from_name_status(name_status: str) -> list:
     return out
 
 
-def _line_finding(path, line, text, history: bool = False, new_files=frozenset()) -> Optional[Finding]:
+def _iter_added(diff: str, deadline: Optional[float] = None):
+    """Yield (path, line number in the new file, added text with a single leading +)."""
+    for path, line, text, added, _hunk in _iter_new_side(diff, deadline):
+        if added:
+            yield path, line, text
+
+
+def next_nonempty(lines: Iterable[str]) -> str:
+    """The first non-blank line of ``lines`` (the test a marker sits on), normalised."""
+    for l in lines:
+        if l.strip():
+            return _norm(l)
+    return ""
+
+
+def _line_finding(path, line, text, history: bool = False, new_files=frozenset(), before=(), after=(),
+                  version_of: Optional[Callable[[str], str]] = None) -> Optional[Finding]:
     allowed, content = MARKER in text, text[1:]
     if has_secret(text, path):
         rule = "secret-history" if history else ("env-file" if _is_env_file(path) else "secret")
@@ -378,16 +449,17 @@ def _line_finding(path, line, text, history: bool = False, new_files=frozenset()
         return None
     kind = None if path and DOCS.search(path) else has_skip_marker(text)
     if kind == "skip" or (kind == "conditional" and path not in new_files):
-        return finding("test-skipped", path, line, allowed=allowed, content=content)
-    if weakens_check(text, path):
-        return finding("check-weakened", path, line, allowed=allowed, content=content)
+        return finding("test-skipped", path, line, allowed=allowed, content=content, following=next_nonempty(after))
+    if weakens_check(text, path, before, after):
+        return finding("check-weakened", path, line, allowed=allowed, content=content,
+                       version=version_of(path) if version_of else "")
     return None
 
 
-def history_secrets(history_diff: str) -> list:
+def history_secrets(history_diff: str, deadline: Optional[float] = None) -> list:
     """Secrets in the per-commit patches of a range (``git log -p --cc``)."""
     found = []
-    for path, line, text in _iter_added(history_diff):
+    for path, line, text in _iter_added(history_diff, deadline):
         f = _line_finding(path, line, text, history=True)
         if f:
             found.append(f)
@@ -395,24 +467,35 @@ def history_secrets(history_diff: str) -> list:
 
 
 def detect(diff: str, deleted: Iterable[str] = (), history: str = "", renamed: Iterable = (),
-           allowed_paths: Iterable[str] = (), new_files: Iterable[str] = ()) -> list:
+           allowed_paths: Iterable[str] = (), new_files: Iterable[str] = (),
+           version_of: Optional[Callable[[str], str]] = None, deadline: Optional[float] = None) -> list:
     """Blockers in a unified diff, the deleted and renamed paths and, optionally, the per-commit history.
-    ``new_files`` are files the change adds (a conditional skip in a new test file is legitimate)."""
+    ``new_files`` are files the change adds (a conditional skip in a new test file is legitimate);
+    ``version_of(path)`` identifies a file's new content for file-level exceptions."""
     allowed_paths, new_files = set(allowed_paths or ()), frozenset(new_files or ())
+    version = version_of or (lambda p: "")
+    rows = list(_iter_new_side(diff, deadline))
     found = []
-    for path, line, text in _iter_added(diff):
-        f = _line_finding(path, line, text, new_files=new_files)
+    for i, (path, line, text, added, hunk) in enumerate(rows):
+        if i % _CHECK_EVERY == 0:
+            _check_deadline(deadline)
+        if not added:
+            continue
+        before = [r[2][1:] for r in reversed(rows[max(0, i - 8):i]) if r[4] == hunk]
+        after = [r[2][1:] for r in rows[i + 1:i + 9] if r[4] == hunk]
+        f = _line_finding(path, line, text, new_files=new_files, before=before, after=after, version_of=version)
         if f:
             found.append(f)
     for path in deleted:
         if is_test_code(path):
-            found.append(finding("test-deleted", path, 0, allowed=path in allowed_paths))
+            found.append(finding("test-deleted", path, 0, allowed=path in allowed_paths, version="deleted"))
     for old, new in renamed:
         if is_test_code(old) and not TEST_PATH.search(new):
-            found.append(finding("test-moved", old, 0, "to %s" % new, allowed=old in allowed_paths))
+            found.append(finding("test-moved", old, 0, "to %s" % new, allowed=old in allowed_paths,
+                                 version=new + "@" + version(new)))
     # A secret in the history is reported even when the final diff already has another finding at that place.
     seen = {(f.file, f.line) for f in found if f.rule in ("secret", "env-file")}
-    found += [f for f in history_secrets(history) if (f.file, f.line) not in seen]
+    found += [f for f in history_secrets(history, deadline) if (f.file, f.line) not in seen]
     return found
 
 
@@ -462,7 +545,8 @@ def scripts_of(package_json: Optional[str]):
 
 def check_changed(command: Optional[str], paths: Iterable[str], is_file: Callable[[str], bool],
                   allowed_paths: Iterable[str] = (), protected: Iterable[str] = (),
-                  contents: Optional[Callable[[str], tuple]] = None) -> list:
+                  contents: Optional[Callable[[str], tuple]] = None,
+                  version_of: Optional[Callable[[str], str]] = None) -> list:
     """One blocker per file the base's check runs (plus ``protected`` ones) that the change touches. For
     package.json only its ``scripts`` count; ``contents(path)`` returns (base text, new text) to compare them."""
     paths, allowed_paths = set(paths), set(allowed_paths or ())
@@ -480,7 +564,8 @@ def check_changed(command: Optional[str], paths: Iterable[str], is_file: Callabl
     def detail(p):
         return "Foreman's own configuration" if p == CONFIG_FILE else "check: `%s`" % command
 
-    return [finding("check-changed", p, 0, detail(p), allowed=p in allowed_paths) for p in targets if touched(p)]
+    return [finding("check-changed", p, 0, detail(p), allowed=p in allowed_paths,
+                    version=version_of(p) if version_of else "") for p in targets if touched(p)]
 
 
 # ─── Git ─────────────────────────────────────────────────────────────────────
@@ -651,7 +736,7 @@ def check_command_at(repo: Repo, rev: Optional[str], explicit: Optional[str] = N
 
 
 def _check_findings(repo: Repo, base_rev: Optional[str], check: Optional[str], paths, allowed_paths,
-                    new_text: Callable[[str], Optional[str]]) -> list:
+                    new_text: Callable[[str], Optional[str]], version_of: Callable[[str], str]) -> list:
     if not base_rev:
         return []
     is_file = repo.is_file_at(base_rev)
@@ -659,7 +744,22 @@ def _check_findings(repo: Repo, base_rev: Optional[str], check: Optional[str], p
     if not check and not protected:
         return []
     return check_changed(check, paths, is_file, allowed_paths, protected,
-                         contents=lambda p: (repo.show(base_rev, p), new_text(p)))
+                         contents=lambda p: (repo.show(base_rev, p), new_text(p)), version_of=version_of)
+
+
+def _versions(repo: Repo, rev: Optional[str] = None, staged: bool = False) -> Callable[[str], str]:
+    """``version(path)``: the git blob id of a file's new content (at ``rev``, in the index, or in the working
+    tree), or "deleted". The same content gives the same id at commit and at push."""
+    def version(path: str) -> str:
+        if rev:
+            blob = repo.try_git("rev-parse", "--verify", "-q", "%s:%s" % (rev, path))
+        elif staged:
+            blob = repo.try_git("rev-parse", "--verify", "-q", ":" + path)
+        else:
+            full = os.path.join(repo.root, *path.split("/"))
+            blob = repo.try_git("hash-object", "--", path) if os.path.isfile(full) else None
+        return blob or "deleted"
+    return version
 
 
 def _read_text(path: str) -> Optional[str]:
@@ -680,11 +780,13 @@ def scan_range(repo: Repo, base: Optional[str], head: str = "HEAD", check: Optio
     paths, deleted, renamed = paths_from_name_status(name_status)
     messages = repo.git("log", "--format=%B", rev_range) + "\n" + (extra_messages or "")
     allowed_paths = allowed_paths_in(messages)
+    version_of = _versions(repo, rev=head)
     findings = detect(repo.git("diff", "-M", *_DIFF_OPTS, diff_from, head), deleted,
                       history=repo.git("log", "-p", "--cc", *_DIFF_OPTS, "--format=", rev_range),
-                      renamed=renamed, allowed_paths=allowed_paths, new_files=added_from_name_status(name_status))
+                      renamed=renamed, allowed_paths=allowed_paths, new_files=added_from_name_status(name_status),
+                      version_of=version_of, deadline=repo.deadline)
     check = check_command_at(repo, base, check)
-    findings += _check_findings(repo, base, check, paths, allowed_paths, lambda p: repo.show(head, p))
+    findings += _check_findings(repo, base, check, paths, allowed_paths, lambda p: repo.show(head, p), version_of)
     return Report(repo.root, scope, base, base_label, repo.try_git("rev-parse", head), check, findings)
 
 
@@ -694,6 +796,7 @@ def _untracked_diff(repo: Repo) -> tuple:
     files = [p for p in out.split("\0") if p][:_MAX_UNTRACKED_FILES]
     parts = []
     for path in files:
+        _check_deadline(repo.deadline)
         full = os.path.join(repo.root, *path.split("/"))
         try:
             if os.path.getsize(full) > _MAX_UNTRACKED_BYTES:
@@ -727,14 +830,16 @@ def scan_worktree(repo: Repo, staged_only: bool = False, include_untracked: bool
         paths += files
         new_files += files
     allowed_paths = allowed_paths_in(extra_messages)
-    findings = detect(diff, deleted, renamed=renamed, allowed_paths=allowed_paths, new_files=new_files)
+    version_of = _versions(repo, staged=staged_only)
+    findings = detect(diff, deleted, renamed=renamed, allowed_paths=allowed_paths, new_files=new_files,
+                      version_of=version_of, deadline=repo.deadline)
     head_rev = "HEAD" if has_head else None
     check = check_command_at(repo, head_rev, check)
     if staged_only:
         new_text = lambda p: repo.try_git("show", ":" + p)
     else:
         new_text = lambda p: _read_text(os.path.join(repo.root, *p.split("/")))
-    findings += _check_findings(repo, head_rev, check, paths, allowed_paths, new_text)
+    findings += _check_findings(repo, head_rev, check, paths, allowed_paths, new_text, version_of)
     return Report(repo.root, scope, repo.try_git("rev-parse", "HEAD") if has_head else None, "HEAD",
                   None, check, findings)
 

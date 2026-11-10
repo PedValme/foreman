@@ -72,6 +72,10 @@ class LineRules(unittest.TestCase):
         self.assertTrue(one("K = '" + GHP + "z" * 36 + "'", "tests/test_x.py"))
         self.assertFalse(one('pass' + 'word = "' + 'Tr0ub4dor-and-3"', "tests/test_x.py"))
         self.assertFalse(one('URL = "postgresql://' + 'app:realPass99@db/base"', "tests/test_x.py"))
+        self.assertFalse(one('pass' + 'word = "' + 'testpass123"', "tests/test_x.py"))
+        # A long value mixing upper case, lower case and digits looks generated: it counts even in a test.
+        self.assertTrue(one("API_" + "KEY = '" + "Zx9kq2LmP0wRt7uV3s'", "tests/test_x.py"))
+        self.assertFalse(one("API_" + "KEY = '" + "zx9kq2lmp0wrt7uv3s'", "tests/test_x.py"))  # no upper case
 
     def test_env_files(self):
         self.assertEqual([f.rule for f in detector.detect("+++ b/.env\n@@ -0,0 +1 @@\n+DB_PASS" + "WORD="
@@ -171,10 +175,14 @@ class SkipMarkers(unittest.TestCase):
         "x" + "it('x', f)", "self." + "skipTest('later')", "this." + "skip()", "t." + "Skip(\"flaky\")",
         "t." + "Skipf(\"%s\", x)", "t." + "SkipNow()", "#[" + "ignore]", "@" + "Disabled", "@" + "Ignore",
         "@pytest.mark." + "xfail", "pytest." + "xfail('x')", "@unittest." + "expectedFailure",
+        # a constant condition is no condition
+        "@pytest.mark." + "skip" + "if(True, reason='x')", "@unittest." + "skip" + "If(True, 'x')",
+        "it." + "skip" + "If(true)('x', f)", "@pytest.mark." + "skip" + "if(1, reason='x')",
+        "@unittest." + "skip" + "Unless(False, 'x')",
     )
     CONDITIONAL = ("@pytest.mark." + "skipif(sys.platform == 'win32', reason='posix')",
-                   "@unittest." + "skipIf(True, 'x')", "@unittest." + "skipUnless(HAS_GPU, 'gpu')",
-                   "it." + "skipIf(isWindows)('x', f)")
+                   "@unittest." + "skipIf(IS_WINDOWS, 'x')", "@unittest." + "skipUnless(HAS_GPU, 'gpu')",
+                   "it." + "skipIf(isWindows)('x', f)", "@pytest.mark." + "skipif(TRUE_ON_CI, reason='x')")
 
     def test_markers_switch_tests_off(self):
         for marker in self.MARKERS:
@@ -194,10 +202,41 @@ class SkipMarkers(unittest.TestCase):
         self.assertEqual([f.rule for f in detector.detect(diff)], ["test-skipped"])
 
 
+def hunk(path, *lines, added=None):
+    """A diff of new-side ``lines``; ``added`` lists the indexes that are added (default: all)."""
+    added = set(range(len(lines))) if added is None else set(added)
+    body = "".join(("+" if i in added else " ") + l + "\n" for i, l in enumerate(lines))
+    return "+++ b/%s\n@@ -1,%d +1,%d @@\n%s" % (path, len(lines) - len(added), len(lines), body)
+
+
 class CheckWeakened(unittest.TestCase):
+    def test_workflows_only_around_a_test_runner(self):
+        step = hunk(".github/workflows/ci.yml", "      - name: Tests", "        run: npm test",
+                    "        continue-on-error: true", added=[2])
+        self.assertEqual([f.rule for f in detector.detect(step)], ["check-weakened"])
+        other = hunk(".github/workflows/ci.yml", "      - name: Lint docs", "        run: markdownlint .",
+                     "        continue-on-error: true", added=[2])
+        self.assertEqual(detector.detect(other), [])
+        self.assertEqual(one("        run: npm ci || true", ".github/workflows/ci.yml"), [])
+        for runner in ("go test ./...", "cargo test", "make check", "tox -e py", "python -m unittest", "yarn run test",
+                       "pnpm test", "vitest run", "jest --ci"):
+            self.assertTrue(one("        run: %s || true" % runner, ".github/workflows/ci.yml"), runner)
+
+    def test_pytest_options_only_for_test_paths(self):
+        self.assertEqual(one("addopts = --ignore=docs --ignore=build", "pytest.ini"), [])
+        self.assertTrue(one("addopts = --ignore=src/app/test_utils.py", "pytest.ini"))
+
+    def test_js_coverage_blocks_are_not_tests(self):
+        self.assertEqual(one("  coverage: { exclude: ['src/gen/**'] },", "vitest.config.ts"), [])
+        self.assertEqual(one("  coveragePathIgnorePatterns: ['/gen/'],", "jest.config.js"), [])
+        block = hunk("vitest.config.ts", "  coverage: {", "    provider: 'v8',", "    exclude: ['src/gen/**'],",
+                     added=[2])
+        self.assertEqual(detector.detect(block), [])
+        block = hunk("vitest.config.ts", "  test: {", "    exclude: ['tests/flaky/**'],", added=[1])
+        self.assertEqual([f.rule for f in detector.detect(block)], ["check-weakened"])
+
     def test_well_known_places(self):
         cases = ((".github/workflows/ci.yml", "        run: pytest || true"),
-                 (".github/workflows/ci.yaml", "    continue-on-error: true"),
                  ("pytest.ini", "addopts = --deselect tests/test_a.py::test_b"),
                  ("pyproject.toml", 'addopts = "--ignore=tests/slow"'),
                  ("setup.cfg", "addopts = --ignore-glob=tests/*_e2e.py"),
@@ -234,6 +273,31 @@ class Fingerprints(unittest.TestCase):
         self.assertEqual(history.rule, "secret-history")
         self.assertEqual(history.fingerprint, a.fingerprint)  # the same exception covers commit and push
         self.assertEqual(len(a.short_id), 8)
+
+    def test_a_skip_is_bound_to_the_test_it_skips(self):
+        marked = SKIP + "  # " + detector.MARKER
+        first = detector.detect(hunk("tests/test_a.py", marked, "def test_one():", added=[0]))[0]
+        again = detector.detect(hunk("tests/test_a.py", "", marked, "", "def test_one():", added=[1]))[0]
+        other = detector.detect(hunk("tests/test_a.py", marked, "def test_two():", added=[0]))[0]
+        self.assertEqual(first.fingerprint, again.fingerprint)
+        self.assertNotEqual(first.fingerprint, other.fingerprint)
+
+    def test_file_findings_are_bound_to_the_new_content(self):
+        is_file = lambda p: p == "scripts/check.sh"
+        v1 = detector.check_changed("scripts/check.sh", ["scripts/check.sh"], is_file, version_of=lambda p: "aaa")[0]
+        v2 = detector.check_changed("scripts/check.sh", ["scripts/check.sh"], is_file, version_of=lambda p: "bbb")[0]
+        self.assertNotEqual(v1.fingerprint, v2.fingerprint)
+        moved1 = detector.detect("", renamed=[("tests/test_x.py", "archive/x.py")], version_of=lambda p: "aaa")[0]
+        moved2 = detector.detect("", renamed=[("tests/test_x.py", "archive/x.py")], version_of=lambda p: "bbb")[0]
+        self.assertNotEqual(moved1.fingerprint, moved2.fingerprint)
+
+
+class TimeBudget(unittest.TestCase):
+    def test_long_diffs_check_the_clock(self):
+        diff = hunk("app/a.py", *["x = %d" % i for i in range(5000)])
+        with self.assertRaises(detector.GitTimeout):
+            detector.detect(diff, deadline=time.monotonic() - 1)
+        self.assertEqual(detector.detect(diff, deadline=time.monotonic() + 60), [])
 
 
 class CheckEntryPoint(unittest.TestCase):
@@ -277,11 +341,12 @@ class MadeUpValues(unittest.TestCase):
 
     def test_outside_tests_or_real_formats_still_block(self):
         self.assertTrue(detector.has_secret("+" + self.FAKE, "src/config.ts"))
-        # In test files only real credential formats count (accepted trade-off: a real password typed into a test
-        # file as a plain string is not caught).
-        for value in ("s3cr3t-for-real-99", "Test-Staging-2026!", "fakebook2026pass"):
+        # In test files a key/value guess counts only for a long value mixing upper case, lower case and digits
+        # (accepted trade-off: shorter or single-case real passwords in test files are not caught).
+        for value in ("s3cr3t-for-real-99", "fakebook2026pass"):
             self.assertFalse(detector.has_secret('+  pass' + 'word: "' + value + '"', "tests/x.test.ts"), value)
             self.assertTrue(detector.has_secret('+  pass' + 'word: "' + value + '"', "src/x.ts"), value)
+        self.assertTrue(detector.has_secret('+  pass' + 'word: "' + 'Test-Staging-2026!"', "e2e/config.ts"))
         self.assertTrue(detector.has_secret('+  tok' + 'en: "synthetic"  # ' + GHP + "a" * 36, "tests/x.test.ts"))
 
     def test_current_credential_formats(self):

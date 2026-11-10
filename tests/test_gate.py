@@ -224,6 +224,68 @@ class TerminalGate(GitRepoCase):
             self.assertEqual(d["action"], "block")
             self.assertIn("Foreman: BLOCKED", commands.handle_slash("status", session_key="task-7"))
 
+    def test_output_redirection_makes_a_safe_segment_unsafe(self):
+        for command in ("git status > tests/test_app.py && git commit -m x",
+                        "echo x >> tests/test_app.py; git commit -am x",
+                        "git diff --output=p.diff && git commit -m x"):
+            self.assertIn("as its own command", terminal(command, self.root)["message"], command)
+        self.write("app.py", "x = 11\n")
+        self.git("add", "-A")
+        for command in ("git status > /dev/null && git commit -m x", "git log -1 2>&1 && git commit -m x",
+                        'echo "a > b" && git commit -m x'):
+            self.assertIsNone(terminal(command, self.root), command)
+
+    def test_an_absolute_workdir_is_never_replaced(self):
+        outside = os.path.join(self.tmp, "plain")
+        os.makedirs(outside)
+        with mock.patch.object(gate, "session_cwd", side_effect=AssertionError("must not be consulted")):
+            self.assertIsNone(terminal("git commit -m x", outside))
+
+    def test_grants_for_a_file_do_not_cover_later_changes(self):
+        self.write("scripts/check.sh", "python -m unittest\n")
+        self.write(detector.CONFIG_FILE, json.dumps({"check": "bash scripts/check.sh"}))
+        self.commit("check")
+        self.write("scripts/check.sh", "python -m unittest -q\n")
+        self.git("add", "-A")
+        msg = "tune\n\n" + detector.MARKER + " scripts/check.sh: quieter output"
+        d = terminal("git commit -m '%s'" % msg, self.root)
+        commands.handle_slash("allow " + re.search(r"id ([0-9a-f]{8})", d["message"]).group(1))
+        self.assertIsNone(terminal("git commit -m '%s'" % msg, self.root))
+        self.write("scripts/check.sh", "exit 0\n")
+        self.git("add", "-A")
+        self.assertEqual(terminal("git commit -m '%s'" % msg, self.root)["action"], "block")
+
+    def test_a_grant_does_not_follow_the_marker_to_another_test(self):
+        marked = SKIP + "  # " + detector.MARKER + " flaky"
+        self.write("tests/test_app.py", marked + "\ndef test_x():\n    assert True\n")
+        self.git("add", "-A")
+        d = terminal("git commit -m x", self.root)
+        commands.handle_slash("allow " + re.search(r"id ([0-9a-f]{8})", d["message"]).group(1))
+        self.assertIsNone(terminal("git commit -m x", self.root))
+        self.write("tests/test_app.py", "def test_x():\n    assert True\n\n\n" + marked + "\ndef test_y():\n    pass\n")
+        self.git("add", "-A")
+        self.assertEqual(terminal("git commit -m x", self.root)["action"], "block")
+
+    def test_a_damaged_store_never_grants_or_raises(self):
+        for content in ('{"granted": [], "pending": "x"}', '{"granted": {"abc": "str"}}', "[1, 2]", "not json"):
+            os.makedirs(grants.store_dir(), exist_ok=True)
+            with open(grants.store_path(), "w", encoding="utf-8") as fh:
+                fh.write(content)
+            self.write("tests/test_app.py", SKIP + "  # " + detector.MARKER + "\n")
+            self.git("add", "-A")
+            d = terminal("git commit -m x", self.root)
+            self.assertEqual(d["action"], "block", content)
+            listing = commands.handle_slash("allow")
+            self.assertNotIn("Foreman failed", listing)
+            self.assertIn("tests/test_app.py", listing)
+
+    def test_store_guard_spellings(self):
+        store = grants.store_path()
+        upper = os.path.join(os.path.dirname(store), "Foreman-Grants.JSON. ")
+        self.assertEqual(gate.on_pre_tool_call(tool_name="write_file", args={"path": upper, "content": "{}"})["action"],
+                         "block")
+        self.assertEqual(terminal("cat FOREMAN-GRANTS.json", self.root)["action"], "block")
+
     def test_the_hook_deadline_covers_the_repository_lookup(self):
         self.write("app.py", "x = 9\n")
         self.git("add", "-A")
@@ -290,6 +352,38 @@ class TerminalGate(GitRepoCase):
         self.assertIsNone(terminal("git commit -m x", outside))
 
 
+class SessionDirectory(GitRepoCase):
+    """The CLI case seen in a real session: Hermes's configured directory is the home folder, the process runs in
+    the repository. Every candidate is tried; the first one inside a repository wins."""
+
+    def setUp(self):
+        super().setUp()
+        self.write("app.py", "x = 1\n")
+        self.commit("base")
+        self.home = os.path.join(self.tmp, "home")
+        os.makedirs(self.home)
+
+    def fake_runtime(self, path):
+        runtime = types.ModuleType("agent.runtime_cwd")
+        runtime.resolve_agent_cwd = lambda: path
+        return mock.patch.dict(sys.modules, {"agent": types.ModuleType("agent"), "agent.runtime_cwd": runtime})
+
+    def test_a_later_candidate_inside_a_repository_wins(self):
+        with self.fake_runtime(self.home), mock.patch.object(gate.os, "getcwd", return_value=self.root):
+            self.assertEqual(gate.cwd_candidates()[:2], [os.path.normpath(self.home), os.path.normpath(self.root)])
+            self.assertEqual(gate.session_cwd(), os.path.normpath(self.root))
+            self.assertIn("Foreman: CLEAN", commands.handle_slash("status"))
+            self.assertEqual(json.loads(commands.foreman_check_tool({}))["verdict"], "CLEAN")
+
+    def test_without_any_repository_the_first_candidate_is_named(self):
+        elsewhere = os.path.join(self.tmp, "elsewhere")
+        os.makedirs(elsewhere)
+        with self.fake_runtime(self.home), mock.patch.object(gate.os, "getcwd", return_value=elsewhere):
+            out = commands.handle_slash("status")
+        self.assertIn(os.path.normpath(self.home), out)
+        self.assertIn("not inside a git repository", out)
+
+
 class WriteGate(GitRepoCase):
     def setUp(self):
         super().setUp()
@@ -332,6 +426,9 @@ class WriteGate(GitRepoCase):
         new = os.path.join(self.root, "tests", "test_posix.py")
         self.assertIsNone(self.write_file(new, cond + "def test_p():\n    assert True\n"))
         self.assertEqual(self.write_file(self.test_file, cond + "def test_x():\n    assert True\n")["action"], "block")
+        constant = "@pytest.mark." + "skip" + "if(True, reason='later')\n"
+        newer = os.path.join(self.root, "tests", "test_later.py")
+        self.assertEqual(self.write_file(newer, constant + "def test_l():\n    assert True\n")["action"], "block")
 
     def test_patch_replace_and_v4a(self):
         d = gate.on_pre_tool_call(tool_name="patch", args={

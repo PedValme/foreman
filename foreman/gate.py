@@ -49,6 +49,10 @@ class _Op(str):
     """An operator token, distinguishable from a quoted word with the same text."""
 
 
+class _Redir(str):
+    """An unquoted output redirection (``>``, ``>>``, ``>&2``); its target, if any, is the next word."""
+
+
 def tokenize(command: str) -> list:
     """Split a shell command into words and operator tokens. Quotes are removed, backslashes are kept literally
     except before a quote, a space or another backslash, so Windows paths survive."""
@@ -82,6 +86,12 @@ def tokenize(command: str) -> list:
             i += 1
         elif c in " \t\r":
             flush()
+        elif c == ">":
+            flush()
+            m = re.match(r">>?(?:&(?:\d+|-))?", command[i:])
+            tokens.append(_Redir(m.group(0)))
+            i += len(m.group(0))
+            continue
         elif c == "\n" or c in ";|&(){}":
             flush()
             op = command[i:i + 2] if command[i:i + 2] in ("&&", "||") else c
@@ -149,6 +159,7 @@ def parse_actions(command: str, cwd: str, located: bool = False, _depth: int = 0
 
     for words in segments(command):
         original = list(words)
+        words, writes_file = _strip_redirs(words)
         while words and (re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0]) or _prog(words[0]) in _WRAPPERS):
             words = words[1:]
         if not words:
@@ -165,6 +176,8 @@ def parse_actions(command: str, cwd: str, located: bool = False, _depth: int = 0
             cwd = stack.pop() if stack else cwd
             continue
         if prog in _SAFE_PROGS:
+            if writes_file:  # echo x > tests/test_a.py rewrites a file
+                unsafe(original)
             continue
         inner = None
         if prog in _SHELLS:  # bash -c "git commit ..."
@@ -186,15 +199,15 @@ def parse_actions(command: str, cwd: str, located: bool = False, _depth: int = 0
         if prog == "git":
             act, sub = _parse_git(words[1:], cwd, state["git_add"], located)
             if act is None:
-                if sub == "add":
+                if sub == "add" and not writes_file:
                     state["git_add"] = True
-                elif sub not in _SAFE_GIT:
+                elif sub not in _SAFE_GIT or writes_file:
                     unsafe(original)
                 continue
         elif prog == "gh":
             act, sub = _parse_gh(words[1:], cwd, located)
             if act is None:
-                if sub not in _SAFE_GH:
+                if sub not in _SAFE_GH or writes_file:
                     unsafe(original)
                 continue
         else:
@@ -207,6 +220,28 @@ def parse_actions(command: str, cwd: str, located: bool = False, _depth: int = 0
         state["gated"] = _LABELS[act.kind]
         actions.append(act)
     return actions
+
+
+_HARMLESS_TARGETS = {"/dev/null", "nul", "$null"}
+
+
+def _strip_redirs(words: list) -> tuple:
+    """(words without redirections, True when a redirection or ``--output`` writes a file)."""
+    clean, writes, i = [], False, 0
+    while i < len(words):
+        w = words[i]
+        if isinstance(w, _Redir):
+            if "&" not in w:  # >&2 duplicates a descriptor; > file writes one
+                target = words[i + 1] if i + 1 < len(words) else ""
+                writes = writes or target.lower() not in _HARMLESS_TARGETS
+                i += 1
+            i += 1
+            continue
+        if w.startswith("--output"):
+            writes = True
+        clean.append(w)
+        i += 1
+    return clean, writes
 
 
 def _requote(word: str) -> str:
@@ -332,32 +367,50 @@ def _option_values(args: list, short: str, long: str) -> list:
 
 # ─── Where the session runs ──────────────────────────────────────────────────
 
-def session_cwd(*keys: str) -> str:
-    """The session's working directory, not the gateway's.
+def cwd_candidates(*keys: str) -> list:
+    """Where the session may be working, most specific first, existing directories only:
 
-    First the directory the terminal tool recorded for this session (it follows ``cd`` between calls), under the
-    session key Hermes exposes and the keys the caller passes; then Hermes's documented ``resolve_agent_cwd()``;
-    then the process directory."""
-    candidates = []
+    1. the directory the terminal tool recorded for this session (it follows ``cd`` between calls), under the session
+       key Hermes exposes and the keys the caller passes — a Hermes internal, read guarded;
+    2. Hermes's documented ``resolve_agent_cwd()`` (the configured terminal directory, or the launch directory);
+    3. the process directory."""
+    keys_in_order = []
     try:
         from gateway.session_context import get_session_env
-        candidates.append(get_session_env("HERMES_SESSION_KEY", "") or "")
+        keys_in_order.append(get_session_env("HERMES_SESSION_KEY", "") or "")
     except Exception:
         pass
-    candidates += [k for k in keys if isinstance(k, str)]
+    keys_in_order += [k for k in keys if isinstance(k, str)]
+    out = []
     try:
         from tools.terminal_tool import get_session_cwd  # not a documented plugin surface: guarded
-        for key in dict.fromkeys(k for k in candidates if k):
-            recorded = get_session_cwd(key)
-            if isinstance(recorded, str) and os.path.isdir(recorded):
-                return recorded
+        for key in dict.fromkeys(k for k in keys_in_order if k):
+            out.append(get_session_cwd(key))
     except Exception:
         pass
     try:
         from agent.runtime_cwd import resolve_agent_cwd
-        return str(resolve_agent_cwd())
+        out.append(str(resolve_agent_cwd()))
     except Exception:
-        return os.getcwd()
+        pass
+    try:
+        out.append(os.getcwd())
+    except OSError:
+        pass
+    return list(dict.fromkeys(os.path.normpath(p) for p in out if isinstance(p, str) and p and os.path.isdir(p)))
+
+
+def session_cwd(*keys: str, deadline: Optional[float] = None) -> str:
+    """The first candidate directory that is inside a git repository; when none is, the first candidate (so the
+    message names where Foreman looked)."""
+    candidates = cwd_candidates(*keys)
+    for c in candidates:
+        try:
+            if detector.find_repo(c, deadline=deadline):
+                return c
+        except GitError:
+            break
+    return candidates[0] if candidates else os.path.expanduser("~")
 
 
 # ─── Evaluating an action ────────────────────────────────────────────────────
@@ -570,7 +623,7 @@ def on_pre_tool_call(tool_name: str = "", args=None, task_id: str = "", **kwargs
         command = args.get("command")
         if not isinstance(command, str):
             return None
-        if grants.GRANTS_FILE in command:
+        if grants.GRANTS_FILE.lower() in command.lower():
             return _store_guard()
         if not _QUICK.search(command):
             return None
@@ -588,6 +641,14 @@ def on_pre_tool_call(tool_name: str = "", args=None, task_id: str = "", **kwargs
         return None
 
 
+def _is_store_path(path) -> bool:
+    """The grant store, however the path is spelt (case, trailing dots or spaces that Windows drops)."""
+    if not isinstance(path, str) or not path:
+        return False
+    name = os.path.basename(path.replace("\\", "/").rstrip("/")).rstrip(". ")
+    return os.path.normcase(name).lower() == grants.GRANTS_FILE.lower()
+
+
 def _store_guard() -> dict:
     return {"action": "block", "message": "Foreman blocked this call: Foreman's exception store changes only when "
                                           "the user runs `/foreman allow <id>`."}
@@ -595,8 +656,16 @@ def _store_guard() -> dict:
 
 def gate_command(command: str, workdir: Optional[str] = None, task_id: str = "") -> Optional[dict]:
     deadline = time.monotonic() + HOOK_BUDGET_SECONDS
-    base = session_cwd(task_id)
-    cwd = _resolve(base, workdir) if workdir else base
+    if not parse_actions(command, os.sep):  # nothing gated: skip resolving the session directory
+        return None
+    if workdir and os.path.isabs(os.path.expanduser(workdir)):
+        cwd = os.path.normpath(os.path.expanduser(workdir))  # explicit: never replaced by another candidate
+    else:
+        try:
+            base = session_cwd(task_id, deadline=deadline)
+        except GitError:
+            base = os.getcwd()
+        cwd = _resolve(base, workdir) if workdir else base
     actions = parse_actions(command, cwd, located=bool(workdir))
     if not actions:
         return None
@@ -622,20 +691,21 @@ def gate_command(command: str, workdir: Optional[str] = None, task_id: str = "")
 # ─── Writes to test files ────────────────────────────────────────────────────
 
 def _new_marker_lines(old_text: str, new_text: str, new_file: bool = False) -> list:
-    """Lines of ``new_text`` with a skip marker that ``old_text`` did not already have. In a new file a conditional
-    skip is legitimate."""
+    """(line, next non-empty line) for each line of ``new_text`` with a skip marker that ``old_text`` did not already
+    have. In a new file a conditional skip is legitimate."""
     def counts(kind):
         return kind == "skip" or (kind == "conditional" and not new_file)
 
     before = Counter(" ".join(l.split()) for l in (old_text or "").splitlines() if detector.has_skip_marker(l))
+    lines = (new_text or "").splitlines()
     added = []
-    for l in (new_text or "").splitlines():
+    for i, l in enumerate(lines):
         if counts(detector.has_skip_marker(l)):
             key = " ".join(l.split())
             if before[key] > 0:
                 before[key] -= 1
             else:
-                added.append(l.strip())
+                added.append((l.strip(), detector.next_nonempty(lines[i + 1:])))
     return added
 
 
@@ -661,7 +731,7 @@ def _repo_relative(path: str) -> tuple:
 
 
 def _v4a_files(patch: str) -> list:
-    """(path, removed text, added text, is new file) per file of a V4A patch."""
+    """(path, old side, new side, is new file) per file of a V4A patch; each side keeps the context lines."""
     files, cur = [], None
     for line in patch.splitlines():
         m = re.match(r"^\*\*\* (Update|Add) File:\s*(.+?)\s*$", line)
@@ -672,35 +742,37 @@ def _v4a_files(patch: str) -> list:
         if line.startswith("*** "):
             cur = None if not line.startswith("*** Move to:") else cur
             continue
-        if cur is None:
+        if cur is None or line.startswith("@@"):
             continue
         if line.startswith("+"):
             cur[2].append(line[1:])
         elif line.startswith("-"):
             cur[1].append(line[1:])
+        else:  # context
+            cur[1].append(line[1:])
+            cur[2].append(line[1:])
     return [(p, "\n".join(r), "\n".join(a), new) for p, r, a, new in files]
 
 
 def gate_write(tool_name: str, args: dict, task_id: str = "") -> Optional[dict]:
-    edits = []  # (path, old text or None to read it, new text, new file or None to check)
+    edits = []  # (path, old text or None to read it, new text or None to build it, new file or None to check)
+    if _is_store_path(args.get("path")):
+        return _store_guard()
     if tool_name == "write_file":
         path, content = args.get("path"), args.get("content")
-        if isinstance(path, str) and os.path.basename(path) == grants.GRANTS_FILE:
-            return _store_guard()
         if isinstance(path, str) and isinstance(content, str) and detector.has_skip_marker(content):
             edits.append((path, None, content, None))
     else:
-        if isinstance(args.get("path"), str) and os.path.basename(args["path"]) == grants.GRANTS_FILE:
-            return _store_guard()
         patch = args.get("patch")
         if isinstance(patch, str) and (args.get("mode") == "patch" or not args.get("old_string")):
-            if grants.GRANTS_FILE in patch:
+            if grants.GRANTS_FILE.lower() in patch.lower():
                 return _store_guard()
             edits += [(p, old, new, is_new) for p, old, new, is_new in _v4a_files(patch)
                       if detector.has_skip_marker(new)]
         new = args.get("new_string")
         if isinstance(args.get("path"), str) and isinstance(new, str) and detector.has_skip_marker(new):
-            edits.append((args["path"], args.get("old_string") or "", new, False))
+            edits.append((args["path"], ("replace", args.get("old_string") or "", bool(args.get("replace_all"))),
+                          new, False))
     if not edits:
         return None
     cwd = session_cwd(task_id)
@@ -712,10 +784,18 @@ def gate_write(tool_name: str, args: dict, task_id: str = "") -> Optional[dict]:
             continue
         if is_new is None:
             is_new = not os.path.exists(full)
-        if old is None:
+        if isinstance(old, tuple):  # patch replace: rebuild the file as it will be, to know the test that follows
+            _kind, old_string, replace_all = old
+            current = _read(full)
+            if old_string and old_string in current:
+                old, new = current, current.replace(old_string, new, -1 if replace_all else 1)
+            else:
+                old = old_string
+        elif old is None:
             old = _read(full)
-        for line in _new_marker_lines(old, new, new_file=is_new):
-            findings.append(detector.finding("test-skipped", rel, 0, allowed=MARKER in line, content=line))
+        for line, following in _new_marker_lines(old, new, new_file=is_new):
+            findings.append(detector.finding("test-skipped", rel, 0, allowed=MARKER in line, content=line,
+                                             following=following))
     blocking, waiting = split_marked(findings, root or "")
     if not (blocking or waiting):
         return None

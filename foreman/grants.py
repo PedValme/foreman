@@ -44,17 +44,31 @@ def store_path() -> str:
     return os.path.join(store_dir(), GRANTS_FILE)
 
 
+def _valid_section(section) -> bool:
+    return isinstance(section, dict) and all(isinstance(k, str) and isinstance(v, dict) for k, v in section.items())
+
+
 def _load() -> dict:
+    """The store, or an empty one when it is missing or malformed: a damaged store must never raise (the gate would
+    then fall back to asking for approval) and never grant anything."""
     try:
         with open(store_path(), "r", encoding="utf-8") as fh:
             data = json.load(fh)
-        if isinstance(data, dict):
-            data.setdefault("pending", {})
-            data.setdefault("granted", {})
-            return data
     except (OSError, ValueError):
-        pass
-    return {"pending": {}, "granted": {}}
+        return {"pending": {}, "granted": {}}
+    if not isinstance(data, dict):
+        return {"pending": {}, "granted": {}}
+    out = {}
+    for key in ("pending", "granted"):
+        section = data.get(key, {})
+        out[key] = section if _valid_section(section) else {}
+    for entry in out["granted"].values():
+        if not isinstance(entry.get("expires"), (int, float)):
+            entry["expires"] = 0
+    for entry in out["pending"].values():
+        if not isinstance(entry.get("created"), (int, float)):
+            entry["created"] = 0
+    return out
 
 
 def _save(data: dict) -> None:
