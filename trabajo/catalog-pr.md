@@ -96,14 +96,16 @@ so a missing seam never lets a commit through unchecked. The issue asking for th
 
 ## Screenshots
 
-The Desktop pane's code rendered in a browser preview with scripted data (the real `desktop/plugin.js` against a
-stand-in SDK); real-app captures will replace them in a later SHA bump.
+The first image is a real capture of Foreman's panel in Hermes Desktop v0.23.0, with real data from the demo
+repository `PedValme/foreman-demo`. The others are browser previews with scripted data (the real `desktop/plugin.js`
+against a stand-in SDK).
 
-- `docs/screenshots/panel-waiting-for-owner-light.png`: a pull request past the gate and the review, waiting for the
-  owner.
-- `docs/screenshots/panel-several-changes-light.png`: several changes on the line.
-- `docs/screenshots/panel-blocked-at-gate-light.png`: a commit blocked by a skipped test.
-- `docs/screenshots/panel-bounced-dark.png`: a change the review sent back to the agent.
-- `docs/screenshots/panel-narrow-360-dark.png`: the pane at 360 px.
+- `docs/screenshots/panel-real-app.png`: real app; a pull request the review refused, one blocked at the gate, one
+  merged after the owner's approval.
+- `docs/screenshots/panel-several-changes-light.png`: browser preview; several changes on the line.
+- `docs/screenshots/panel-bounced-dark.png`: browser preview; a change the review sent back to the agent.
+- `docs/screenshots/panel-narrow-360-dark.png`: browser preview; the pane at 360 px.
+- `docs/screenshots/panel-waiting-for-owner-light.png`: browser preview; a pull request past the gate and the review,
+  waiting for the owner.
 
 Demo video (under 90 s): `<link to the X post>`.

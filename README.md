@@ -15,9 +15,9 @@ agent  > The test is right: cart.total() treats a 10% discount as 10x. Fixing th
 agent  > git commit -am "Treat discount as a percentage"   (passes)
 ```
 
-![Foreman's Desktop panel: a pull request that passed the gate and the review, waiting for the owner](docs/screenshots/panel-waiting-for-owner-light.png)
+![Foreman's panel in Hermes Desktop v0.23.0 with real data from the demo repository PedValme/foreman-demo: a pull request the review refused, one blocked at the gate, one merged after the owner's approval](docs/screenshots/panel-real-app.png)
 
-*The panel's code rendered in a browser preview with scripted data, not yet a capture from the Hermes Desktop app.*
+*Foreman's panel in Hermes Desktop v0.23.0, with real data from the demo repository `PedValme/foreman-demo`: a pull request the second-model review refused, one blocked at the gate, one merged after the owner's approval.*
 
 ```
 hermes plugins install PedValme/foreman/plugin --ref <40-character commit SHA>

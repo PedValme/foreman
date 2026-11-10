@@ -50,9 +50,9 @@ gate ok > review FAIL (2 blocking) > owner - > merge refused
 
 The optional Hermes Desktop panel shows the same line as cards:
 
-![Foreman's Desktop panel: a pull request that passed the gate and the review, waiting for the owner](../docs/screenshots/panel-waiting-for-owner-light.png)
+![Foreman's panel in Hermes Desktop v0.23.0 with real data from the demo repository PedValme/foreman-demo: a pull request the review refused, one blocked at the gate, one merged after the owner's approval](../docs/screenshots/panel-real-app.png)
 
-*The panel's code rendered in a browser preview with scripted data, not yet a capture from the Hermes Desktop app.*
+*Foreman's panel in Hermes Desktop v0.23.0, with real data from the demo repository `PedValme/foreman-demo`: a pull request the second-model review refused, one blocked at the gate, one merged after the owner's approval.*
 
 ## Install
 
@@ -277,9 +277,13 @@ them.
 
 ## Desktop panel
 
+![Foreman's panel in Hermes Desktop v0.23.0 with real data from the demo repository PedValme/foreman-demo](../docs/screenshots/panel-real-app.png)
+
+*The real app, as above. The images below are the panel's code rendered in a browser preview with scripted data, to show other states.*
+
 ![Several changes on the panel: one blocked at the gate, one bounced back, one waiting for the owner](../docs/screenshots/panel-several-changes-light.png)
 
-*The panel's code rendered in a browser preview with scripted data, not yet a capture from the Hermes Desktop app.*
+*Browser preview with scripted data: several changes at once.*
 
 One card per pull request or branch on the line **Gate → Review → Owner → Merge**, with the bounces, each station's
 detail and the latest events; changes waiting for you come first. A status-bar chip says `Foreman · 2 waiting for
@@ -295,9 +299,11 @@ or merges by itself, and shows titles and events as plain text. It reads one rea
 window is hidden. To preview it without Hermes:
 `python examples/panel-preview/build.py`, then open `examples/panel-preview/index.html`.
 
-| Blocked at the gate | Bounced back by the review | Narrow (360 px), dark |
+Browser previews with scripted data:
+
+| Waiting for the owner | Bounced back by the review | Narrow (360 px), dark |
 |---|---|---|
-| ![A card blocked at the gate by a skipped test](../docs/screenshots/panel-blocked-at-gate-light.png) | ![A card sent back to the agent by the review](../docs/screenshots/panel-bounced-dark.png) | ![The panel at 360 px wide in dark mode](../docs/screenshots/panel-narrow-360-dark.png) |
+| ![A card that passed the gate and the review, waiting for the owner](../docs/screenshots/panel-waiting-for-owner-light.png) | ![A card sent back to the agent by the review](../docs/screenshots/panel-bounced-dark.png) | ![The panel at 360 px wide in dark mode](../docs/screenshots/panel-narrow-360-dark.png) |
 
 ## SARIF reports as a source
 
@@ -482,8 +488,12 @@ loosened assertion back inside one turn; install from Git at a commit.
 Verified in a real Telegram session (Hermes v0.23.0): the test notification arrived, a blocked PR was refused, the
 merge-time review ran, Cancel merged nothing and Merge merged the PR.
 
-Verified by the test suite only (Linux, macOS, Windows): the Desktop panel (also rendered in a browser preview
-against a stand-in SDK, not yet inside the real app) and SARIF with a real hermes-security export.
+Verified in the real Hermes Desktop v0.23.0 (Windows client, remote backend, real data from the demo repository
+`PedValme/foreman-demo`): the Desktop panel renders the real pipeline data, the status-bar chip brings the pane
+forward, **Show verdict** sends the command and Foreman answers in the chat, and a merge refused by the review reads
+"Review failed". One caveat: on first enable the pane may need the Desktop switch turned off and on (see Install).
+
+Verified by the test suite only (Linux, macOS, Windows): SARIF with a real hermes-security export.
 
 ## Development
 
