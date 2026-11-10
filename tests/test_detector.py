@@ -50,8 +50,8 @@ class LineRules(unittest.TestCase):
         self.assertTrue(one("pytest." + "skip('off')"))
         self.assertFalse(one("password = os.environ['DB_PASSWORD']"))
         self.assertTrue(one('"api_' + 'key": "' + 'abcdef123456"'))  # quoted JSON key
-        self.assertTrue(one("@unittest." + "skipIf(True, 'x')"))
-        self.assertTrue(one("@pytest.mark." + "skipif(True, reason='x')"))
+        self.assertTrue(one("@unittest." + "skip" + "If(True, 'x')"))
+        self.assertTrue(one("@pytest.mark." + "skip" + "if(True, reason='x')"))
         self.assertTrue(one('DATABASE_URL = "postgresql://' + 'user:pass1234@db.internal.net/base"'))
         self.assertFalse(one('URL = "postgresql://app:app@localhost:5432/app"'))  # a local test database
         self.assertTrue(one('URL = "postgresql://' + 'app:realPass99@db/base"'))  # db is a real service name
