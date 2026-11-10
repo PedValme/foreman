@@ -83,6 +83,54 @@ python -m foreman.detector <base> [<head>] [--check "<command>"] [--json]
 Exits 1 when there is a blocker. Findings marked `foreman:allow` do not fail the run; they are listed for the
 reviewer.
 
+## Use a SARIF report as a source
+
+Foreman can read a [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) report from a
+scanner and add its results to the blockers. **Foreman never runs the scanner**: it only reads the file you point it
+at, so the report must be produced beforehand (and a stale one is only flagged, see below).
+
+Example with the official `hermes-security` plugin, which exports SARIF
+(`tool.driver.name` = `hermes-security`):
+
+```
+hermes security-review export --scan <scan-id> --format sarif --out results.sarif
+python -m foreman.detector origin/main HEAD --sarif results.sarif
+```
+
+or list the report in `.foreman.json`, read **at the base** like `check`, so `/foreman status`, the hooks and CI all
+see it and a change cannot point it elsewhere (editing these keys, or a tracked report they name, is a
+`check-changed` blocker):
+
+```json
+{"sarif": ["reports/results.sarif"], "sarif_threshold": "error"}
+```
+
+- **Rule id** `sarif:<tool>/<ruleId>`, with the file and line of the first location.
+- **Severity** of a result: its `security-severity` (0-10), else the named `properties.severity` that
+  hermes-security writes (its rule-level score is the maximum over the rule's findings), else the rule's
+  `security-severity`, else `level`, else the rule's default level, else `warning`.
+- **Threshold**: results at or above it block; the rest are listed as notes. `error` (7.0, the default), `warning`
+  (4.0) or a number 0-10, with `--sarif-threshold` or `sarif_threshold`.
+- **Never blocks**: suppressed results (accepted or without status) and `baselineState: "absent"`.
+- **Staleness**: a report older than the newest commit (or edited file) it gates adds the note "SARIF report is older
+  than the changes it gates"; it does not block.
+- **Unreadable report**: named in `.foreman.json` it becomes a note ("could not read SARIF: ..."); given with
+  `--sarif` it is exit 2, so CI never passes silently. Reports over 20 MB are not read.
+
+## CI mode: a required check
+
+```
+python -m foreman.detector origin/<base> HEAD [--check "<command>"] [--sarif FILE] [--json]
+```
+
+Exit codes: **0** clean, **1** at least one blocker, **2** the run could not be done (not a repository, git failed,
+an unreadable `--sarif` file). [`examples/foreman-check.yml`](examples/foreman-check.yml) is a workflow to copy:
+full-history checkout, Foreman downloaded at a pinned commit SHA, the detector run against the pull request's base.
+Make it a required check: unlike the hooks, it runs where the agent cannot edit it.
+
+Findings marked only with `foreman:allow` are listed and exit 0 in CI: Foreman does not decide for a person, so a
+human reviews them in the PR.
+
 ## Install
 
 ```

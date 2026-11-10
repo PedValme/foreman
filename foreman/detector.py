@@ -16,8 +16,13 @@ fail the run. The agent cannot wave itself through.
 CI usage::
 
     python -m foreman.detector <base> [<head>] [--check "<check command>"] [--json] [--repo <path>]
+        [--sarif FILE]... [--sarif-threshold error|warning|<number>]
 
-The exit status is 1 when there is at least one blocker that is not allowed.
+SARIF 2.1.0 reports (see ``foreman.sarif``) are a second source of blockers: given with ``--sarif``, or listed in the
+``sarif`` key of .foreman.json at the base.
+
+The exit status is 1 when there is at least one blocker that is not allowed, 2 when the run could not be done
+(not a repository, git failed, a ``--sarif`` file that cannot be read).
 """
 from __future__ import annotations
 
@@ -26,6 +31,7 @@ import base64
 import hashlib
 import json
 import os
+import posixpath
 import re
 import shlex
 import subprocess
@@ -562,7 +568,7 @@ def scripts_of(package_json: Optional[str]):
 def check_changed(command: Optional[str], paths: Iterable[str], is_file: Callable[[str], bool],
                   allowed_paths: Iterable[str] = (), protected: Iterable[str] = (),
                   contents: Optional[Callable[[str], tuple]] = None,
-                  version_of: Optional[Callable[[str], str]] = None) -> list:
+                  version_of: Optional[Callable[[str], str]] = None, labels: Optional[dict] = None) -> list:
     """One blocker per file the base's check runs (plus ``protected`` ones) that the change touches. For
     package.json only its ``scripts`` count; ``contents(path)`` returns (base text, new text) to compare them."""
     paths, allowed_paths = set(paths), set(allowed_paths or ())
@@ -578,6 +584,8 @@ def check_changed(command: Optional[str], paths: Iterable[str], is_file: Callabl
         return True
 
     def detail(p):
+        if p in (labels or {}):
+            return labels[p]
         return "Foreman's own configuration" if p == CONFIG_FILE else "check: `%s`" % command
 
     return [finding("check-changed", p, 0, detail(p), allowed=p in allowed_paths,
@@ -705,6 +713,7 @@ class Report:
     head: Optional[str] = None
     check: Optional[str] = None
     findings: list = field(default_factory=list)
+    notes: list = field(default_factory=list)  # non-blocking: SARIF results below the threshold, unreadable reports
 
     @property
     def blockers(self) -> list:
@@ -723,7 +732,8 @@ class Report:
     def to_dict(self) -> dict:
         return {"verdict": self.verdict, "repo": self.repo, "scope": self.scope, "base": self.base,
                 "base_label": self.base_label, "head": self.head, "check": self.check,
-                "blockers": [f.to_dict() for f in self.blockers], "allowed": [f.to_dict() for f in self.allowed]}
+                "blockers": [f.to_dict() for f in self.blockers], "allowed": [f.to_dict() for f in self.allowed],
+                "notes": [f.to_dict() for f in self.notes]}
 
 
 def format_findings(findings: Iterable[Finding], indent: str = "  ") -> str:
@@ -734,20 +744,23 @@ def format_findings(findings: Iterable[Finding], indent: str = "  ") -> str:
     return "\n".join(lines)
 
 
+def config_at(repo: Repo, rev: Optional[str]) -> dict:
+    """The parsed .foreman.json *at the base* (empty when absent or unreadable), so a change cannot redefine what
+    gates it."""
+    raw = repo.show(rev, CONFIG_FILE) if rev else None
+    try:
+        data = json.loads(raw) if raw else {}
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def check_command_at(repo: Repo, rev: Optional[str], explicit: Optional[str] = None) -> Optional[str]:
     """The check command: the explicit one, else the ``check`` key of .foreman.json *at the base*, so a change
     cannot redefine its own check."""
     if explicit:
         return explicit
-    if not rev:
-        return None
-    raw = repo.show(rev, CONFIG_FILE)
-    if not raw:
-        return None
-    try:
-        value = json.loads(raw).get("check")
-    except (ValueError, AttributeError):
-        return None
+    value = config_at(repo, rev).get("check")
     return value if isinstance(value, str) and value.strip() else None
 
 
@@ -757,10 +770,70 @@ def _check_findings(repo: Repo, base_rev: Optional[str], check: Optional[str], p
         return []
     is_file = repo.is_file_at(base_rev)
     protected = [CONFIG_FILE] if is_file(CONFIG_FILE) else []
+    # A report the base's configuration points to is part of the gate: editing it (adding a suppression) is rigging.
+    reports = [p for p in _config_sarif_paths(config_at(repo, base_rev)) if p not in protected and is_file(p)]
+    protected += reports
     if not check and not protected:
         return []
     return check_changed(check, paths, is_file, allowed_paths, protected,
-                         contents=lambda p: (repo.show(base_rev, p), new_text(p)), version_of=version_of)
+                         contents=lambda p: (repo.show(base_rev, p), new_text(p)), version_of=version_of,
+                         labels={p: "SARIF report that gates the change" for p in reports})
+
+
+# ─── SARIF sources ───────────────────────────────────────────────────────────
+
+def _config_sarif_paths(config: dict, outside: Optional[list] = None) -> list:
+    """The repository-relative, forward-slash paths of the ``sarif`` key (a string or a list of strings). A path that
+    leaves the repository (absolute, ``..``) is dropped, and appended to ``outside`` when the caller wants it."""
+    value = config.get("sarif")
+    value = [value] if isinstance(value, str) else value
+    out = []
+    for p in value if isinstance(value, list) else []:
+        if not (isinstance(p, str) and p.strip()):
+            continue
+        norm = posixpath.normpath(p.strip().replace("\\", "/"))
+        if norm.startswith("/") or norm == ".." or norm.startswith("../") or re.match(r"^[A-Za-z]:", norm):
+            if outside is not None:
+                outside.append(p.strip()[:120])
+        else:
+            out.append(norm)
+    return out
+
+
+def _sarif_paths(repo: Repo, base_rev: Optional[str], explicit=()) -> list:
+    """Absolute paths of every SARIF report this scan reads (configured at the base, plus explicit)."""
+    return ([os.path.join(repo.root, *p.split("/")) for p in _config_sarif_paths(config_at(repo, base_rev))]
+            + [os.path.abspath(p) for p in explicit])
+
+
+def sarif_findings(repo: Repo, base_rev: Optional[str], explicit=(), threshold: Optional[float] = None,
+                   newest: Optional[float] = None) -> tuple:
+    """(blockers, notes) from SARIF reports: the ``sarif`` / ``sarif_threshold`` keys of .foreman.json at the base
+    (files read from the working tree, relative to the repository), plus ``explicit`` paths. Never raises for a bad
+    report; a hit of the time budget does raise GitTimeout, like every other step."""
+    from . import sarif
+    config, outside = config_at(repo, base_rev), []
+    _config_sarif_paths(config, outside)
+    paths = _sarif_paths(repo, base_rev, explicit)
+    notes = [sarif.note("sarif:unreadable", p, "could not read SARIF: the path leaves the repository") for p in outside]
+    if not paths:
+        return [], notes
+    if threshold is None:
+        threshold = sarif.DEFAULT_THRESHOLD
+        if "sarif_threshold" in config:
+            try:
+                threshold = sarif.parse_threshold(config["sarif_threshold"])
+            except ValueError as e:
+                notes.append(sarif.note("sarif:unreadable", CONFIG_FILE,
+                                        "ignoring sarif_threshold, using %s: %s" % (threshold, e)))
+    _check_deadline(repo.deadline)
+    result = sarif.collect(list(dict.fromkeys(paths)), repo.root, threshold, newest)
+    return result.blockers, notes + result.notes
+
+
+def _commit_time(repo: Repo, *revs: str) -> Optional[float]:
+    out = repo.try_git("log", "-1", "--format=%ct", *revs)
+    return float(out) if out and out.isdigit() else None
 
 
 def _versions(repo: Repo, rev: Optional[str] = None, staged: bool = False) -> Callable[[str], str]:
@@ -787,9 +860,11 @@ def _read_text(path: str) -> Optional[str]:
 
 
 def scan_range(repo: Repo, base: Optional[str], head: str = "HEAD", check: Optional[str] = None,
-               extra_messages: str = "", scope: str = "range", base_label: Optional[str] = None) -> Report:
+               extra_messages: str = "", scope: str = "range", base_label: Optional[str] = None,
+               sarif=(), sarif_threshold: Optional[float] = None) -> Report:
     """What publishing ``base..head`` would publish: the final diff, plus every commit's patch for secrets. Without a
-    base (a branch with no ancestor on the remote), the whole history of ``head``."""
+    base (a branch with no ancestor on the remote), the whole history of ``head``. SARIF reports (the base's
+    .foreman.json ``sarif`` key, plus the explicit ``sarif`` paths) add their blockers and notes."""
     rev_range = "%s..%s" % (base, head) if base else head
     diff_from = base or repo.empty_tree
     name_status = repo.git("diff", "--name-status", "-M", *_DIFF_OPTS, diff_from, head)
@@ -803,7 +878,10 @@ def scan_range(repo: Repo, base: Optional[str], head: str = "HEAD", check: Optio
                       version_of=version_of, deadline=repo.deadline)
     check = check_command_at(repo, base, check)
     findings += _check_findings(repo, base, check, paths, allowed_paths, lambda p: repo.show(head, p), version_of)
-    return Report(repo.root, scope, base, base_label, repo.try_git("rev-parse", head), check, findings)
+    blockers, notes = sarif_findings(repo, base, sarif, sarif_threshold, _commit_time(repo, rev_range))
+    report = Report(repo.root, scope, base, base_label, repo.try_git("rev-parse", head), check, findings + blockers)
+    report.notes = notes
+    return report
 
 
 def _untracked_diff(repo: Repo) -> tuple:
@@ -831,7 +909,8 @@ def _untracked_diff(repo: Repo) -> tuple:
 
 
 def scan_worktree(repo: Repo, staged_only: bool = False, include_untracked: bool = True, check: Optional[str] = None,
-                  extra_messages: str = "", scope: str = "worktree") -> Report:
+                  extra_messages: str = "", scope: str = "worktree", sarif=(),
+                  sarif_threshold: Optional[float] = None) -> Report:
     """The uncommitted changes against HEAD: staged and unstaged (or only staged), plus untracked files."""
     has_head = repo.has_head()
     base = "HEAD" if has_head else repo.empty_tree
@@ -856,21 +935,44 @@ def scan_worktree(repo: Repo, staged_only: bool = False, include_untracked: bool
     else:
         new_text = lambda p: _read_text(os.path.join(repo.root, *p.split("/")))
     findings += _check_findings(repo, head_rev, check, paths, allowed_paths, new_text, version_of)
-    return Report(repo.root, scope, repo.try_git("rev-parse", "HEAD") if has_head else None, "HEAD",
-                  None, check, findings)
+    # The newest change is the last commit or the newest edited file, whichever is later (the reports themselves
+    # do not count: an untracked report is not a change it gates).
+    newest = _commit_time(repo, "HEAD") if has_head else None
+    reports = {os.path.normcase(os.path.abspath(p)) for p in _sarif_paths(repo, head_rev, sarif)}
+    for p in paths:
+        full = os.path.join(repo.root, *p.split("/"))
+        try:
+            if os.path.normcase(os.path.abspath(full)) not in reports:
+                newest = max(newest or 0, os.path.getmtime(full))
+        except OSError:
+            pass  # deleted
+    blockers, notes = sarif_findings(repo, head_rev, sarif, sarif_threshold, newest)
+    report = Report(repo.root, scope, repo.try_git("rev-parse", "HEAD") if has_head else None, "HEAD",
+                    None, check, findings + blockers)
+    report.notes = notes
+    return report
 
 
-def scan_branch(repo: Repo, check: Optional[str] = None) -> Report:
+def scan_branch(repo: Repo, check: Optional[str] = None, sarif=(), sarif_threshold: Optional[float] = None) -> Report:
     """The current branch against the merge-base with the remote's default branch (or a local main/master)."""
     if not repo.has_head():
         return Report(repo.root, "branch", findings=[])
     base, label = repo.base_ref()
     if not base:
         return Report(repo.root, "branch", head=repo.try_git("rev-parse", "HEAD"), findings=[])
-    return scan_range(repo, base, "HEAD", check=check, scope="branch", base_label=label)
+    return scan_range(repo, base, "HEAD", check=check, scope="branch", base_label=label, sarif=sarif,
+                      sarif_threshold=sarif_threshold)
 
 
 # ─── CI entry point ──────────────────────────────────────────────────────────
+
+def _threshold_arg(value: str) -> float:
+    from . import sarif
+    try:
+        return sarif.parse_threshold(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e))
+
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="python -m foreman.detector",
@@ -880,13 +982,26 @@ def main(argv=None) -> int:
     parser.add_argument("--check", help="the check command of the base; default: `check` in the base's .foreman.json")
     parser.add_argument("--repo", default=".", help="path inside the repository (default: the current directory)")
     parser.add_argument("--json", action="store_true", help="print the report as JSON")
+    parser.add_argument("--sarif", action="append", default=[], metavar="FILE",
+                        help="a SARIF 2.1.0 report to read as a source of findings (repeatable); unreadable = exit 2")
+    parser.add_argument("--sarif-threshold", metavar="LEVEL", type=_threshold_arg,
+                        help="error (default, 7.0), warning (4.0) or a number 0-10: results at or above it block")
     args = parser.parse_args(argv)
     root = find_repo(args.repo)
     if not root:
         print("foreman: %s is not inside a git repository" % args.repo, file=sys.stderr)
         return 2
+    from . import sarif
+    explicit = [os.path.abspath(p) for p in args.sarif]
+    for path in explicit:  # asked for on the command line: an unreadable report must fail the run, not pass it
+        try:
+            sarif.parse_file(path, root)
+        except sarif.SarifError as e:
+            print("foreman: cannot read SARIF %s: %s" % (path, e), file=sys.stderr)
+            return 2
     try:
-        report = scan_range(Repo(root), args.base, args.head, check=args.check)
+        report = scan_range(Repo(root), args.base, args.head, check=args.check, sarif=explicit,
+                            sarif_threshold=args.sarif_threshold)
     except GitError as e:
         print("foreman: %s" % e, file=sys.stderr)
         return 2
@@ -900,6 +1015,10 @@ def main(argv=None) -> int:
         if report.allowed:
             print("Marked %s by the author; they do not fail this run, review them:" % MARKER)
             print(format_findings(report.allowed))
+        if report.notes:
+            print("Notes (they do not block):")
+            for n in report.notes:
+                print("  [%s] %s  %s" % (n.rule, n.location, n.message))
     return 1 if report.blockers else 0
 
 

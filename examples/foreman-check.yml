@@ -1,0 +1,59 @@
+# Foreman as a required check in CI. Copy this file to .github/workflows/foreman-check.yml in your repository,
+# then make the "foreman" job a required status check in the branch protection (or ruleset) of your default branch.
+#
+# Why in CI: inside Hermes the gate runs on the agent's own machine. A required check runs where the agent cannot
+# edit it, so a green result here does not depend on the agent.
+#
+# Exit codes of the detector: 0 = clean, 1 = at least one blocker, 2 = the run could not be done (not a repository,
+# git failed, or a --sarif file that cannot be read: CI must not pass silently).
+#
+# Findings the author marked with `foreman:allow` (marker-only findings) are LISTED and exit 0 in CI: Foreman does
+# not wave anything through on its own, it hands those to a person. A human reviews them in the PR: read that list
+# in the log of this job before you merge.
+#
+# The check command (and with it `check-changed`) and the optional SARIF reports come from `.foreman.json` at the
+# PR's base, so the pull request cannot redefine them. You can also pass `--check "<command>"` below.
+#
+# On a pull_request event, actions/checkout checks out the merge of the PR into its base, so
+# `origin/<base> .. HEAD` is exactly what the PR changes.
+
+name: foreman
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  foreman:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the detector reads the whole range, history included (a secret removed later still counts)
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Download Foreman at a pinned commit
+        env:
+          # Replace with the full SHA of the Foreman commit you reviewed. Never track a branch in a required check.
+          FOREMAN_SHA: "0000000000000000000000000000000000000000"
+        run: |
+          curl -fsSL "https://github.com/PedValme/foreman/archive/${FOREMAN_SHA}.tar.gz" -o "$RUNNER_TEMP/foreman.tar.gz"
+          mkdir "$RUNNER_TEMP/foreman"
+          tar -xzf "$RUNNER_TEMP/foreman.tar.gz" -C "$RUNNER_TEMP/foreman" --strip-components=1
+
+      # Optional: run your scanner in an earlier step and write a SARIF report (for example results.sarif), then add
+      # `--sarif results.sarif` below. Foreman never runs a scanner itself; it only reads the file. A --sarif file
+      # that is missing or unreadable fails this job (exit 2).
+
+      - name: Foreman
+        env:
+          PYTHONPATH: ${{ runner.temp }}/foreman
+        run: python -m foreman.detector "origin/${{ github.base_ref }}" HEAD
+        # With a report:
+        #   run: python -m foreman.detector "origin/${{ github.base_ref }}" HEAD --sarif results.sarif --sarif-threshold error
