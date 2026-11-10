@@ -51,7 +51,8 @@ mode, YOLO included.
 
 ### When Foreman asks for approval instead
 
-`gh pr merge` always asks a person (a merge is never automatic). So do a push of several branches (`--all`,
+`gh pr merge` run by the agent always asks a person (a merge is never automatic; your own `/foreman merge` is
+that person's decision, see *Use*). So do a push of several branches (`--all`,
 `--mirror`, several refspecs) and any command Foreman could not inspect (git error, its 18 s time budget, a working
 directory that does not exist on the Hermes host). These use Hermes's approval prompt: **in YOLO mode or with
 approvals off, Hermes lets them through without a person.**
@@ -59,10 +60,55 @@ approvals off, Hermes lets them through without a person.**
 ## Use
 
 ```
-/foreman status [path]   verdict for the current repository: CLEAN or BLOCKED, with reasons
-/foreman allow [id]      list or allow findings the agent marked
+/foreman                     the board: branch vs base, open pull requests, the issues they close
+/foreman use [path|n]        pin the repository for this session (no argument: pick one)
+/foreman prs | issues        focused views of the open pull requests or issues
+/foreman verdict [pr|branch] MERGEABLE or BLOCKED, each reason as [rule] file:line and its fix
+/foreman merge <pr> [--merge|--rebase]   merge it, only if MERGEABLE (squash by default)
+/foreman reject <pr> [--close] [note]    post the reasons as one comment on the pull request
+/foreman status [path]       verdict for the current repository: CLEAN or BLOCKED, with reasons
+/foreman allow [id]          list or allow findings the agent marked
 /foreman help
 ```
+
+The board is plain text, one screen, the same in a terminal, the Desktop app and messaging:
+
+```
+Foreman board: acme/widgets
+Repository: /home/me/src/widgets
+  (the repository pinned with /foreman use)
+Branch: fix/parser  vs origin/main · 2 ahead · 0 uncommitted · CLEAN
+
+Pull requests (1 open):
+  #7    Fix the parser
+       fix/parser · CI failing (1 of 2) · closes #3, #5
+
+Issues no open PR closes (1):
+  #9    Crash on empty input  [bug]
+
+Next:
+  /foreman verdict 7       mergeable or blocked, and why
+  /foreman issues          every open issue and its PR
+```
+
+**Which repository.** `/foreman use <path>` pins one for the session; `/foreman use` offers recently used
+repositories and the git repositories around the session's directory with Hermes's picker (in a chat without
+buttons, or where Hermes cannot ask, it prints a numbered list: `/foreman use 2`). Without a pin, Foreman resolves the
+repository as described in *Known limits*.
+
+**Pull request verdicts.** When the clone has the pull request's head commit, `/foreman verdict <pr>` runs the full
+check on it, history included. Otherwise it reads GitHub's diff (`gh pr diff`) without touching your working tree;
+a secret added and removed again in an earlier commit is then not seen, and the output says so.
+
+**Merge and reject.** You typing `/foreman merge <pr>` is the decision. Foreman refuses when the verdict is BLOCKED or
+cannot be computed. When it is MERGEABLE, it runs `gh pr merge <pr> --squash --delete-branch --match-head-commit
+<sha>` (so only the commit it inspected is merged) through Hermes's own terminal tool, never from its own subprocess.
+`/foreman reject <pr>` posts one Markdown comment with the reasons (and a saved model review, if there is one, and
+your note) with `gh pr comment`, the same way, and shows you the exact text; `--close` also closes the pull request.
+A pull request with no blocker is rejected only with a note.
+
+**Without GitHub** (no `gh`, not logged in, or no GitHub remote) the board lists the local branches with their
+verdict and says what is missing; `/foreman verdict <branch>` still works.
 
 The agent can call the `foreman_check` tool for the same verdict as JSON.
 
@@ -100,11 +146,25 @@ Requires Hermes Agent >= 0.22.6 and git on the PATH.
 - **Reads files** of that repository: untracked files (up to 500, 512 KB each) to look for secrets and markers, the
   file a `write_file` would replace, `package.json` to compare its scripts, and a commit message file given with
   `-F`. It may read a non-ignored `.env` only to warn before it is committed; values are never printed or stored.
-- **Writes one file**, `foreman-grants.json` in its Hermes plugin data directory: the findings waiting for you and
-  the exceptions you allowed (rule, file, line, message; no file contents).
+- **Writes in its Hermes plugin data directory** only: `foreman-grants.json` (the findings waiting for you and the
+  exceptions you allowed: rule, file, line, message; no file contents), `foreman-board.json` (the repository pinned
+  per session and the last ten you used: paths only), and, for a moment, the text of a `/foreman reject` comment
+  in `outbox/` (deleted once `gh pr comment` has read it). It reads `reviews/<owner>__<repo>__<pr>.json` there when a
+  saved model review exists.
+- **Runs the GitHub CLI (`gh`) only when you type a `/foreman` subcommand**, as a subprocess with its own login, in
+  the repository's directory. These calls contact GitHub and only read: `gh repo view`, `gh pr list`, `gh issue list`,
+  `gh pr view` and `gh pr diff`. Foreman never reads `gh`'s token or configuration files, nor any other credential.
+- **Writes to GitHub only on your explicit command**: `/foreman merge <pr>` runs `gh pr merge`, and `/foreman reject
+  <pr>` runs `gh pr comment` (and `gh pr close` with `--close`). They run through Hermes's terminal tool
+  (`ctx.dispatch_tool("terminal", …)`) without a Hermes approval prompt: the command you typed is the approval
+  (see *Known limits*). Hermes's terminal backend and its hard floors still apply; nothing is merged,
+  commented or closed otherwise, and never by the agent. `gh pr merge --delete-branch` also deletes the pull
+  request's branch on GitHub and the local branch, switching to the base branch if it was checked out.
 - Reads the working directory the terminal tool recorded for the session, through a Hermes internal
   (`tools.terminal_tool.get_session_cwd`), guarded, with Hermes's documented `resolve_agent_cwd()` as fallback.
-- **No network calls**, no telemetry, no credentials, no background processes, no model calls.
+  `/foreman use` also lists the directories directly inside the session's directories to find git repositories.
+- **No network calls of its own** (only the `gh` commands above, when you ask), no telemetry, no credentials, no
+  background processes, no model calls.
 - It registers two hooks (`pre_tool_call`, `pre_verify`), one slash command (`/foreman`) and one tool
   (`foreman_check`).
 
@@ -126,7 +186,8 @@ Requires Hermes Agent >= 0.22.6 and git on the PATH.
   `check-weakened` patterns above.
 - Secrets are found by pattern: real credential formats reliably, key/value guesses with false negatives (and none
   inside test files).
-- Repository resolution: Foreman tries, in order, the directory the terminal tool recorded for the session, the
+- Repository resolution: for `/foreman` subcommands, a repository pinned with `/foreman use` comes first. Then
+  Foreman tries, in order, the directory the terminal tool recorded for the session, the
   session's working directory that Hermes binds for a local session's command (`scoped_session_cwd()`), then (in
   the CLI and TUI only) the process directory, then Hermes's `resolve_agent_cwd()`, and uses the first one inside a
   git repository. Hermes's own data is never picked unless the terminal recorded it: nothing inside a Hermes home
@@ -139,6 +200,14 @@ Requires Hermes Agent >= 0.22.6 and git on the PATH.
 - With a remote terminal backend (Docker, SSH, …) the repository is not on the Hermes host: Foreman asks for
   approval on every gated command.
 - In YOLO mode or with approvals off, the cases in *When Foreman asks for approval instead* pass without a person.
+- `/foreman merge` and `/foreman reject` run their `gh` command through Hermes's terminal tool from the slash
+  command. In Hermes 0.23 a tool dispatched that way skips the plugins' `pre_tool_call` hooks, and Hermes's terminal
+  does not treat `gh pr merge` as a dangerous command, so no approval prompt appears: the command you typed is the
+  decision, and Foreman computes its verdict itself before running it.
+- With a remote terminal backend (Docker, SSH, …), the verdict is computed on the Hermes host but `gh pr merge` runs
+  on the backend, in the host's path, where it may fail or find another clone; `--match-head-commit` still keeps
+  it from merging any commit but the inspected one. `/foreman reject` cannot hand the comment file to `gh` there; it
+  then says the comment was not posted and shows its text.
 
 ## Development
 

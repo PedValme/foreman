@@ -373,8 +373,9 @@ LOCAL_PLATFORMS = {"", "cli", "tui", "local"}
 RECORDED, SESSION, PROCESS, CONFIGURED = "recorded", "session", "process", "configured"
 HOW = {RECORDED: "the terminal's directory for this session", SESSION: "this session's working directory",
        PROCESS: "the current directory", CONFIGURED: "Hermes's working directory", "given": "the given path"}
-NO_REPOSITORY_HERE = ("Foreman could not tell which repository you mean from here. Run `/foreman status <path>`, or "
-                      "run it after the agent has used the terminal in this session.")
+NO_REPOSITORY_HERE = ("Foreman could not tell which repository you mean from here. Pick one with `/foreman use` (or "
+                      "`/foreman use <path>`), run `/foreman status <path>`, or run it after the agent has used the "
+                      "terminal in this session.")
 
 
 def _session_env(name: str) -> str:
