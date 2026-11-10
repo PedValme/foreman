@@ -370,9 +370,11 @@ def _option_values(args: list, short: str, long: str) -> list:
 # Surfaces where the Hermes process was started by the user in a directory, so that directory means something.
 # Messaging platforms and the Desktop app start from wherever the service or the app was launched.
 LOCAL_PLATFORMS = {"", "cli", "tui", "local"}
-RECORDED, PROCESS, CONFIGURED = "recorded", "process", "configured"
-HOW = {RECORDED: "the terminal's directory for this session", PROCESS: "the current directory",
-       CONFIGURED: "Hermes's working directory", "given": "the given path"}
+RECORDED, SESSION, PROCESS, CONFIGURED = "recorded", "session", "process", "configured"
+HOW = {RECORDED: "the terminal's directory for this session", SESSION: "this session's working directory",
+       PROCESS: "the current directory", CONFIGURED: "Hermes's working directory", "given": "the given path"}
+NO_REPOSITORY_HERE = ("Foreman could not tell which repository you mean from here. Run `/foreman status <path>`, or "
+                      "run it after the agent has used the terminal in this session.")
 
 
 def _session_env(name: str) -> str:
@@ -383,20 +385,48 @@ def _session_env(name: str) -> str:
         return ""
 
 
-def hermes_home() -> Optional[str]:
-    """The active Hermes home, through Hermes's documented helper."""
+def _canon(path: str) -> str:
+    return os.path.normcase(os.path.realpath(path))
+
+
+def hermes_homes() -> list:
+    """The Hermes homes to keep out of the picture: the active (profile) home, the process home and the root that
+    holds the profiles, all through ``hermes_constants`` (public)."""
+    homes = []
     try:
-        from hermes_constants import get_hermes_home
-        return os.path.normcase(os.path.realpath(str(get_hermes_home())))
+        import hermes_constants as hc
+        for name in ("get_hermes_home", "get_process_hermes_home", "get_default_hermes_root"):
+            fn = getattr(hc, name, None)
+            if fn is None:
+                continue
+            try:
+                homes.append(_canon(str(fn())))
+            except Exception:
+                pass
     except Exception:
-        return None
+        pass
+    return list(dict.fromkeys(h for h in homes if h))
+
+
+def hermes_home() -> Optional[str]:
+    homes = hermes_homes()
+    return homes[0] if homes else None
 
 
 def _inside(path: str, home: Optional[str]) -> bool:
     if not home or not path:
         return False
-    p = os.path.normcase(os.path.realpath(path))
+    p = _canon(path)
     return p == home or p.startswith(home.rstrip(os.sep) + os.sep)
+
+
+def _hermes_data(path: str, root: Optional[str], homes: list) -> bool:
+    """True when ``path`` is Hermes's own data: inside a Hermes home, or in a repository whose root is a Hermes home
+    or one of its ancestors (the gateway runs from the root home, and a home may itself be a git repository)."""
+    for home in homes:
+        if _inside(path, home) or (root and _inside(home, _canon(root))):
+            return True
+    return False
 
 
 def cwd_candidates(*keys: str, platform: Optional[str] = None) -> list:
@@ -404,10 +434,11 @@ def cwd_candidates(*keys: str, platform: Optional[str] = None) -> list:
 
     1. the directory the terminal tool recorded for this session's keys (it follows ``cd`` between calls) — a Hermes
        internal, read guarded;
-    2. on local surfaces (CLI, TUI), the process directory, where the user started Hermes;
-    3. Hermes's documented ``resolve_agent_cwd()`` (the configured terminal directory).
-    Anything inside the Hermes home is dropped unless the terminal recorded it: it is Hermes's own data, not the
-    user's project, even when it happens to be a git repository."""
+    2. this session's working directory: the caller's directory, which the gateway binds for a local session's
+       slash command (``agent.runtime_cwd.scoped_session_cwd()``);
+    3. on local surfaces (CLI, TUI), the process directory;
+    4. Hermes's documented ``resolve_agent_cwd()`` (the configured terminal directory).
+    Anything inside a Hermes home is dropped unless the terminal recorded it."""
     if platform is None:
         platform = _session_env("HERMES_SESSION_PLATFORM")
     keys_in_order = [k for k in (*keys, _session_env("HERMES_SESSION_KEY")) if isinstance(k, str) and k]
@@ -416,6 +447,11 @@ def cwd_candidates(*keys: str, platform: Optional[str] = None) -> list:
         from tools.terminal_tool import get_session_cwd  # not a documented plugin surface: guarded
         for key in dict.fromkeys(keys_in_order):
             out.append((get_session_cwd(key), RECORDED))
+    except Exception:
+        pass
+    try:
+        from agent.runtime_cwd import scoped_session_cwd  # the session's declared cwd, empty when none is bound
+        out.append((scoped_session_cwd(), SESSION))
     except Exception:
         pass
     process = None
@@ -430,12 +466,12 @@ def cwd_candidates(*keys: str, platform: Optional[str] = None) -> list:
         out.append((str(resolve_agent_cwd()), CONFIGURED))
     except Exception:
         pass
-    home, seen, result = hermes_home(), set(), []
+    homes, seen, result = hermes_homes(), set(), []
     for path, how in out:
         if not isinstance(path, str) or not path or not os.path.isdir(path):
             continue
         path = os.path.normpath(path)
-        if path in seen or (how != RECORDED and _inside(path, home)):
+        if path in seen or (how != RECORDED and _hermes_data(path, None, homes)):
             continue
         seen.add(path)
         result.append((path, how))
@@ -443,22 +479,26 @@ def cwd_candidates(*keys: str, platform: Optional[str] = None) -> list:
 
 
 def locate(*keys: str, platform: Optional[str] = None, deadline: Optional[float] = None) -> tuple:
-    """(directory, how) of the first candidate inside a git repository that is not the Hermes home; when none is,
-    the first candidate, so the message names where Foreman looked."""
-    candidates = cwd_candidates(*keys, platform=platform)
-    home = hermes_home()
-    for path, how in candidates:
+    """(directory, how) of the first candidate inside a git repository that is not Hermes's own data, or
+    (None, None) when none qualifies: never a guessed repository."""
+    homes = hermes_homes()
+    for path, how in cwd_candidates(*keys, platform=platform):
         try:
             root = detector.find_repo(path, deadline=deadline)
         except GitError:
             break
-        if root and (how == RECORDED or not _inside(root, home)):
+        if root and (how == RECORDED or not _hermes_data(path, root, homes)):
             return path, how
-    return candidates[0] if candidates else (os.path.expanduser("~"), CONFIGURED)
+    return None, None
+
+
+# A placeholder base for commands whose directory Foreman could not determine; it never exists.
+_UNKNOWN_DIR = os.path.abspath(os.path.join(os.sep, "__foreman_unknown_directory__"))
 
 
 def session_cwd(*keys: str, platform: Optional[str] = None, deadline: Optional[float] = None) -> str:
-    return locate(*keys, platform=platform, deadline=deadline)[0]
+    """The located directory, or "" when Foreman cannot tell."""
+    return locate(*keys, platform=platform, deadline=deadline)[0] or ""
 
 
 # ─── Evaluating an action ────────────────────────────────────────────────────
@@ -709,14 +749,16 @@ def gate_command(command: str, workdir: Optional[str] = None, task_id: str = "")
     if workdir and os.path.isabs(os.path.expanduser(workdir)):
         cwd = os.path.normpath(os.path.expanduser(workdir))  # explicit: never replaced by another candidate
     else:
-        try:
-            base = session_cwd(task_id, deadline=deadline)
-        except GitError:
-            base = os.getcwd()
+        base = session_cwd(task_id, deadline=deadline) or _UNKNOWN_DIR
         cwd = _resolve(base, workdir) if workdir else base
     actions = parse_actions(command, cwd, located=bool(workdir))
     if not actions:
         return None
+    unknown = [a for a in actions if _inside(a.cwd, _canon(_UNKNOWN_DIR))]
+    if unknown:  # the command depends on a directory Foreman could not determine
+        return {"action": "block", "message": "Foreman blocked %s: it cannot tell which repository this runs in. "
+                "Re-run it with `workdir` set to the repository, or as `git -C <repo> ...`."
+                % _LABELS[unknown[0].kind]}
     what = ", ".join(dict.fromkeys(_LABELS[a.kind] for a in actions))
     combined = next((a for a in actions if a.preceded_by), None)
     if combined is not None:
@@ -823,7 +865,7 @@ def gate_write(tool_name: str, args: dict, task_id: str = "") -> Optional[dict]:
                           new, False))
     if not edits:
         return None
-    cwd = session_cwd(task_id)
+    cwd = session_cwd(task_id) or os.getcwd()  # only to resolve a relative path; Foreman then finds its repository
     findings, root = [], None
     for path, old, new, is_new in edits:
         full = _resolve(cwd, path)
@@ -868,7 +910,7 @@ def on_pre_verify(coding: bool = False, attempt: int = 0, changed_paths=None, se
 
 def verify_worktrees(changed_paths: list, budget: float = HOOK_BUDGET_SECONDS, session_id: str = "") -> Optional[dict]:
     deadline = time.monotonic() + budget
-    cwd = session_cwd(session_id)
+    cwd = session_cwd(session_id) or os.getcwd()
     roots = []
     for p in list(changed_paths)[:50]:
         if not isinstance(p, str):

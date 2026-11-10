@@ -14,7 +14,7 @@ from typing import Callable, Optional
 
 from . import detector, grants
 from .detector import MARKER, GitError, Repo
-from .gate import HOW, RECORDED, locate
+from .gate import HOW, NO_REPOSITORY_HERE, RECORDED, locate
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,10 @@ def verdict(path: Optional[str] = None, *keys: str, platform: Optional[str] = No
         where, how = os.path.expanduser(path), "given"
     else:
         where, how = locate(*keys, platform=platform)
+        if where is None:
+            if not path:
+                return {"verdict": "NO_REPOSITORY", "path": None, "chosen_from": None, "message": NO_REPOSITORY_HERE}
+            where = os.getcwd()
         if path:
             where, how = os.path.normpath(os.path.join(where, path)), "given"
     root = detector.find_repo(where)
@@ -87,6 +91,8 @@ def _format_finding(d: dict, with_id: bool = False) -> str:
 
 
 def format_verdict(v: dict) -> str:
+    if v["verdict"] == "NO_REPOSITORY" and v.get("path") is None:
+        return v.get("message", NO_REPOSITORY_HERE)
     if v["verdict"] in ("NO_REPOSITORY", "ERROR"):
         return "Foreman: %s. %s" % (v["verdict"].replace("_", " ").lower(), v.get("message", ""))
     hint = "" if v.get("chosen_from") in (None, RECORDED, "given") else " (from %s)" % HOW.get(v["chosen_from"], "?")

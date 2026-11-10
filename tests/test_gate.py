@@ -364,16 +364,20 @@ class SessionDirectory(GitRepoCase):
         self.commit("base")
         self.home = os.path.join(self.tmp, "home")
         os.makedirs(self.home)
-        # A Hermes home that is a git repository, with a dirty skip so picking it would show.
+        # A root Hermes home that is a git repository (with a dirty skip so picking it would show) and a profile
+        # home under it, as on the machine where the defect was seen.
         self.hermes = os.path.join(self.tmp, "hermes-home")
+        self.profile = os.path.join(self.hermes, "profiles", "dev")
         os.makedirs(os.path.join(self.hermes, "tests"))
+        os.makedirs(self.profile)
         self.git("init", "-q", cwd=self.hermes)
         with open(os.path.join(self.hermes, "tests", "test_h.py"), "w", encoding="utf-8") as fh:
             fh.write(SKIP + "\n")
 
-    def fake_hermes(self, configured, recorded=None):
+    def fake_hermes(self, configured, recorded=None, session=""):
         runtime = types.ModuleType("agent.runtime_cwd")
         runtime.resolve_agent_cwd = lambda: configured
+        runtime.scoped_session_cwd = lambda: session
         constants = types.ModuleType("hermes_constants")
         constants.get_hermes_home = lambda: self.hermes
         terminal_tool = types.ModuleType("tools.terminal_tool")
@@ -402,14 +406,40 @@ class SessionDirectory(GitRepoCase):
         os.makedirs(elsewhere)
         with self.fake_hermes(self.hermes), mock.patch.object(gate.os, "getcwd", return_value=elsewhere):
             out = commands.handle_slash("status", platform="cli")
-        self.assertIn("not inside a git repository", out)
-        self.assertIn(self.norm(elsewhere), out)
-        self.assertNotIn(self.norm(self.hermes), out)
+        self.assertEqual(out, gate.NO_REPOSITORY_HERE)
+
+    def fake_gateway(self, session):
+        """The gateway process: cwd is the root Hermes home (a git repository), the active home is a profile under
+        it, Hermes's configured directory is the user's home, and the session cwd carries the caller's directory."""
+        patch = self.fake_hermes(self.home, session=session)
+        constants = types.ModuleType("hermes_constants")
+        constants.get_hermes_home = lambda: self.profile
+        constants.get_default_hermes_root = lambda: self.hermes
+        return patch, mock.patch.dict(sys.modules, {"hermes_constants": constants}), \
+            mock.patch.object(gate.os, "getcwd", return_value=self.hermes)
+
+    def test_in_the_gateway_process_the_session_cwd_is_used(self):
+        a, b, c = self.fake_gateway(session=self.root)
+        with a, b, c:
+            out = commands.handle_slash("status", session_id="s1", platform="cli")
+        self.assertIn("Repository: %s (from this session's working directory)" % self.norm(self.root), out)
+        self.assertNotIn(self.norm(self.hermes) + "\n", out)
+
+    def test_in_the_gateway_process_without_a_session_cwd_foreman_says_so(self):
+        a, b, c = self.fake_gateway(session="")
+        with a, b, c:
+            out = commands.handle_slash("status", session_id="s1", platform="cli")
+            self.assertEqual(out, gate.NO_REPOSITORY_HERE)
+            self.assertEqual(json.loads(commands.foreman_check_tool({}))["verdict"], "NO_REPOSITORY")
+            # The hook never guesses either: an unlocated gated command is blocked with the workdir hint.
+            d = terminal("git commit -m x")
+            self.assertEqual(d["action"], "block")
+            self.assertIn("workdir", d["message"])
 
     def test_on_a_messaging_platform_the_process_directory_is_ignored(self):
         with self.fake_hermes(self.home), mock.patch.object(gate.os, "getcwd", return_value=self.root):
             self.assertEqual([p for p, _ in gate.cwd_candidates(platform="telegram")], [self.norm(self.home)])
-            self.assertIn("not inside a git repository", commands.handle_slash("status", platform="telegram"))
+            self.assertEqual(commands.handle_slash("status", platform="telegram"), gate.NO_REPOSITORY_HERE)
 
     def test_the_recorded_terminal_directory_wins_and_needs_no_hint(self):
         other = os.path.join(self.tmp, "other")
