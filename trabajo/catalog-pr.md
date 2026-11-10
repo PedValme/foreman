@@ -1,0 +1,99 @@
+# Draft catalog pull request for NousResearch/hermes-agent (not opened)
+
+Before opening: replace `<SHA>` below and in `trabajo/catalog/foreman.yaml` (the `sha` and every `screenshots` URL)
+with the full 40-character commit of PedValme/foreman being listed; run `hermes plugins validate plugin
+--install-deps` on a checkout at that commit and `python scripts/validate_plugin_catalog.py plugin-catalog/foreman.yaml`
+in the Hermes checkout; the PR adds one file, `plugin-catalog/foreman.yaml`.
+
+**Title:** `plugin-catalog: add foreman (test-integrity gate for coding agents)`
+
+---
+
+## Foreman
+
+A green check the agent did not rig. Foreman reads the real diff before `git commit`, `git push`, `gh pr create` and
+`gh pr merge` and blocks a coding agent that skips, deletes or moves tests, edits or weakens what the check runs,
+bypasses git hooks or commits a secret. A second model (by default the user's Hermes fallback model) reviews what
+rules cannot see, such as a loosened assertion. Only a person allows an exception or merges.
+
+- Repository: https://github.com/PedValme/foreman (public, MIT), plugin in `plugin/` (`subdir: plugin`)
+- Pinned commit: `<SHA>`, version `0.1.0`, `requires_hermes: ">=0.22.6"` (also in `plugin.yaml`)
+- README (renders on the plugin page): `plugin/README.md` at the pinned commit
+- Submitted by the repository owner (rule 5). **Plugin Hackathon entry.**
+
+## Hermes surfaces it uses
+
+- Hooks: `pre_tool_call` (terminal, `write_file`, `patch`: blocks rigging commands and writes) and `pre_verify` (before
+  a coding turn ends: tells the agent what to undo; with `auto_review: finish`, reads stored reviews).
+- One slash command, `/foreman`, with subcommands (no built-in name is shadowed).
+- Two tools: `foreman_check` (the verdict as JSON) and `foreman_review` (the second-model review, advisory).
+- `ctx.llm` for the review, with the capabilities `llm.model_override` and `llm.provider_override` so the reviewer can
+  be another model; `ctx.ask_choice` for the merge confirmation and the repository picker; `ctx.dispatch_tool
+  ("terminal", …)` for `gh pr merge`, `gh pr comment`, `gh pr close` and `hermes send`; `ctx.session_cwd()`;
+  `plugin_data_dir` for its state; `config_schema` settings.
+- Desktop: `desktop/plugin.js` (a pane and a status-bar chip, SDK only, switched off until the user enables it) and a
+  dashboard backend route, `GET /api/plugins/foreman/pipeline`, read-only, returning Foreman's own state file.
+
+## Disclosure (rule 13)
+
+- **Shell commands.** Read-only `git` subprocesses in the repository the agent works in (`diff`, `diff-tree`, `log`,
+  `ls-files`, `rev-parse`, `rev-list`, `merge-base`, `cat-file`, `show`, `status`, `remote`, `symbolic-ref`,
+  `for-each-ref`, `hash-object` without `-w`). The GitHub CLI only when the user types a `/foreman` subcommand: reads
+  (`gh repo view`, `gh pr list`, `gh issue list`, `gh pr view`, `gh pr diff`) as a subprocess with `gh`'s own login;
+  writes (`gh pr merge --match-head-commit`, `gh pr comment`, `gh pr close`) only on `/foreman merge` and `/foreman
+  reject`, merge and close after the user's confirmation, through Hermes's terminal tool. `gh pr merge
+  --delete-branch` deletes the merged branch on GitHub and locally.
+- **Reads outside its own data.** Files of the repository the agent works in (untracked files up to 500 × 512 KB,
+  `package.json`, `Makefile`, `tox.ini`, `.foreman.json`, named SARIF reports, a commit message file); a non-ignored
+  `.env` only to warn before it is committed, values never printed or stored. The user's main model and the first
+  fallback's provider and model names, through Hermes's config reader. `/foreman use` lists the directories directly
+  inside the session's directories to find git repositories.
+- **Network.** No calls of its own and no telemetry. Three paths, all user-initiated or user-enabled: the user's own
+  `gh` (above); the review's model call through `ctx.llm` (the bounded diff, title, commit subjects and detector
+  findings go to the user's configured provider; it spends tokens, once per exact diff, on `/foreman review`, before
+  `/foreman merge` by default, or inside the turn with `auto_review: finish`); notifications with `hermes send`, off
+  until the user runs `/foreman notify on`.
+- **Writes.** Only in its plugin data directory: pending findings and exceptions, the pinned repository, stored
+  reviews (up to 300 cached), the pipeline state (at most 200 changes), the notification log, and short-lived reject
+  comment and message files.
+- **Credentials.** None stored or read; models through `ctx.llm`, GitHub through `gh`'s own login, messages through
+  the user's Hermes and bot.
+- **Background processes.** None. The Desktop pane polls the read-only route every 2 s while visible, 15 s otherwise.
+- **Approvals (rule 12).** It never auto-approves. A merge or close needs a person's confirmation or typed `--yes`;
+  with nobody to ask (cron, a chat without choices, a timeout) nothing merges. An agent-run `gh pr merge` is always
+  refused. A command Foreman cannot inspect goes to Hermes's approval prompt.
+
+### The one `hermes plugins validate` warning
+
+```
+⚠ private core imports (catalog rule 9 …): foreman/gate.py:623 tools.terminal_tool.get_session_cwd.
+```
+
+The `pre_tool_call` hook must know which repository a `git commit` without `workdir` runs in, which is the terminal's
+directory after the agent's earlier `cd`. No public accessor gives that today: `ctx.session_cwd()` returns the
+session's recorded workspace or launch directory. The import is inside `try/except`, read-only (it calls the function,
+never rebinds anything), and if it fails or moves Foreman falls back to `ctx.session_cwd()` and
+`agent.runtime_cwd.resolve_agent_cwd()`; when none names a repository the gate blocks with a hint to pass `workdir`,
+so a missing seam never lets a commit through unchecked. The issue asking for the seam (with two others):
+`<link to the issue, from trabajo/hermes-issue-seams.md>`.
+
+## Validation
+
+- `hermes plugins validate plugin --install-deps` at `<SHA>`: passed; security scan safe; the one warning above.
+- `scripts/validate_plugin_catalog.py plugin-catalog/foreman.yaml`: OK.
+- The plugin's own CI: unit tests on Linux, macOS and Windows (Python 3.11 and 3.13), and Foreman on its own pull
+  requests.
+
+## Screenshots
+
+The Desktop pane's code rendered in a browser preview with scripted data (the real `desktop/plugin.js` against a
+stand-in SDK); real-app captures will replace them in a later SHA bump.
+
+- `docs/screenshots/panel-waiting-for-owner-light.png`: a pull request past the gate and the review, waiting for the
+  owner.
+- `docs/screenshots/panel-several-changes-light.png`: several changes on the line.
+- `docs/screenshots/panel-blocked-at-gate-light.png`: a commit blocked by a skipped test.
+- `docs/screenshots/panel-bounced-dark.png`: a change the review sent back to the agent.
+- `docs/screenshots/panel-narrow-360-dark.png`: the pane at 360 px.
+
+Demo video (under 90 s): `<link to the X post>`.
