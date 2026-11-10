@@ -29,14 +29,16 @@ other commands to show; nothing reads it to grant, merge or unblock anything. It
 
     {"schema": 1, "repo": "<local root>", "slug": "<owner>/<repo>",
      "target": {"kind": "pr" | "branch" | "worktree", "ref": "<pr number or branch>", "title": "...",
-                "base": "<base label or null>", "head": "<commit reviewed>"},
-     "head": "<the commit reviewed, 40 hex; empty when unknown; a worktree review also read uncommitted changes>",
+                "base": "<base label or null>"},
      "time": "<UTC ISO 8601>",
+     "head": "<the reviewed commit: the PR's head, or HEAD>", "diff_sha": "<sha256 of the reviewed diff>",
+     "cache_key": "<sha256 of the prompt version, the reviewer and the diff>",
      "verdict": "BLOCKED" | "PASS WITH NOTES" | "PASS" | "COULD NOT RUN" | "NOTHING TO REVIEW",
      "model": {"provider": "...", "model": "...", "source": "setting" | "fallback" | "default",
                "same_as_author": true | false | null} | null,
      "model_notes": ["why the chosen model was not used", ...],
-     "deterministic": {"blocked": bool, "findings": [{"rule", "location", "message"}], "note": "..."},
+     "deterministic": {"blocked": bool, "findings": [{"rule", "location", "message"}], "note": "...",
+                       "verdict": "CLEAN" | "BLOCKED" | "INCOMPLETE" | "NEEDS YOUR OK", "errors": [...]},
      "findings": [{"severity", "file", "line", "title", "why", "evidence", "fix"}],   # verified only
      "dropped_unverified": <int>, "summary": "<the model's summary>", "model_verdict": "<ignored>",
      "coverage": {"complete": bool, "files": <int>, "reviewed": [...], "partial": [...],
@@ -51,8 +53,6 @@ import logging
 import os
 import re
 import secrets
-import shutil
-import subprocess
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -635,7 +635,9 @@ class Target:
     det_blocked: bool = False
     det_note: str = ""
     omitted: dict = field(default_factory=dict)          # changed files not in ``diff``: path -> reason
-    head: str = ""                                       # the commit reviewed (40 hex), "" when unknown
+    head: Optional[str] = None                           # the reviewed commit (the PR's head, or HEAD)
+    det_verdict: str = ""                                # CLEAN | BLOCKED | INCOMPLETE | NEEDS YOUR OK
+    det_errors: list = field(default_factory=list)       # what the detector could not inspect
 
 
 def slug_of(repo: Repo) -> str:
@@ -665,31 +667,50 @@ def _subjects(repo: Repo, rev_range: str) -> str:
     return "; ".join(l.strip() for l in out.splitlines() if l.strip())
 
 
+def worktree_diff(repo: Repo) -> tuple:
+    """(diff, base label, files left out of it): the current branch against its base plus the uncommitted and
+    untracked changes, exactly as the review sends it. The finish loop hashes the same text."""
+    has_head = repo.has_head()
+    base, label = repo.base_ref() if has_head else (None, None)
+    diff = repo.git("diff", "-M", *_DIFF_OPTS, base or ("HEAD" if has_head else repo.empty_tree))
+    synthetic, untracked = detector._untracked_diff(repo)
+    diff += untracked_as_git_diff(synthetic)
+    listed = repo.git("ls-files", "--others", "--exclude-standard", "-z").split("\0")
+    emitted = set(_UNTRACKED_PART.findall(synthetic))
+    omitted = {p: "untracked, binary or over 512 KB" for p in untracked if p not in emitted}
+    omitted.update({p: "untracked, past the first 500" for p in listed[len(untracked):] if p})
+    return diff, label, omitted
+
+
+def _det_from_verdict(v: dict) -> tuple:
+    """(finding dicts, blocked, verdict word, errors) from a verdict dict (``commands.verdict`` or
+    ``board.pr_verdict``): a marked finding still waiting for a person blocks a merge like a blocker."""
+    from .verdicts import BLOCKED, NEEDS_OK
+    det = [{"rule": d["rule"], "location": d["location"], "message": d["message"]} for d in v.get("blockers") or []]
+    det += [{"rule": d["rule"], "location": d["location"], "message": d["message"] + " (marked by the agent, "
+             "waiting for you)"} for d in v.get("marked") or []]
+    verdict = v.get("verdict") or ""
+    return det, verdict in (BLOCKED, NEEDS_OK), verdict, list(v.get("errors") or [])
+
+
 def local_target(root: str, branch: Optional[str], keys: tuple, platform: Optional[str]) -> Target:
     repo = Repo(root, budget=GIT_BUDGET_SECONDS)
     slug = slug_of(repo)
     if branch is None:
         from .commands import verdict  # late: commands imports this module
+        from .verdicts import ALL
         name = repo.branch()
-        has_head = repo.has_head()
-        base, label = repo.base_ref() if has_head else (None, None)
-        diff = repo.git("diff", "-M", *_DIFF_OPTS, base or ("HEAD" if has_head else repo.empty_tree))
-        synthetic, untracked = detector._untracked_diff(repo)
-        diff += untracked_as_git_diff(synthetic)
-        listed = repo.git("ls-files", "--others", "--exclude-standard", "-z").split("\0")
-        emitted = set(_UNTRACKED_PART.findall(synthetic))
-        omitted = {p: "untracked, binary or over 512 KB" for p in untracked if p not in emitted}
-        omitted.update({p: "untracked, past the first 500" for p in listed[len(untracked):] if p})
+        diff, label, omitted = worktree_diff(repo)
         v = verdict(root, *keys, platform=platform)
-        if v.get("verdict") not in ("CLEAN", "BLOCKED"):
+        if v.get("verdict") not in ALL:
             raise GitError("the deterministic detector could not run: %s" % v.get("message", v.get("verdict")))
-        det =[{"rule": d["rule"], "location": d["location"], "message": d["message"]} for d in v.get("blockers", [])]
-        det += [{"rule": d["rule"], "location": d["location"], "message": d["message"] + " (marked by the agent, "
-                 "waiting for you)"} for d in v.get("marked", [])]
+        det, blocked, word, errors = _det_from_verdict(v)
+        base = v.get("base_sha")
         subjects = _subjects(repo, "%s..HEAD" % base) if base else ""
         title = "branch %s%s" % (name, ": " + subjects if subjects else "")
-        return Target("worktree", name, title, root, slug, diff, label, det, v["verdict"] == "BLOCKED",
-                      omitted=omitted, head=(repo.try_git("rev-parse", "HEAD") or "") if has_head else "")
+        return Target("worktree", name, title, root, slug, diff, label, det, blocked, omitted=omitted,
+                      head=repo.try_git("rev-parse", "--verify", "-q", "HEAD^{commit}"), det_verdict=word,
+                      det_errors=errors)
     if branch.startswith("-"):
         raise GitError("`%s` is not a branch name" % branch)
     head = None
@@ -703,57 +724,40 @@ def local_target(root: str, branch: Optional[str], keys: tuple, platform: Option
     if not base:
         raise GitError("no base branch found for `%s` (no main/master to compare with)" % branch)
     diff = repo.git("diff", "-M", *_DIFF_OPTS, base, head)
-    report = detector.scan_range(repo, base, head, scope="branch", base_label=label)
+    report = detector.scan_range(repo, base, head, scope="branch", base_label=label, sarif_at_head=True)
     det, blocked = _det_dicts(report.findings)
+    from .verdicts import verdict_of
+    word = verdict_of([f for f in report.findings if not f.allowed], report.errors,
+                      [f for f in report.findings if f.allowed and not grants.is_granted(f.fingerprint)])
     subjects = _subjects(repo, "%s..%s" % (base, head))
     return Target("branch", branch, "branch %s%s" % (branch, ": " + subjects if subjects else ""), root, slug, diff,
-                  label, det, blocked, head=repo.try_git("rev-parse", "%s^{commit}" % head) or "")
+                  label, det, blocked, head=repo.try_git("rev-parse", "--verify", "-q", head + "^{commit}"),
+                  det_verdict=word, det_errors=list(report.errors))
 
 
-def _gh(args: list, cwd: str) -> str:
-    """Run a read-only `gh` command; raises GitError with a clear reason."""
-    exe = shutil.which("gh")
-    if not exe:
-        raise GitError("`gh` (GitHub CLI) is not installed, so a pull request cannot be fetched; check the branch "
-                       "out and run `/foreman review <branch>` instead")
-    kwargs = {}
-    if os.name == "nt":
-        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    env = dict(os.environ, GH_PROMPT_DISABLED="1", GH_NO_UPDATE_NOTIFIER="1", NO_COLOR="1")
+def pr_target(root: str, number: str, view: Optional[dict] = None) -> Target:
+    """A pull request, read through the board's ``pr_verdict`` (the same gh calls, the same local-history path and
+    head re-check), so ``/foreman review 7`` and ``/foreman verdict 7`` cannot disagree. ``view`` is a verdict the
+    caller already computed."""
+    from . import board
+    v = view if view is not None else board.pr_verdict(root, int(number))
+    if v.get("error"):
+        if v.get("missing"):
+            raise GitError("%s, so a pull request cannot be fetched; check the branch out and run `/foreman review "
+                           "<branch>` instead" % v["error"])
+        raise GitError(v["error"])
     try:
-        r = subprocess.run([exe, *args], cwd=cwd, capture_output=True, timeout=GH_TIMEOUT_SECONDS, env=env,
-                           stdin=subprocess.DEVNULL, **kwargs)
-    except subprocess.TimeoutExpired:
-        raise GitError("`gh %s` timed out after %ds" % (" ".join(args[:2]), GH_TIMEOUT_SECONDS))
-    except OSError as e:
-        raise GitError("cannot run gh: %s" % e)
-    if r.returncode:
-        raise GitError("`gh %s` failed: %s" % (" ".join(args[:3]), _short(r.stderr.decode("utf-8", "replace"))))
-    return r.stdout.decode("utf-8", "replace")
-
-
-def pr_target(root: str, number: str) -> Target:
-    meta_raw = _gh(["pr", "view", number, "--json", "number,title,url,baseRefName,headRefName,headRefOid"], root)
-    try:
-        meta = json.loads(meta_raw)
-    except ValueError:
-        raise GitError("`gh pr view %s` did not return JSON" % number)
-    diff = _gh(["pr", "diff", number, "--color", "never"], root)
-    url = str(meta.get("url") or "")
-    m = re.search(r"github\.com/([^/]+)/([^/]+)/pull/", url)
-    slug = "%s/%s" % (m.group(1), m.group(2)) if m else slug_of(Repo(root, budget=10))
-    files = split_diff(diff)
-    findings = detector.detect(diff, deleted=[f.path for f in files if f.deleted],
-                               renamed=[(f.old_path, f.path) for f in files if f.old_path and f.old_path != f.path
-                                        and not f.deleted and not f.added],
-                               new_files=[f.path for f in files if f.added])
-    det, blocked = _det_dicts(findings)
-    title = "pull request #%s %s (%s → %s)" % (meta.get("number", number), meta.get("title", ""),
-                                               meta.get("headRefName", "?"), meta.get("baseRefName", "?"))
-    return Target("pr", str(meta.get("number", number)), title, root, slug, diff, meta.get("baseRefName"), det,
-                  blocked, "for a pull request diff the `check-changed` and `secret-history` rules are not evaluated; "
-                           "`/foreman status` on the checked-out branch covers them",
-                  head=str(meta.get("headRefOid") or ""))
+        diff = board.pr_diff(root, v)
+    except board.GhError as e:
+        raise GitError("cannot read the pull request's diff: %s" % e.reason)
+    slug = v.get("name") or slug_of(Repo(root, budget=10))
+    det, blocked, word, errors = _det_from_verdict(v)
+    title = "pull request #%s %s (%s → %s)" % (v["number"], v.get("title", ""), v.get("head") or "?",
+                                               v.get("base") or "?")
+    note = ("checked from GitHub's diff: secrets in earlier commits of the branch were not checked"
+            if v.get("how") == "remote" else "")
+    return Target("pr", str(v["number"]), title, root, slug, diff, v.get("base"), det, blocked, note,
+                  head=v.get("head_oid") or None, det_verdict=word, det_errors=errors)
 
 
 # ─── Store ───────────────────────────────────────────────────────────────────
@@ -797,9 +801,9 @@ def save(record: dict) -> Optional[str]:
     return path
 
 
-def load(slug: str, kind: str, ref: str, root: str = "") -> Optional[dict]:
-    """The last stored review for that repository and target, or None. Its ``head`` is the commit it read ("" in a
-    record written before Foreman stored it): a caller compares it with the current head and refuses a stale one."""
+def load(slug: str, kind: str, ref: str, root: str = "", head: Optional[str] = None) -> Optional[dict]:
+    """The last stored review for that repository and target, or None; with ``head``, only a review of exactly that
+    commit."""
     try:
         with open(review_path(slug, kind, ref, root), "r", encoding="utf-8") as fh:
             data = json.load(fh)
@@ -807,13 +811,43 @@ def load(slug: str, kind: str, ref: str, root: str = "") -> Optional[dict]:
         return None
     if not (isinstance(data, dict) and data.get("schema") == SCHEMA_VERSION):
         return None
-    return dict(data, head=data.get("head") if isinstance(data.get("head"), str) else "")
+    if head is not None and data.get("head") != head:
+        return None
+    return data
+
+
+# ─── Review cache: one model call per exact diff and reviewer ───────────────
+
+PROMPT_VERSION = "1"  # bump when the prompt or the schema changes: older stored reviews then miss the cache
+
+
+def reviewer_key(choice: "Choice", cfg: dict) -> str:
+    """Who reviews: the model asked for, or the host's main model when none is (it can change in Hermes)."""
+    if choice.model:
+        return "%s/%s" % (choice.provider or "", choice.model)
+    provider, model = main_route(cfg)
+    return "host:%s/%s" % (provider, model)
+
+
+def cache_key(diff: str, reviewer: str) -> str:
+    return hashlib.sha256(("%s\0%s\0%s" % (PROMPT_VERSION, reviewer, diff)).encode("utf-8", "replace")).hexdigest()
+
+
+def diff_sha(diff: str) -> str:
+    return hashlib.sha256(diff.encode("utf-8", "replace")).hexdigest()
+
+
+def current_cache_key(diff: str, ctx: Any = None) -> str:
+    """The cache key a review of ``diff`` would get now (no model call)."""
+    ctx = ctx if ctx is not None else _CTX
+    cfg = hermes_config()
+    return cache_key(diff, reviewer_key(choose_model(ctx, cfg), cfg))
 
 
 # ─── The review ──────────────────────────────────────────────────────────────
 
 def _parse_target(args: str) -> tuple:
-    arg = (args or "").strip().split()
+    arg = [a for a in (args or "").strip().split() if a != "--fresh"]
     if not arg:
         return None, None
     from .board import _pr_number  # the same forms the board takes: 12, #12, a pull request URL
@@ -824,10 +858,38 @@ def _parse_target(args: str) -> tuple:
     return "branch", ref
 
 
+NOT_REVIEWED = "NOT REVIEWED"
+CLOCK = time.time  # tests replace it
+
+
+def _final_verdict(record: dict, det_blocked: bool, complete: bool) -> str:
+    """The review's verdict from its model findings and the detector's verdict now."""
+    if record.get("error"):
+        if record["error"].startswith("nothing to review"):
+            return "BLOCKED" if det_blocked else "NOTHING TO REVIEW"
+        return "BLOCKED" if det_blocked else "COULD NOT RUN"
+    kept = record.get("findings") or []
+    if det_blocked or any(f.get("severity") == "BLOCKING" for f in kept):
+        return "BLOCKED"
+    from .verdicts import INCOMPLETE
+    if kept or record.get("dropped_unverified") or not complete \
+            or record["deterministic"].get("verdict") == INCOMPLETE \
+            or str(record.get("model_verdict") or "").strip().upper() == "BLOCK":
+        # An unverifiable finding is not a pass either: the diff may have steered the model into bad quotes. Nor is
+        # a model that asked to block and gave nothing that can be checked.
+        return "PASS WITH NOTES"
+    return "PASS"
+
+
 def run_review(args: str = "", keys: tuple = (), platform: Optional[str] = None, ctx: Any = None,
-               where: Optional[str] = None) -> dict:
+               where: Optional[str] = None, allow_model: bool = True, fresh: bool = False,
+               pr_view: Optional[dict] = None) -> dict:
     """Review ``args`` (a pull request number, a branch, or nothing for the current branch plus its uncommitted
-    changes) and return the record (also stored). ``where`` is a directory inside the repository."""
+    changes) and return the record (also stored). ``where`` is a directory inside the repository.
+
+    A stored review of the same diff by the same reviewer is returned as it is (``cached``: True) and the model is
+    not called again; only ``fresh`` (a person's ``--fresh``) runs it again. Without ``allow_model`` the model is
+    never called: a diff with no stored review gets the verdict NOT REVIEWED."""
     ctx = ctx if ctx is not None else _CTX
     if where is None:
         from .board import resolve  # like every board subcommand: the pinned repository, then gate.locate
@@ -839,30 +901,52 @@ def run_review(args: str = "", keys: tuple = (), platform: Optional[str] = None,
         return {"verdict": "NO_REPOSITORY", "message": "%s is not inside a git repository." % where}
     kind, ref = _parse_target(args)
     try:
-        target = pr_target(root, ref) if kind == "pr" else local_target(root, ref, keys, platform)
+        target = pr_target(root, ref, pr_view) if kind == "pr" else local_target(root, ref, keys, platform)
     except GitError as e:
         return {"verdict": "ERROR", "message": str(e)}
     files = split_diff(target.diff)
     b = bound(files)
     b.skipped.update(target.omitted)
     b.total += len(target.omitted)
-    record ={"schema": SCHEMA_VERSION, "repo": root, "slug": target.slug,
-              "target": {"kind": target.kind, "ref": target.ref, "title": target.title, "base": target.base,
-                         "head": target.head},
-              "head": target.head,
-              "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-              "deterministic": {"blocked": target.det_blocked, "findings": target.deterministic,
-                                "note": target.det_note},
-              "findings": [], "dropped_unverified": 0, "coverage": b.to_dict(), "error": None,
-              "model": None, "model_notes": [], "summary": ""}
-    if not b.files:
-        record["error"] = "nothing to review" if not b.total else "nothing reviewable: " + b.note()
-        record["verdict"] = "BLOCKED" if target.det_blocked else ("NOTHING TO REVIEW" if not b.total
-                                                                  else "COULD NOT RUN")
-        record["saved"] = save(record)
-        return record
     cfg = hermes_config()
     choice = choose_model(ctx, cfg)
+    key = cache_key(target.diff, reviewer_key(choice, cfg))
+    deterministic = {"blocked": target.det_blocked, "findings": target.deterministic, "note": target.det_note,
+                     "verdict": target.det_verdict, "errors": target.det_errors}
+    stored = cache_load(key)
+    failures = int((stored or {}).get("failures") or 0) if (stored or {}).get("error") else 0
+    if stored and not fresh and (not stored.get("error") or failures >= MAX_AUTO_TRIES):
+        # The same diff by the same reviewer: the stored result, never a new model call. A failed call is retried
+        # automatically once; after that only a person's --fresh runs it again.
+        stored = dict(stored, deterministic=deterministic, cached=True)  # the detector's part is always current
+        stored["verdict"] = _final_verdict(stored, target.det_blocked, (stored.get("coverage") or {}).get(
+            "complete", b.complete))
+        stored.pop("saved", None)
+        if target.head and stored.get("head") != target.head and stored.get("diff_sha") == diff_sha(target.diff):
+            # the same diff at a new head (GitHub's "Update branch", a rebase): the review covers it as it is
+            stored.update(head=target.head, target=dict(stored.get("target") or {}, kind=target.kind,
+                                                        ref=target.ref, title=target.title, base=target.base))
+            _save_both(dict(stored, cached=False, deterministic=deterministic), key)
+        # the same diff may have been reviewed under another target (a branch, then its pull request)
+        stored.update(repo=root, slug=target.slug, head=target.head or stored.get("head"),
+                      target={"kind": target.kind, "ref": target.ref, "title": target.title, "base": target.base})
+        return stored
+    record = {"schema": SCHEMA_VERSION, "repo": root, "slug": target.slug,
+              "target": {"kind": target.kind, "ref": target.ref, "title": target.title, "base": target.base},
+              "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(CLOCK())),
+              "head": target.head, "diff_sha": diff_sha(target.diff), "cache_key": key,
+              "deterministic": deterministic,
+              "findings": [], "dropped_unverified": 0, "coverage": b.to_dict(), "error": None,
+              "model": None, "model_notes": [], "summary": "", "cached": False}
+    if not b.files:
+        record["error"] = "nothing to review" if not b.total else "nothing reviewable: " + b.note()
+        record["verdict"] = _final_verdict(record, target.det_blocked, b.complete)
+        record["saved"] = save(record)
+        return record
+    if not allow_model:
+        record["verdict"] = NOT_REVIEWED
+        record["error"] = "no stored review of this exact diff"
+        return record  # never stored: it is not a review
     instructions, inputs, _token = build_input(target.title, target.deterministic, b)
     result, error = call_model(ctx, choice, instructions, inputs)
     parsed = None
@@ -883,24 +967,72 @@ def run_review(args: str = "", keys: tuple = (), platform: Optional[str] = None,
     record["model"] = {"provider": choice.provider or "", "model": choice.model or "", "source": choice.source,
                        "same_as_author": same, "attributed_to": attributed}
     record["model_notes"] = list(choice.notes)
+    # The key of the reviewer that really ran (Hermes may have refused the override); the requested key points to
+    # the same record, which names the model that ran, so asking again does not call the model again.
+    actual = cache_key(target.diff, reviewer_key(choice, cfg))
+    record["cache_key"] = actual
     if error:
         record["error"] = error
-        record["verdict"] = "BLOCKED" if target.det_blocked else "COULD NOT RUN"
-        record["saved"] = save(record)
+        record["failures"] = failures + 1
+        record["verdict"] = _final_verdict(record, target.det_blocked, b.complete)
+        record["saved"] = _save_both(record, key)
         return record
     kept, dropped = verify(parsed.get("findings", []), b.files)
     record.update(findings=kept, dropped_unverified=dropped, summary=_short(str(parsed.get("summary", "")), 600),
                   model_verdict=str(parsed.get("verdict", ""))[:20])
-    if target.det_blocked or any(f["severity"] == "BLOCKING" for f in kept):
-        record["verdict"] = "BLOCKED"
-    elif kept or dropped or not b.complete or record["model_verdict"].strip().upper() == "BLOCK":
-        # An unverifiable finding is not a pass either: the diff may have steered the model into bad quotes. Nor is
-        # a model that asked to block and gave nothing that can be checked.
-        record["verdict"] = "PASS WITH NOTES"
-    else:
-        record["verdict"] = "PASS"
-    record["saved"] = save(record)
+    record["verdict"] = _final_verdict(record, target.det_blocked, b.complete)
+    record["saved"] = _save_both(record, key)
     return record
+
+
+def _save_both(record: dict, requested_key: str) -> Optional[str]:
+    """The record as the target's last review and in the cache, under the key asked for and the key that ran."""
+    for k in dict.fromkeys((requested_key, record.get("cache_key"))):
+        if k:
+            cache_save(k, record)
+    return save(record)
+
+
+# ─── The cache store: one file per (diff, reviewer), bounded ─────────────────
+
+CACHE_DIR = "cache"
+MAX_CACHE_FILES = 300
+MAX_AUTO_TRIES = 2  # a model call that failed is retried once on its own; then only a person's --fresh
+
+
+def _cache_path(key: str) -> str:
+    return os.path.join(grants.store_dir(), REVIEWS_DIR, CACHE_DIR, "%s.json" % _safe(key)[:64])
+
+
+def cache_load(key: str) -> Optional[dict]:
+    try:
+        with open(_cache_path(key), "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) and data.get("schema") == SCHEMA_VERSION else None
+
+
+def cache_save(key: str, record: dict) -> None:
+    path = _cache_path(key)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=".cache-", dir=os.path.dirname(path))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump({k: v for k, v in record.items() if k != "saved"}, fh, indent=1, sort_keys=True)
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        entries = sorted(os.scandir(os.path.dirname(path)), key=lambda e: e.stat().st_mtime)
+        for e in [e for e in entries if e.name.endswith(".json")][:-MAX_CACHE_FILES]:
+            os.unlink(e.path)
+    except OSError:
+        logger.warning("foreman: cannot store the review in the cache", exc_info=True)
 
 
 # ─── Text output ─────────────────────────────────────────────────────────────
@@ -910,6 +1042,9 @@ def format_review(r: dict) -> str:
         return "Foreman review: %s. %s" % ("no repository" if r["verdict"] == "NO_REPOSITORY" else "could not run",
                                            r.get("message", ""))
     lines = ["Foreman review: %s" % r["verdict"]]
+    if r.get("cached"):
+        lines.append("Same diff as the review of %s: this is the stored result; the model was not called again "
+                     "(`/foreman review --fresh` runs it again)." % (r.get("time") or "earlier"))
     t = r["target"]
     lines.append("Target: %s%s — %s" % (t["title"], " vs %s" % t["base"] if t.get("base") and t["kind"] != "pr"
                                         else "", r.get("slug", "")))
@@ -927,11 +1062,14 @@ def format_review(r: dict) -> str:
             lines.append(UNKNOWN_MODEL)
     lines.append("Coverage: %s." % r["coverage"]["note"])
     det = r["deterministic"]
-    lines.append("Deterministic detector: %s" % ("BLOCKED" if det["blocked"] else "no blocker"))
+    lines.append("Deterministic gate: %s" % (det.get("verdict") or ("BLOCKED" if det["blocked"] else "CLEAN")))
     lines += ["  [%s] %s — %s" % (d["rule"], d["location"], d["message"]) for d in det["findings"]]
+    lines += ["  could not inspect: %s" % e for e in det.get("errors") or []]
     if det.get("note"):
         lines.append("  (%s)" % det["note"])
-    if r.get("error"):
+    if r["verdict"] == NOT_REVIEWED:
+        lines.append("Model review: no stored review of this exact diff; the model was not called.")
+    elif r.get("error"):
         if r["error"].startswith("nothing to review"):
             lines.append("Model review: nothing to review (the diff is empty).")
         else:
@@ -952,7 +1090,7 @@ def format_review(r: dict) -> str:
         if r.get("summary"):
             lines.append("Model summary: %s" % r["summary"])
         mv = r.get("model_verdict", "")
-        if mv.strip().upper() == "BLOCK" and r["verdict"] != "BLOCKED":
+        if str(mv).strip().upper() == "BLOCK" and r["verdict"] != "BLOCKED":
             lines.append("The model asked to block without verifiable evidence (its own verdict was BLOCK, and no "
                          "BLOCKING finding quoted the diff).")
     lines.append(ADVISORY)
@@ -962,9 +1100,42 @@ def format_review(r: dict) -> str:
 
 
 def cmd_review(args: str = "", keys: tuple = (), platform: Optional[str] = None) -> str:
-    return format_review(run_review(args, keys, platform))
+    """``/foreman review [<pr>|<branch>] [--fresh] [--repo r]``: typed by a person, so it may call the model at any
+    level. ``--repo`` goes through the board's validated resolver (only a repository Foreman already knows)."""
+    from .board import root_for
+    words, root, problem = root_for(args, keys, platform)
+    if problem:
+        return problem
+    fresh = "--fresh" in words
+    r = run_review(" ".join(words), keys, platform, where=root, fresh=fresh)
+    record_in_pipeline(r)
+    return format_review(r)
+
+
+def record_in_pipeline(r: dict, then: str = "ready", bounce: bool = False) -> Optional[dict]:
+    """Put a review record on the pipeline (never raises)."""
+    if r.get("verdict") in ("NO_REPOSITORY", "ERROR", NOT_REVIEWED) or not isinstance(r.get("target"), dict):
+        return None
+    try:
+        from . import pipeline
+        t = r["target"]
+        if t["kind"] == "pr":
+            ref = pipeline.Ref(r["slug"], r["repo"], "pr", int(t["ref"]), head=r.get("head"),
+                               branch=_pr_branch(t.get("title") or ""))
+        else:
+            ref = pipeline.Ref(r["slug"], r["repo"], "branch", branch=t["ref"], head=r.get("head"))
+        return pipeline.record_review(ref, r, then=then, bounce=bounce)
+    except Exception:
+        logger.warning("foreman: cannot record the review on the pipeline", exc_info=True)
+        return None
+
+
+def _pr_branch(title: str) -> str:
+    m = re.search(r"\(([^()]*) → [^()]*\)$", title)
+    return m.group(1) if m else ""
 
 
 SUBCOMMANDS: dict = {
-    "review": (cmd_review, "[<pr-number>|<branch>]  a second model reviews the diff (on demand; spends tokens)"),
+    "review": (cmd_review, "[<pr>|<branch>] [--fresh] [--repo r]  a second model reviews the diff (spends tokens "
+                           "once per diff; --fresh asks again)"),
 }

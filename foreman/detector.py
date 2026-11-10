@@ -36,8 +36,10 @@ import os
 import posixpath
 import re
 import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Callable, Iterable, Optional
@@ -1049,9 +1051,8 @@ class Report:
 
     @property
     def verdict(self) -> str:
-        if self.blockers:
-            return "BLOCKED"
-        return "NEEDS_APPROVAL" if self.allowed else "CLEAN"
+        from .verdicts import verdict_of
+        return verdict_of(self.blockers, self.errors, self.allowed)
 
     def to_dict(self) -> dict:
         return {"verdict": self.verdict, "repo": self.repo, "scope": self.scope, "base": self.base,
@@ -1137,7 +1138,7 @@ def sarif_scope_of(config: dict) -> str:
 
 def sarif_findings(repo: Repo, base_rev: Optional[str], explicit=(), threshold: Optional[float] = None,
                    newest: Optional[float] = None, scope: Optional[str] = None, changed=None,
-                   stale_margin: float = 0.0) -> tuple:
+                   stale_margin: float = 0.0, read_at: Optional[str] = None) -> tuple:
     """(blockers, notes, errors) from SARIF reports: the ``sarif`` / ``sarif_threshold`` / ``sarif_scope`` keys of
     .foreman.json at the base (files read from the working tree, relative to the repository), plus ``explicit`` paths.
     With the scope ``changed`` (the default) only results in ``changed`` files, or new or updated ones, can block.
@@ -1165,16 +1166,50 @@ def sarif_findings(repo: Repo, base_rev: Optional[str], explicit=(), threshold: 
     scoped = None if scope == "all" else (changed if changed is not None else ())
     _check_deadline(repo.deadline, "the SARIF report")
     blockers, seen = [], set()
-    for paths, where in ((named, " named in " + CONFIG_FILE), (given, "")):
-        paths = [p for p in dict.fromkeys(paths) if p not in seen]
-        seen.update(paths)
-        result = sarif.collect(paths, repo.root, threshold, newest, scoped, repo.deadline, unreadable="error",
-                               stale_margin=stale_margin)
-        blockers += result.blockers
-        notes += result.notes
-        errors += ["could not read the SARIF report %s%s: %s" % (label, where, reason)
-                   for label, reason in result.errors]
+    tmp = tempfile.mkdtemp(prefix="foreman-sarif-") if read_at and named else None
+    try:
+        if tmp:
+            named, more = _reports_at(repo, read_at, named, tmp)
+            errors += more
+        for paths, where in ((named, " named in " + CONFIG_FILE), (given, "")):
+            paths = [p for p in dict.fromkeys(paths) if p not in seen]
+            seen.update(paths)
+            result = sarif.collect(paths, repo.root, threshold, newest, scoped, repo.deadline, unreadable="error",
+                                   stale_margin=stale_margin)
+            blockers += result.blockers
+            notes += result.notes
+            errors += ["could not read the SARIF report %s%s: %s" % (label, where, reason)
+                       for label, reason in result.errors]
+    finally:
+        if tmp:
+            shutil.rmtree(tmp, ignore_errors=True)
     return blockers, notes, errors
+
+
+def _reports_at(repo: Repo, rev: str, named: list, tmp: str) -> tuple:
+    """(paths for ``sarif.collect``, errors): each configured report as committed at ``rev`` (copied to ``tmp`` with
+    the commit time of its last change as its modification time), or the working tree's file when the checkout is
+    ``rev`` itself. A report that is neither is an error: the checkout belongs to another commit."""
+    head = repo.try_git("rev-parse", "--verify", "-q", "HEAD^{commit}")
+    target = repo.try_git("rev-parse", "--verify", "-q", rev + "^{commit}")
+    out, errors = [], []
+    for i, full in enumerate(named):
+        rel = os.path.relpath(full, repo.root).replace("\\", "/")
+        if repo.is_file_at(rev)(rel):
+            data = repo.git("show", "%s:%s" % (rev, rel))
+            copy = os.path.join(tmp, "%d.sarif" % i)
+            with open(copy, "w", encoding="utf-8") as fh:
+                fh.write(data)
+            when = repo.try_git("log", "-1", "--format=%ct", rev, "--", rel)
+            if when and when.isdigit():
+                os.utime(copy, (int(when), int(when)))
+            out.append((copy, rel))
+        elif head and head == target:
+            out.append(full)
+        else:
+            errors.append("could not read the SARIF report %s named in %s: it is not committed in %s and the "
+                          "checked-out tree is another commit" % (rel, CONFIG_FILE, (target or rev)[:7]))
+    return out, errors
 
 
 def compact_notes(notes) -> str:
@@ -1235,10 +1270,12 @@ def _read_text(path: str) -> Optional[str]:
 
 def scan_range(repo: Repo, base: Optional[str], head: str = "HEAD", check: Optional[str] = None,
                extra_messages: str = "", scope: str = "range", base_label: Optional[str] = None,
-               sarif=(), sarif_threshold: Optional[float] = None, sarif_scope: Optional[str] = None) -> Report:
+               sarif=(), sarif_threshold: Optional[float] = None, sarif_scope: Optional[str] = None,
+               sarif_at_head: bool = False) -> Report:
     """What publishing ``base..head`` would publish: the final diff, plus every commit's patch for secrets. Without a
     base (a branch with no ancestor on the remote), the whole history of ``head``. SARIF reports (the base's
-    .foreman.json ``sarif`` key, plus the explicit ``sarif`` paths) add their blockers and notes."""
+    .foreman.json ``sarif`` key, plus the explicit ``sarif`` paths) add their blockers and notes; with
+    ``sarif_at_head`` a configured report is read as committed in ``head`` (a pull request that is not checked out)."""
     rev_range = "%s..%s" % (base, head) if base else head
     diff_from = base or repo.empty_tree
     name_status = repo.git("diff", "--name-status", "-M", *_DIFF_OPTS, diff_from, head)
@@ -1254,7 +1291,8 @@ def scan_range(repo: Repo, base: Optional[str], head: str = "HEAD", check: Optio
     findings += _check_findings(repo, base, check, paths, allowed_paths, lambda p: repo.show(head, p), version_of)
     reports = {os.path.normcase(os.path.abspath(p)) for p in _sarif_paths(repo, base, sarif)}
     blockers, notes, errors = sarif_findings(repo, base, sarif, sarif_threshold, _head_change_time(repo, head, reports),
-                                             sarif_scope, paths, STALE_MARGIN_RANGE)
+                                             sarif_scope, paths, STALE_MARGIN_RANGE,
+                                             read_at=head if sarif_at_head else None)
     report = Report(repo.root, scope, base, base_label, repo.try_git("rev-parse", head), check, findings + blockers)
     report.notes, report.errors = notes, errors
     return report
@@ -1555,10 +1593,11 @@ def main(argv=None) -> int:
     if os.environ.get("GITHUB_ACTIONS"):
         for f in report.allowed:
             print(annotation("error" if args.strict else "warning", f), file=out)
+    from .verdicts import verdict_of
+    label = verdict_of(blocking, report.errors, marked)
     if args.json:
-        print(json.dumps(dict(report.to_dict(), strict=args.strict), indent=2))
+        print(json.dumps(dict(report.to_dict(), strict=args.strict, verdict=label), indent=2))
     else:
-        label = "INCOMPLETE" if report.errors and not blocking else ("BLOCKED" if blocking else report.verdict)
         print("foreman: %s (%d blocker(s), %d marked %s)" % (label, len(blocking), len(marked), MARKER))
         if blocking:
             print(format_findings(blocking))

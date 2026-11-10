@@ -24,6 +24,7 @@ from typing import Callable, Optional
 
 from . import detector, gate, grants
 from .detector import MARKER, GitError, GitTimeout, Repo
+from .verdicts import BLOCKED, CLEAN, INCOMPLETE, NEEDS_OK, verdict_of
 
 logger = logging.getLogger(__name__)
 
@@ -370,6 +371,19 @@ def known_repository(value: str) -> tuple:
     return (matches[0], None) if matches else (None, refuse)
 
 
+def root_for(args: str, keys: tuple = (), platform: Optional[str] = None) -> tuple:
+    """(the words without ``--repo X``, the repository root or None, the problem text or None): ``--repo`` through
+    the validated resolver (only a repository Foreman already knows), else the session's repository."""
+    words, repo_arg, problem = take_repo_option((args or "").split())
+    if problem:
+        return words, None, problem
+    if repo_arg is not None:
+        root, problem = known_repository(repo_arg)
+        return words, root, problem
+    root, _how_ = resolve(keys, platform)
+    return words, root, None if root else _no_repository()
+
+
 def _repo_suffix(args: str) -> str:
     """`` --repo X`` when the command named one, so a hint Foreman prints can be run as it is."""
     _words, value, _problem = take_repo_option((args or "").split())
@@ -592,11 +606,14 @@ def pr_verdict(root: str, number: int) -> dict:
         if base_rev and repo.try_git("cat-file", "-e", oid + "^{commit}") is not None:
             merge_base = repo.try_git("merge-base", oid, base_rev)
             if merge_base:
-                report = detector.scan_range(repo, merge_base, oid, scope="pull request", base_label=base_label)
-                v["how"] = "local"
+                report = detector.scan_range(repo, merge_base, oid, scope="pull request", base_label=base_label,
+                                             sarif_at_head=True)
+                v["how"], v["merge_base"] = "local", merge_base
                 v["blockers"], v["marked"], v["allowed_by_user"] = _split(report.findings, root)
                 v["check"] = report.check
-                v["verdict"] = "BLOCKED" if v["blockers"] or v["marked"] else "CLEAN"
+                v["errors"] = list(dict.fromkeys(report.errors))
+                v["sarif_notes"] = [n.to_dict() for n in report.notes]
+                v["verdict"] = verdict_of(v["blockers"], v["errors"], v["marked"])
                 return v
         try:
             diff = gh(["pr", "diff", str(number), "--color", "never"], root, timeout=GH_DIFF_TIMEOUT)
@@ -620,6 +637,9 @@ def pr_verdict(root: str, number: int) -> dict:
         name_status = "\n".join([name_status] + extra) if extra else name_status
         messages = "\n".join("%s\n%s" % (c.get("messageHeadline") or "", c.get("messageBody") or "")
                              for c in view.get("commits") or [] if isinstance(c, dict))
+        reports = detector._config_sarif_paths(detector.config_at(repo, base_rev)) if base_rev else []
+        v["errors"] = ["could not read the SARIF report %s named in %s: the pull request's head is not in the local "
+                       "clone (fetch it)" % (p, detector.CONFIG_FILE) for p in reports]
         if base_rev:
             check = detector.check_command_at(repo, base_rev)
             findings = detector.findings_from_diff(diff, name_status, check=check, base_is_file=repo.is_file_at(base_rev),
@@ -633,13 +653,24 @@ def pr_verdict(root: str, number: int) -> dict:
         v["notes"].append("Inspected from GitHub's diff (the head is not in the local clone): a secret added and "
                           "removed again in an earlier commit is not seen. Fetch the branch and run `/foreman "
                           "verdict %d` again for the full check." % number)
-        v["how"] = "remote"
+        v["how"], v["diff"] = "remote", diff
     except GitError as e:
         v["error"] = str(e)
         return v
     v["blockers"], v["marked"], v["allowed_by_user"] = _split(findings, root)
-    v["verdict"] = "BLOCKED" if v["blockers"] or v["marked"] else "CLEAN"
+    v["verdict"] = verdict_of(v["blockers"], v.get("errors"), v["marked"])
     return v
+
+
+def pr_diff(root: str, v: dict) -> str:
+    """The unified diff of the pull request ``pr_verdict`` inspected, for exactly the same head: from the local
+    commits when it was inspected locally, else the diff GitHub gave (whose head was re-checked)."""
+    if v.get("how") == "local" and v.get("merge_base"):
+        return Repo(root, budget=BOARD_BUDGET_SECONDS).git("diff", "-M", *detector._DIFF_OPTS, v["merge_base"],
+                                                           v["head_oid"])
+    if isinstance(v.get("diff"), str):
+        return v["diff"]
+    raise GhError("the pull request's diff was not read")
 
 
 def branch_verdict(root: str, branch: str, keys: tuple = ()) -> dict:
@@ -666,14 +697,16 @@ def branch_verdict(root: str, branch: str, keys: tuple = ()) -> dict:
         if not base:
             v["error"] = "`%s` has no base branch (no main or master to compare with)" % branch
             return v
-        report = detector.scan_range(repo, base, rev, scope="branch", base_label=label)
+        report = detector.scan_range(repo, base, rev, scope="branch", base_label=label, sarif_at_head=True)
     except GitError as e:
         v["error"] = str(e)
         return v
     count = repo.try_git("rev-list", "--count", "%s..%s" % (base, rev))
     v.update(base=label, commits_ahead=int(count) if count and count.isdigit() else None, check=report.check)
     v["blockers"], v["marked"], v["allowed_by_user"] = _split(report.findings, root)
-    v["verdict"] = "BLOCKED" if v["blockers"] or v["marked"] else "CLEAN"
+    v["errors"] = list(dict.fromkeys(report.errors))
+    v["sarif_notes"] = [n.to_dict() for n in report.notes]
+    v["verdict"] = verdict_of(v["blockers"], v["errors"], v["marked"])
     return v
 
 
@@ -703,7 +736,25 @@ def _reasons(v: dict) -> list:
         lines.append("Allowed by you:")
         lines += [wrap("%s — %s (id %s)" % (d["location"], d["message"], d["id"]), "      ", "  [%s] " % d["rule"])
                   for d in v["allowed_by_user"]]
+    if v.get("errors"):
+        lines.append("Could not inspect (INCOMPLETE is not a pass):")
+        lines += [wrap(e, "    ", "  - ") for e in v["errors"]]
+    notes = sarif_notes(v)
+    if notes:
+        lines.append(wrap(notes))
     return lines
+
+
+def sarif_notes(v: dict) -> str:
+    """One compact line for the non-blocking SARIF notes of a verdict, or ""."""
+    notes = v.get("sarif_notes")
+    if notes is None:  # the current branch's verdict (commands.verdict) keeps them under "notes"
+        notes = [n for n in v.get("notes") or [] if isinstance(n, dict)]
+    if not notes:
+        return ""
+    shown = "; ".join("%s: %s" % (n.get("location"), n.get("message")) for n in notes[:2])
+    return "SARIF: %d note(s), not blocking: %s%s" % (len(notes), shown,
+                                                       " (+%d more)" % (len(notes) - 2) if len(notes) > 2 else "")
 
 
 def format_pr_verdict(v: dict) -> str:
@@ -743,8 +794,13 @@ def format_pr_verdict(v: dict) -> str:
         caution = "" if v.get("ci") == "CI passing" else " Look at the CI first (%s)." % v.get("ci")
         lines.append(wrap("`/foreman merge %d` (squash; add --merge or --rebase to change), or `/foreman reject %d "
                           "<note>`.%s" % (n, n, caution), "  ", "Next: "))
-    elif v["verdict"] == "CLEAN":
+    elif v["verdict"] == CLEAN:
         lines.append(wrap("fix what is listed above, then `/foreman verdict %d` again." % n, "  ", "Next: "))
+    elif v["verdict"] == NEEDS_OK:
+        lines.append(wrap("`/foreman allow <id>` for each marked finding you agree with, then `/foreman verdict %d` "
+                          "again; or `/foreman reject %d [note]`." % (n, n), "  ", "Next: "))
+    elif v["verdict"] == INCOMPLETE:
+        lines.append(wrap("fix what could not be inspected, then `/foreman verdict %d` again." % n, "  ", "Next: "))
     else:
         lines.append(wrap("`/foreman reject %d [note]` posts these reasons on the pull request." % n, "  ", "Next: "))
     return "\n".join(lines)
@@ -788,6 +844,16 @@ def format_branch_verdict(v: dict, pr: Optional[dict] = None, gh_note: str = "")
 
 # ─── The board ───────────────────────────────────────────────────────────────
 
+def _verdict_word(v: dict) -> str:
+    """The verdict with its count: BLOCKED 2, NEEDS YOUR OK 1, INCOMPLETE, CLEAN."""
+    word = v.get("verdict") or "?"
+    if word == BLOCKED:
+        return "BLOCKED %d" % len(v.get("blockers") or [])
+    if word == NEEDS_OK:
+        return "NEEDS YOUR OK %d" % len(v.get("marked") or [])
+    return word
+
+
 def _branch_line(v: dict) -> str:
     if v.get("verdict") in ("ERROR", "NO_REPOSITORY"):
         return "Branch: could not be checked (%s)" % trim(v.get("message", ""), 50)
@@ -802,8 +868,7 @@ def _branch_line(v: dict) -> str:
     else:
         facts.append("no base branch")
     facts.append("%d uncommitted" % v.get("uncommitted_files", 0))
-    n = len(v.get("blockers") or []) + len(v.get("marked") or [])
-    facts.append("BLOCKED %d" % n if v.get("verdict") == "BLOCKED" else "CLEAN")
+    facts.append(_verdict_word(v))
     return "Branch: %s  %s" % (trim(v.get("branch"), 30), " · ".join(facts))
 
 
@@ -827,9 +892,12 @@ def local_branches(root: str, deadline: float) -> list:
                 continue
             base_label = base_label or label
             count = repo.try_git("rev-list", "--count", "%s..refs/heads/%s" % (base, name))
-            report = detector.scan_range(repo, base, "refs/heads/" + name, scope="branch", base_label=label)
-            blocked = [f for f in report.findings if not f.allowed or not grants.is_granted(f.fingerprint)]
-            verdict = "BLOCKED %d" % len(blocked) if blocked else "CLEAN"
+            report = detector.scan_range(repo, base, "refs/heads/" + name, scope="branch", base_label=label,
+                                         sarif_at_head=True)
+            blockers = [f for f in report.findings if not f.allowed]
+            marked = [f for f in report.findings if f.allowed and not grants.is_granted(f.fingerprint)]
+            verdict = _verdict_word({"verdict": verdict_of(blockers, report.errors, marked),
+                                     "blockers": blockers, "marked": marked})
             lines.append("  %-28s %4s ahead  %s" % (trim(name, 28), count or "?", verdict))
         except GitTimeout:
             lines.append("  %-28s not checked (out of time)" % trim(name, 28))
@@ -889,6 +957,21 @@ def cmd_board(args: str = "", keys: tuple = (), platform: Optional[str] = None) 
             next_cmds.append(("/foreman status", "why the current branch is blocked"))
         if free:
             next_cmds.append(("/foreman issues", "every open issue and its PR"))
+    try:
+        from . import pipeline, review
+        if v.get("verdict") in (CLEAN, BLOCKED, INCOMPLETE, NEEDS_OK) and v.get("commits_ahead"):
+            # the current branch's change, with the verdict just computed (the base branch itself is no change)
+            status, detail = pipeline.gate_from_verdict(v)
+            pipeline.record_gate(pipeline.local_ref(root), status, detail, "Gate on the board: %s" % detail)
+        flow = pipeline.board_lines(snap["name"] if snap and snap.get("name") else
+                                    review.slug_of(Repo(root, budget=5)), root, WIDTH)
+    except Exception:
+        logger.warning("foreman: cannot read the pipeline", exc_info=True)
+        flow = []
+    if flow:
+        lines += [""] + flow
+    if v.get("no_tests"):
+        lines += ["", wrap(commands.NO_TESTS)]
     if how != PINNED:
         next_cmds.append(("/foreman use", "work on another repository"))
     lines += ["", "Next:"] + ["  %-24s %s" % c for c in next_cmds[:3]]
@@ -973,7 +1056,9 @@ def cmd_verdict(args: str = "", keys: tuple = (), platform: Optional[str] = None
         if reason:
             return ("Foreman cannot give a verdict for PR #%d: %s. `/foreman verdict <branch>` works on local "
                     "branches." % (number, reason))
-        return format_pr_verdict(pr_verdict(root, number))
+        v = pr_verdict(root, number)
+        _pipeline_pr(root, v)
+        return format_pr_verdict(v)
     v = branch_verdict(root, target, keys)
     pr, note = None, ""
     branch = v.get("name_branch")
@@ -1111,14 +1196,24 @@ def cmd_merge(args: str = "", keys: tuple = (), platform: Optional[str] = None) 
         return "Usage: /foreman merge <pr-number> [--merge|--rebase] [--yes] [--repo <owner/name>]   (default: squash)"
     method = methods[0][2:] if methods else "squash"
     v = pr_verdict(root, number)
+    ref = _pipeline_pr(root, v)
     if v.get("error"):
+        _pipeline_refused(ref, "no verdict: %s" % v["error"])
         return ("Foreman will not merge PR #%d: it cannot compute a verdict (%s)."
                 % (number, v["error"].rstrip(".")))
     if v.get("state") and v["state"] != "OPEN":
         return "Foreman: PR #%d is %s; there is nothing to merge." % (number, v["state"].lower())
-    if v["verdict"] != "CLEAN":
-        return "\n".join(["Foreman will not merge PR #%d: it is %s." % (number, v["verdict"])] + _reasons(v)
-                         + ["Next: `/foreman reject %d [note]` posts these reasons on the pull request." % number])
+    if v["verdict"] != CLEAN:  # --yes never overrides the verdict
+        why = {BLOCKED: "it is BLOCKED.",
+               INCOMPLETE: "its verdict is INCOMPLETE: Foreman could not inspect everything it was told to.",
+               NEEDS_OK: "it NEEDS YOUR OK: the agent marked findings that wait for `/foreman allow <id>`."}
+        nxt = {BLOCKED: "Next: `/foreman reject %d [note]` posts these reasons on the pull request." % number,
+               INCOMPLETE: "Next: fix what could not be inspected, then `/foreman merge %d` again." % number,
+               NEEDS_OK: "Next: `/foreman allow <id>` for each one you agree with, then `/foreman merge %d` again."
+                         % number}
+        _pipeline_refused(ref, "the verdict is %s" % v["verdict"])
+        return "\n".join([wrap("Foreman will not merge PR #%d: %s" % (number, why.get(v["verdict"], v["verdict"])))]
+                         + _reasons(v) + [wrap(nxt.get(v["verdict"], ""))])
     hold = not_ready(v)
     if hold:  # --yes never overrides this: GitHub's own state
         return "\n".join(["Foreman will not merge PR #%d: Foreman finds it CLEAN, but it is not mergeable yet:"
@@ -1126,26 +1221,150 @@ def cmd_merge(args: str = "", keys: tuple = (), platform: Optional[str] = None) 
                          + ["Next: fix that, then `/foreman merge %d` again." % number])
     if not _OID.fullmatch(v.get("head_oid") or ""):
         return "Foreman will not merge PR #%d: GitHub did not give its head commit." % number
+    # The second model's review of this exact head (auto_review merge or finish); off: as before.
+    pre, notes, unreviewed = [], [], ""
+    from . import pipeline
+    if pipeline.level() != "off":
+        outcome = _review_for_merge(root, number, v, keys, platform)
+        pre, notes, unreviewed = outcome["pre"], outcome["notes"], outcome["unreviewed"]
+        if outcome.get("refuse"):
+            _pipeline_refused(ref, outcome["refuse_detail"])
+            return "\n".join(pre + outcome["refuse"])
     # --match-head-commit: GitHub merges exactly the commit Foreman inspected, or nothing.
     command = "gh pr merge %d --%s --delete-branch --match-head-commit %s" % (number, method, v["head_oid"])
-    if not yes:
+    if not yes or unreviewed:  # --yes was typed before anyone knew the review could not run
         rerun = "/foreman merge %d%s%s --yes" % (number, "" if method == "squash" else " --" + method,
                                                  _repo_suffix(args))
         ci = v.get("ci") or "CI unknown"
         warn = "" if ci == "CI passing" else "WARNING: %s.\n" % ci
-        question = "%sMerge PR #%d (%s, %s) into %s?\n%s\nCloses: %s · %s" % (
-            warn, number, v["head_oid"][:7], method, v.get("base") or "its base", trim(v.get("title"), WIDTH),
-            ", ".join(v.get("closes") or []) or "no issue", ci)
+        first = ("The second-model review could not run (%s). A person decides: merge without it?\n"
+                 % trim(unreviewed, 160)) if unreviewed else ""
+        noted = ("Review notes:\n%s\n" % "\n".join(notes)) if notes else ""
+        question = "%s%s%sMerge PR #%d (%s, %s) into %s?\n%s\nCloses: %s · %s" % (
+            first, noted, warn, number, v["head_oid"][:7], method, v.get("base") or "its base",
+            trim(v.get("title"), WIDTH), ", ".join(v.get("closes") or []) or "no issue", ci)
+        _pipeline_call(pipeline.record_waiting, ref, "merge question asked")
         answer = _confirm(question, [("merge", "Merge", "run `%s`" % command), ("cancel", "Cancel", "merge nothing")])
         if answer == "cancel":
-            return "Foreman: cancelled; PR #%d was not merged." % number
+            _pipeline_call(pipeline.record_event, ref, "You cancelled the merge")
+            return "\n".join(pre + ["Foreman: cancelled; PR #%d was not merged." % number])
         if answer != "merge":
-            return _no_answer("PR #%d was not merged" % number, rerun)
+            _pipeline_call(pipeline.record_event, ref, "Merge question not answered; nothing merged")
+            if unreviewed:
+                return "\n".join(pre + [_no_answer(
+                    "PR #%d was not merged: the second-model review could not run (%s), and a person must decide "
+                    "that. Run `/foreman review %d --fresh`, or answer the question where Hermes can ask"
+                    % (number, trim(unreviewed, 120), number), rerun)])
+            return "\n".join(pre + [_no_answer("PR #%d was not merged" % number, rerun)])
     state, detail = _terminal(command, root)
     where = " in %s" % v["name"] if v.get("name") else ""
-    lines = ["Foreman verdict for PR #%d: CLEAN (%s)." % (number, v.get("ci") or "CI unknown"),
-             _outcome_text(state, detail, "merged PR #%d (%s)%s" % (number, method, where), command)]
+    if state == "done":
+        _pipeline_call(pipeline.record_merged, ref, method)
+    else:
+        _pipeline_refused(ref, "`gh pr merge` %s" % state)
+    lines = pre + (["Review notes (you merged with them):"] + notes if notes and yes else []) + [
+        "Foreman verdict for PR #%d: CLEAN (%s)." % (number, v.get("ci") or "CI unknown"),
+        _outcome_text(state, detail, "merged PR #%d (%s)%s" % (number, method, where), command)]
     return "\n".join(lines)
+
+
+def _review_line(f: dict) -> str:
+    return "  %s %s%s — %s" % (f.get("severity"), f.get("file"), ":%d" % f["line"] if f.get("line") else "",
+                               trim(f.get("title"), 50))
+
+
+def _review_for_merge(root: str, number: int, v: dict, keys: tuple, platform: Optional[str]) -> dict:
+    """The second model's review of the pull request's exact head, from the store when the same diff was reviewed
+    by the same reviewer, else run now. {"pre": lines to show first, "notes": lines for the question, "unreviewed":
+    why the review could not run or "", "refuse": lines when verified BLOCKING findings refuse the merge}."""
+    from . import review
+    out = {"pre": [], "notes": [], "unreviewed": "", "refuse": None, "refuse_detail": ""}
+    try:
+        rec = review.run_review(str(number), keys, platform, where=root, pr_view=v)
+    except Exception as e:  # noqa: BLE001 — a review that breaks is a review that could not run
+        logger.warning("foreman: review before merge failed", exc_info=True)
+        rec = {"verdict": "ERROR", "message": "%s: %s" % (type(e).__name__, e)}
+    verdict = rec.get("verdict")
+    if verdict in ("ERROR", "NO_REPOSITORY"):
+        out["unreviewed"] = rec.get("message") or verdict
+        return out
+    if rec.get("head") != v.get("head_oid"):
+        out["refuse"] = [wrap("Foreman will not merge PR #%d: the review is of %s, not of the pull request's head %s; "
+                              "it changed while Foreman read it. Run `/foreman merge %d` again."
+                              % (number, (rec.get("head") or "?")[:7], v["head_oid"][:7], number))]
+        out["refuse_detail"] = "the head moved during the review"
+        return out
+    review.record_in_pipeline(rec, then="awaiting_owner")
+    m = rec.get("model") or {}
+    who = review._label(m.get("provider") or None, m.get("model")) if m and m.get("model") else \
+        "the host's default model"
+    if rec.get("cached"):
+        out["pre"].append(wrap("Second-model review of %s: %s (stored review of this exact diff, %s; the model was "
+                               "not called again)." % (v["head_oid"][:7], verdict, rec.get("time") or "earlier")))
+    else:
+        out["pre"].append(wrap("Foreman reviewed PR #%d at %s with the second model first (%s): %s."
+                               % (number, v["head_oid"][:7], who, verdict)))
+    if m and m.get("same_as_author") is True and not rec.get("error"):
+        out["notes"].append("  " + review.SAME_MODEL)
+    if verdict == "COULD NOT RUN":
+        out["unreviewed"] = rec.get("error") or "unknown reason"
+        return out
+    blocking = [f for f in rec.get("findings") or [] if f.get("severity") == "BLOCKING"]
+    if verdict == "BLOCKED":
+        lines = [wrap("Foreman will not merge PR #%d: the second-model review found blocking problems (each "
+                      "quote checked against the diff; --yes does not override this):" % number)]
+        for f in blocking:
+            lines.append(_review_line(f))
+            lines.append(wrap(f.get("why") or "", "      ", "      why: "))
+            lines.append(wrap(f.get("fix") or "", "      ", "      fix: "))
+        if not blocking:
+            lines += ["  [%s] %s — %s" % (d["rule"], d["location"], d["message"])
+                      for d in (rec.get("deterministic") or {}).get("findings") or []]
+        lines.append(wrap("Next: `/foreman reject %d [note]` posts these reasons on the pull request; the agent "
+                          "fixes them and you merge again." % number))
+        out["refuse"], out["refuse_detail"] = lines, "the review found blocking problems"
+        return out
+    notes = [_review_line(f) for f in (rec.get("findings") or [])[:4]]
+    if len(rec.get("findings") or []) > 4:
+        notes.append("  ... and %d more (`/foreman review %d`)" % (len(rec["findings"]) - 4, number))
+    if rec.get("dropped_unverified"):
+        notes.append("  %d finding(s) dropped: their quote is not in the diff" % rec["dropped_unverified"])
+    cov = rec.get("coverage") or {}
+    if cov and not cov.get("complete", True):
+        notes.append("  partly reviewed: %s" % trim(cov.get("note"), WIDTH - 20))
+    if verdict == "NOTHING TO REVIEW":
+        notes.append("  the pull request's diff is empty")
+    out["notes"] += notes
+    return out
+
+
+def _pipeline_pr(root: str, v: dict):
+    """The pipeline Ref of a pull request verdict, recording its gate stage; None when it cannot."""
+    try:
+        from . import pipeline
+        if not isinstance(v.get("number"), int):
+            return None
+        ref = pipeline.pr_ref(root, v)
+        status, detail = pipeline.gate_from_verdict(v)
+        pipeline.record_gate(ref, status, detail, "Gate on PR #%d: %s" % (v["number"], detail))
+        return ref
+    except Exception:
+        logger.warning("foreman: cannot record the pull request on the pipeline", exc_info=True)
+        return None
+
+
+def _pipeline_call(fn, ref, *args) -> None:
+    if ref is None:
+        return
+    try:
+        fn(ref, *args)
+    except Exception:
+        logger.warning("foreman: cannot update the pipeline", exc_info=True)
+
+
+def _pipeline_refused(ref, detail: str) -> None:
+    from . import pipeline
+    _pipeline_call(pipeline.record_merge_refused, ref, detail)
 
 
 # ─── Saved model review (written by Foreman's reviewer, if any) ──────────────
@@ -1165,7 +1384,7 @@ def saved_review(name_with_owner: str, number: int, head_oid: str = "", head_bra
         from . import review
         wanted = [("pr", str(number), "")] + ([("branch", head_branch, root)] if head_branch else [])
         for kind, ref, where in wanted:
-            found = review.load(name_with_owner, kind, ref, where)
+            found = review.load(name_with_owner, kind, ref, where, head=head_oid)
             if isinstance(found, dict) and found.get("head") == head_oid:
                 data = found
                 break
@@ -1317,10 +1536,22 @@ def cmd_reject(args: str = "", keys: tuple = (), platform: Optional[str] = None)
         return "\n".join([_outcome_text(state, detail, "", command),
                           "The comment was NOT posted on PR #%d%s. Its text:" % (number, where), rule, body, rule])
     lines = ["Foreman: posted this comment on PR #%d%s:" % (number, where), rule, body, rule]
+    closed = False
     if close:
         close_cmd = "gh pr close %d" % number
         state, detail = _terminal(close_cmd, root)
+        closed = state == "done"
         lines.append(_outcome_text(state, detail, "closed PR #%d" % number, close_cmd))
+    try:
+        from . import pipeline
+        if isinstance(v.get("number"), int) and not v.get("error"):
+            pipeline.record_rejected(pipeline.pr_ref(root, v), note or "reasons posted", closed)
+        else:
+            from . import review
+            pipeline.record_rejected(pipeline.Ref(name or review.slug_of(Repo(root, budget=5)), root, "pr", number),
+                                     note or "reasons posted", closed)
+    except Exception:
+        logger.warning("foreman: cannot record the rejection on the pipeline", exc_info=True)
     return "\n".join(lines)
 
 
@@ -1339,13 +1570,43 @@ def cmd_status(args: str = "", keys: tuple = (), platform: Optional[str] = None)
     return commands.cmd_status(args, keys, platform)
 
 
+def cmd_pipeline(args: str = "", keys: tuple = (), platform: Optional[str] = None) -> str:
+    """``/foreman pipeline [<pr>|<branch>]``: one change's stages and its last events; without an argument, the
+    current branch's change (or its pull request), else every change of the repository."""
+    from . import pipeline, review
+    words, root, problem = root_for(args, keys, platform)
+    if problem:
+        return problem
+    repo = Repo(root, budget=10)
+    slug = review.slug_of(repo)
+    items = pipeline.items_for(slug, root)
+    arg = words[0] if words else ""
+    number = _pr_number(arg) if arg else None
+    if arg:
+        found = [i for i in items if (number is not None and i["target"].get("number") == number)
+                 or (number is None and i["target"].get("branch") == arg)]
+    else:
+        branch = repo.branch()
+        found = [i for i in items if i["target"].get("branch") == branch]
+    if found:
+        return pipeline.format_item(found[0], WIDTH)
+    if not items:
+        return wrap("Foreman: nothing on the pipeline for %s yet. It fills as the gate checks commits and pushes, "
+                    "and as `/foreman verdict`, `review`, `merge` and `reject` run." % slug)
+    lines = ["Foreman: %s is not on the pipeline. Changes in %s:" % (("`%s`" % arg) if arg else "this branch", slug)]
+    lines += pipeline.board_lines(slug, root, WIDTH, limit=20)[1:]
+    return "\n".join(lines)
+
+
 SUBCOMMANDS: dict = {
     "board": (cmd_board, "branch, open PRs, issues they close (the default)"),
+    "pipeline": (cmd_pipeline, "[pr|branch] [--repo r]  a change's stages: gate, review, bounces, owner, merge"),
     "use": (cmd_use, "[path|n]  pin the repository for this session"),
     "prs": (cmd_prs, "open PRs: head, CI, the issues each one closes"),
     "issues": (cmd_issues, "open issues and the PR that closes each"),
-    "verdict": (cmd_verdict, "[pr|branch] [--repo r]  CLEAN or BLOCKED, with reasons"),
-    "merge": (cmd_merge, "<pr> [--merge|--rebase] [--yes] [--repo r]  if CLEAN and ready, after you confirm"),
+    "verdict": (cmd_verdict, "[pr|branch] [--repo r]  the verdict, with reasons"),
+    "merge": (cmd_merge, "<pr> [--merge|--rebase] [--yes] [--repo r]  if CLEAN, ready and reviewed, after you "
+                         "confirm"),
     "reject": (cmd_reject, "<pr> [--close [--yes]] [--repo r] [note]  post the reasons on the PR"),
-    "status": (cmd_status, "[path]  this repository: CLEAN or BLOCKED, with reasons"),
+    "status": (cmd_status, "[path]  this repository's verdict (CLEAN, BLOCKED, INCOMPLETE, NEEDS YOUR OK)"),
 }

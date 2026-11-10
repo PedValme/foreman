@@ -320,7 +320,8 @@ def collect(paths, root: str = "", threshold: float = DEFAULT_THRESHOLD, newest:
             total.notes.append(note("sarif:unreadable", label, "could not read SARIF: %s" % reason))
 
     for path in paths:
-        label = _one_line(path, 120)
+        # A (file, label) pair reads a copy of a report (taken from a commit) under its repository path.
+        path, label = path if isinstance(path, tuple) else (path, _one_line(path, 120))
         try:
             part = parse_file(path, root, threshold, label, changed, deadline)
             total.blockers += part.blockers
