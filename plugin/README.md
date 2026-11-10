@@ -79,7 +79,8 @@ board shows local branches only.
 - **Desktop panel (optional).** In Hermes Desktop open **Capabilities → Plugins**, find **Foreman** and switch on its
   **Desktop** column (a plugin's Desktop half ships switched off; click **Rescan** if the row does not show it). The
   **Foreman** pane joins the right side as a tab; click the status-bar chip **Foreman · …** (or **Ctrl/⌘ K → Foreman:
-  show the line**) to bring it forward.
+  show the line**) to bring it forward. If the pane does not appear, reload the app and switch the **Desktop** column
+  off and on again.
 
 ## Quick start (2 minutes)
 
@@ -499,4 +500,4 @@ public fallbacks, until Hermes offers a public way to read the terminal's direct
 
 ## License
 
-MIT. Built by AQP Intelligence.
+MIT. Built by [AQP Intelligence](https://aqpintelligence.com).
