@@ -20,8 +20,9 @@ not skip, delete or weaken the tests, change what the check runs, or commit a se
 6. **UX in the chat, any surface.** `/foreman` finds the repository, shows the branch against the base, the open
    pull requests and the issue each one closes, and gives each a verdict (mergeable or blocked) with the reasons and
    the exact line. It works the same in the terminal, Desktop and messaging. A Desktop panel is optional.
-7. **Merge and reject with reasons.** A merge runs through the agent's terminal tool and Hermes's approval; a
-   rejection leaves its reasons as a comment on the pull request. Never an automatic merge.
+7. **Merge and reject with reasons.** A merge runs through Hermes's terminal tool after the person confirms (rule
+   14; Hermes itself shows no approval prompt for it, checked in v0.23.0); a rejection leaves its reasons as a
+   comment on the pull request. Never an automatic merge.
 8. **The guardia is a second model.** An optional model review of the diff through `ctx.llm` (host-owned
    credentials), on a model different from the main one: by default the user's configured fallback model. If only
    the main model is available, the verdict says the reviewer is the same model. It never runs inside a hook.
@@ -30,7 +31,13 @@ not skip, delete or weaken the tests, change what the check runs, or commit a se
 11. **Works without GitHub.** Without `gh` or a remote, everything that only needs local git still works.
 12. **Catalog rules are product rules.** Public surfaces only, credentials only through Hermes, approvals never
     bypassed, clean failure when unattended, every risky behaviour disclosed in the README, declared capabilities
-    equal to registered ones. No telemetry, no network calls of its own.
+    equal to registered ones. No telemetry. The gate itself makes no network call; two things reach the network,
+    both only on an explicit command and both disclosed: the user's own `gh` (the board, verdicts, merge, reject)
+    and the model call of `/foreman review`.
+13. **Clean is not ready.** Foreman says CLEAN or BLOCKED about rigging; whether a pull request can merge
+    (conflicts, draft, GitHub still computing) is said apart. CI is shown and never decides.
+14. **A merge needs a person.** `/foreman merge` asks before merging; with nobody to ask it merges nothing and
+    prints the command to confirm by typing it. Refusals (BLOCKED, conflicts, draft) cannot be overridden.
 
 ## Out of this delivery
 Publishing GitHub checks from the agent, the owner's decisions and pending items, rework metrics, a Desktop panel
