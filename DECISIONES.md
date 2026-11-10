@@ -73,3 +73,11 @@ the owner confirms it. An option the owner turned down is a decision too and sta
 - 2026-11-09 · The installable plugin lives in a subdirectory (`plugin/`), so a user's install gets only the
   plugin while the method documents stay public in the repository · Pedro: «sí, mueve el plugin a una subcarpeta
   al final como propones».
+- 2026-11-10 · A public demo repository, `PedValme/foreman-demo`, made from the cart example, for the video's board
+  and merge shots · Pedro: «crea el repo foreman-demo y empecemos con telegram».
+- 2026-11-10 · The catalog entry: a short description (the full disclosure stays in the README and the pull request
+  text), category `automation`, and a real-app capture of the panel first among the screenshots; the credit line
+  links to https://aqpintelligence.com, in that closing line only · Pedro, to the four proposals: «sí a las cuatro,
+  la web es correcta».
+- 2026-11-10 · The catalog pull request is opened when the work is finished, not before · Pedro: «El PR primero
+  terminemos».

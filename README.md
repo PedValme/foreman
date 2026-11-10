@@ -31,4 +31,4 @@ The installable plugin is the [`plugin/`](plugin/) folder; tests, examples and w
 project is run: [PRODUCTO.md](PRODUCTO.md) (the product's rules), [DECISIONES.md](DECISIONES.md) (decisions) and
 [ESTADO.md](ESTADO.md) (state).
 
-MIT. Built by AQP Intelligence.
+MIT. Built by [AQP Intelligence](https://aqpintelligence.com).
