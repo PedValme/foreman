@@ -258,7 +258,18 @@ Merge (Foreman checks it again, then asks you with Merge / Cancel buttons):
 
 A message is never a confirmation: it carries commands, not buttons, because Hermes has no public way for a plugin to
 put buttons on a message that answer back to it. Sending the command in the chat runs the normal merge, with a fresh
-verdict and Hermes's own **Merge** / **Cancel** choice. Titles and branch names are made inert first (no Markdown,
+verdict and Hermes's own **Merge** / **Cancel** choice.
+
+On Telegram, Hermes shows the choices as a numbered list with buttons 1, 2...; Foreman keeps each choice to a few
+words so the list is clear (`1. Merge PR #2`, `2. Cancel`). Typing `merge` or `cancel` also works.
+
+Telegram's slash menu shows at most 60 commands by default; with many commands installed `/foreman` can be hidden from
+the menu but still works when typed. To pin it, then restart the gateway:
+
+```
+hermes config set platforms.telegram.extra.command_menu.priority '["foreman"]'
+```
+ Titles and branch names are made inert first (no Markdown,
 HTML, mentions, links or Hermes media directives). `/foreman notify test` sends a sample, `/foreman notify off` stops
 them.
 
@@ -462,9 +473,11 @@ agent-run `gh pr merge` refused under `--yolo`; the board, verdicts and pipeline
 loosened assertions; a confirmed merge that closed its issue; a rejection comment; the `finish` loop sending a
 loosened assertion back inside one turn; install from Git at a commit.
 
+Verified in a real Telegram session (Hermes v0.23.0): the test notification arrived, a blocked PR was refused, the
+merge-time review ran, Cancel merged nothing and Merge merged the PR.
+
 Verified by the test suite only (Linux, macOS, Windows): the Desktop panel (also rendered in a browser preview
-against a stand-in SDK, not yet inside the real app), sending a notification to a real chat, `ask_choice` buttons on Telegram,
-SARIF with a real hermes-security export.
+against a stand-in SDK, not yet inside the real app) and SARIF with a real hermes-security export.
 
 ## Development
 

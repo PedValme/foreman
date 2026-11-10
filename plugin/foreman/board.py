@@ -1026,7 +1026,7 @@ def cmd_issues(args: str = "", keys: tuple = (), platform: Optional[str] = None)
 
 # ─── /foreman verdict ────────────────────────────────────────────────────────
 
-_PR_ARG = re.compile(r"^#?(\d+)$")
+_PR_ARG = re.compile(r"^#?(\d+)[.,;:!?]?$")  # a phone keyboard adds a stray full stop
 
 
 def _pr_number(token: str) -> Optional[int]:
@@ -1172,7 +1172,9 @@ def _confirm(question: str, options: list) -> Optional[str]:
     if not callable(ask):
         return None
     try:
-        return ask(question, [{"value": v, "label": l, "description": d} for v, l, d in options])
+        # No description: Telegram prints "<n>. <label> — <description>" above bare numbered buttons, so the
+        # label says the action and the detail lives in the question.
+        return ask(question, [{"value": v, "label": l} for v, l in options])
     except Exception:
         logger.warning("foreman: ask_choice failed", exc_info=True)
         return None
@@ -1239,12 +1241,16 @@ def cmd_merge(args: str = "", keys: tuple = (), platform: Optional[str] = None) 
         warn = "" if ci == "CI passing" else "WARNING: %s.\n" % ci
         first = ("The second-model review could not run (%s). A person decides: merge without it?\n"
                  % trim(unreviewed, 160)) if unreviewed else ""
-        noted = ("Review notes:\n%s\n" % "\n".join(notes)) if notes else ""
-        question = "%s%s%sMerge PR #%d (%s, %s) into %s?\n%s\nCloses: %s · %s" % (
+        noted = ("Review notes:\n%s\n" % "\n".join("- " + n.strip() for n in notes)) if notes else ""
+        label = "Merge PR #%d" % number
+        question = ("%s%s%sMerge PR #%d (%s, %s) into %s?\n%s\nCloses: %s · %s\n"
+                    "Will run: gh pr merge %d --%s --delete-branch (pinned to %s)\n"
+                    "Choose %s to merge, or Cancel.") % (
             first, noted, warn, number, v["head_oid"][:7], method, v.get("base") or "its base",
-            trim(v.get("title"), WIDTH), ", ".join(v.get("closes") or []) or "no issue", ci)
+            trim(v.get("title"), WIDTH), ", ".join(v.get("closes") or []) or "no issue", ci,
+            number, method, v["head_oid"][:7], label)
         _pipeline_call(pipeline.record_waiting, ref, "merge question asked")
-        answer = _confirm(question, [("merge", "Merge", "run `%s`" % command), ("cancel", "Cancel", "merge nothing")])
+        answer = _confirm(question, [("merge", label), ("cancel", "Cancel")])
         if answer == "cancel":
             _pipeline_call(pipeline.record_event, ref, "You cancelled the merge")
             return "\n".join(pre + ["Foreman: cancelled; PR #%d was not merged." % number])
@@ -1500,13 +1506,15 @@ def cmd_reject(args: str = "", keys: tuple = (), platform: Optional[str] = None)
     body = reject_comment(v, note, saved_review(name, number, v.get("head_oid") or "", v.get("head") or "", root))
     if close and not yes:  # closing is the part that needs a confirmation; it is asked before anything is posted
         rerun = "/foreman reject %d%s --close --yes%s" % (number, _repo_suffix(args), " " + note if note else "")
-        answer = _confirm("Post the comment and close PR #%d?\n%s" % (number, trim(v.get("title"), WIDTH)),
-                          [("close", "Post and close", "comment, then `gh pr close %d`" % number),
-                           ("comment", "Post only", "comment, leave it open"),
-                           ("cancel", "Cancel", "post nothing")])
+        label = "Post and close PR #%d" % number
+        answer = _confirm("Post the comment and close PR #%d?\n%s\n"
+                          "Will run: gh pr comment %d, then gh pr close %d\n"
+                          "Choose %s, Post only (leave it open), or Cancel."
+                          % (number, trim(v.get("title"), WIDTH), number, number, label),
+                          [("close", label), ("post", "Post only"), ("cancel", "Cancel")])
         if answer == "cancel":
             return "Foreman: cancelled; nothing was posted on PR #%d." % number
-        if answer == "comment":
+        if answer == "post":
             close = False
         elif answer != "close":
             return _no_answer("nothing was posted on PR #%d and it was not closed" % number, rerun)

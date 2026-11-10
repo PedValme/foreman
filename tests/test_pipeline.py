@@ -443,7 +443,7 @@ class MergeWithReview(PipelineCase):
         ctx, out = self.merge(llm, choice="merge")
         question = ctx.asked[0][0]
         self.assertTrue(question.startswith("Review notes:\n"), question)
-        self.assertIn("\n  HIGH app.py:1 — Overflow\n", question)
+        self.assertIn("\n- HIGH app.py:1 — Overflow\n", question)
         self.assertIn(review.SAME_MODEL, question)  # the fake ctx grants no other model
         self.assertIn("merged PR #7", out)
         self.assertIn("reviewed PR #7 at fffffff with the second model first", " ".join(out.split()))
