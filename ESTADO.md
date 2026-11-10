@@ -1,35 +1,47 @@
-# Foreman state — 2026-11-09
+# Foreman state — 2026-11-10
 
 > Rewritten in full, never appended; kept short.
 
 <!-- pic-method: next-session -->
 ## Next session
-- Was doing: kickoff closed on 2026-11-09 (documents, public repository). Implementation delegated in three parts
-  (detector port; hooks and plugin skeleton; `/foreman` UX).
-- Tried: nothing run on a real Hermes yet.
-- Next action: verify the delegated parts end to end in a dedicated Hermes profile on this PC (v0.23.0): the agent
-  adds a `skip`, the commit is blocked, the agent fixes the code, the commit passes.
-- Waits for the owner: confirm which of his Hermes instances to test on over SSH · Recommended: the one he uses daily
-- Waits for the owner: record the demo video with the script and instructions in `trabajo/demo-video.md`, and
-  publish it on X tagging @NousResearch · Verified by: the X link in the submission form
+- Was doing: the gate (detector, `pre_tool_call`, `pre_verify`, `/foreman status|allow`) is merged (#2) after three
+  rounds of independent review and real sessions on Hermes v0.23.0 (macOS). Three slices were delegated in parallel,
+  each as its own pull request, not merged: the board and merge/reject UX (`claude/board`), the second-model
+  review (`claude/review`), the SARIF source and CI (`claude/sarif-ci`).
+- Tried: real sessions in a dedicated profile (`foremandev`) on the owner's Hermes machine. Verified: `@unittest.skip`
+  blocked at write time; `git commit` blocked with a skip in the tree, also under `--yolo`; a `foreman:allow` marker
+  blocks under `--yolo` and shows in `/foreman allow`; the honest path (fix the code, commit) passes untouched.
+  Not verified in a real session: `--no-verify` (the model declined to run it), `pre_verify`, `/foreman allow <id>`
+  followed by the commit.
+- Next action: review and merge the three pull requests one by one (conflicts in `foreman/commands.py` and
+  `README.md` are expected and small), run a final independent review of the whole plugin, then the real-session
+  pass on the owner's machine and the catalog pull request.
+- Waits for the owner: record the demo video with the script and instructions in `trabajo/demo-video.md` (not written yet), and publish it on X tagging @NousResearch · Verified by: the X link in the submission form
 - Waits for the owner: submit the hackathon form with the catalog PR link and the video link
+- Waits for the owner: run `fab sync` on the machine that has the environment's clone, so `foreman` reaches the agents' rules · Verified by: `foreman` listed under «En construcción» in ~/.config/agents/AGENTS.md
 
 ## Delivered
-- Nothing yet.
+- The gate, end to end (#2): 97 tests, `hermes plugins validate` passes with two guarded private-import warnings.
 
 ## In progress
-- First slice: the gate end to end (detector, `pre_tool_call`, `pre_verify`, `/foreman status`).
+- Board UX, second-model review, SARIF source and CI mode (three open pull requests).
 
 ## Next steps
-1. Checkpoint 2026-11-10 12:00 (Lima): the block works end to end in a real Hermes session. If not, cut to the
-   pre-commit block only.
-2. `/foreman` UX: repository picker, board (branch, pull requests, linked issues), verdict with reasons, merge and
-   reject.
-3. The guardia: optional model review through `ctx.llm` on the fallback model.
-4. SARIF source and CI mode; GitHub Actions on Linux, macOS and Windows.
-5. Review of all the code by an agent that did not write it; YOLO-mode test; test on the owner's Hermes over SSH.
-6. README with disclosures, demo repository, `hermes plugins validate`, catalog PR open by 2026-11-11 12:00.
-7. Register the repository in the owner's environment (PedValme/entorno, category «en construcción»).
+1. Merge the three slices; final review of all the code by an agent that did not write it.
+2. Real-session pass: `/foreman` board, verdict, merge and reject on a throwaway GitHub repository; `/foreman
+   review` with a second model; `pre_verify`; `/foreman allow <id>`.
+3. README polish with disclosures and screenshots; the demo repository; `trabajo/demo-video.md`.
+4. Open an issue in NousResearch/hermes-agent asking for a public way to read the terminal's working directory and
+   the session's directory from a plugin (the two private imports).
+5. `hermes plugins validate` at the pinned commit; catalog pull request open by 2026-11-11 12:00 (Lima).
+6. Remove the `foremandev` test profile from the owner's machine when testing ends.
 
 ## Known issues
-- None yet.
+- Unresolved: when the CLI hands a slash command to a running gateway before the agent has used the terminal in
+  that session, `/foreman status` cannot tell the repository and asks for a path (`/foreman status <path>`). It no
+  longer shows a wrong repository. The board slice adds `/foreman use <path>` as the way around it.
+- Unresolved: `hermes plugins validate` warns about two guarded private imports in `foreman/gate.py`
+  (`tools.terminal_tool.get_session_cwd`, `agent.runtime_cwd.scoped_session_cwd`). The second one did not help in
+  the real session above; drop it unless the TUI/Desktop path proves it is needed.
+- Unresolved: the last fixes to the gate (repository choice, workflow window, grants-store guard) were verified by
+  tests and one real session, but not by the independent reviewer; the final review covers them.
