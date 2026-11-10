@@ -296,6 +296,52 @@ class PullRequest(ReviewCase):
         self.assertNotIn(secret, json.dumps(r["deterministic"]))
 
 
+class PinnedRepository(ReviewCase):
+    """`/foreman use <path>` pins a repository; review resolves it exactly like the board subcommands."""
+    KEYS = ("session-key-1",)
+
+    def test_review_uses_the_pin_when_no_terminal_directory_is_known(self):
+        from foreman import board, gate
+        self.loosen_test()
+        board.pin(self.root, self.KEYS)
+        llm = FakeLlm(parsed=answer())
+        # No terminal directory, no session directory, no process directory: only the pin can name the repository.
+        with mock.patch.object(gate, "cwd_candidates", return_value=[]), \
+                mock.patch.object(review, "hermes_config", return_value=MAIN), \
+                mock.patch.object(review, "_CTX", FakeCtx(llm)):
+            out = commands.handle_slash("review", session_key=self.KEYS[0])
+        self.assertIn("Foreman review: PASS", out)
+        self.assertIn("Target: branch feature", out)
+        self.assertNotIn("could not tell which repository", out)
+        self.assertEqual(len(llm.calls), 1)
+
+    def test_review_saved_for_a_pr_is_the_one_reject_reads(self):
+        """The PR key is owner/repo and number only: no local path, so /private/tmp vs /tmp cannot split it."""
+        from foreman import board
+        diff = ("diff --git a/app/x.py b/app/x.py\n--- a/app/x.py\n+++ b/app/x.py\n@@ -1,1 +1,1 @@\n"
+                "-    assert add(2, 2) == 4\n+    assert add(2, 2) is not None\n")
+        meta = json.dumps({"number": 6, "title": "t", "url": "https://github.com/Acme/Widgets/pull/6",
+                           "baseRefName": "main", "headRefName": "feat"})
+        finding = {"severity": "HIGH", "file": "app/x.py", "line": 1, "title": "Assertion loosened", "why": "w",
+                   "evidence": "assert add(2, 2) is not None", "fix": "f"}
+        with mock.patch.object(review, "_gh", side_effect=lambda a, cwd: meta if a[1] == "view" else diff):
+            r = self.review(FakeCtx(FakeLlm(parsed=answer([finding]))), args="6")
+            self.review(FakeCtx(FakeLlm(parsed=answer([finding]))), args="6")  # a second run replaces the first
+        for root in (self.root, "/private" + self.root.replace("\\", "/")):
+            self.assertEqual(review.review_path("Acme/Widgets", "pr", "6", root), r["saved"])
+        found = board.saved_review("Acme/Widgets", 6)
+        self.assertEqual(len(found), 1)
+        self.assertIn("Assertion loosened", found[0])
+
+    def test_host_default_model_is_not_named(self):
+        self.loosen_test()
+        r = self.review(FakeCtx(FakeLlm(parsed=answer(), model="some-model", provider="some-provider")))
+        text = review.format_review(r)
+        self.assertIn("Reviewer: the host's default model\n", text)
+        self.assertNotIn("some-model", text)
+        self.assertEqual(r["model"]["attributed_to"], "some-provider / some-model")
+
+
 class ModelChoice(ReviewCase):
     def setUp(self):
         super().setUp()
