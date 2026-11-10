@@ -261,6 +261,51 @@ class PullRequestVerdicts(BoardCase):
         self.gh.add(["pr", "view", "7"], pr_view(7, closes=(3,)))
         self.gh.add(["pr", "diff", "7"], clean_diff())
 
+    def test_clean_and_ready_versus_clean_but_not_mergeable(self):
+        self.mergeable()
+        out = self.run_cmd("verdict 7")
+        self.assertIn("Foreman verdict for PR #7: CLEAN — ready to merge", out)
+        self.assertIn("Look at the CI first (no CI checks)", " ".join(out.split()))
+        self.assertNotIn("MERGEABLE", out)
+        view = pr_view(8)
+        view.update(mergeable="CONFLICTING", isDraft=True, statusCheckRollup=[])
+        self.gh.add(["pr", "view", "8"], view)
+        self.gh.add(["pr", "diff", "8"], clean_diff())
+        out = self.run_cmd("verdict 8")
+        self.assertIn("Foreman verdict for PR #8: CLEAN — but not mergeable yet", out)
+        self.assertIn("CI: no CI checks (none run while it conflicts)", out)
+        self.assertIn("it is a draft: mark it ready for review", out)
+        self.assertIn("it conflicts with main: update the branch", out)
+        self.assertNotIn("/foreman merge 8", out)
+
+    def test_conflicts_draft_or_unknown_refuse_even_with_yes(self):
+        for n, change, reason in ((8, {"mergeable": "CONFLICTING"}, "conflicts with main"),
+                                  (9, {"isDraft": True}, "it is a draft"),
+                                  (10, {"mergeable": "UNKNOWN"}, "try again in a moment")):
+            view = pr_view(n)
+            view.update(change)
+            self.gh.add(["pr", "view", str(n)], view)
+            self.gh.add(["pr", "diff", str(n)], clean_diff())
+            board.bind(FakeCtx(choice="merge"))
+            out = self.run_cmd("merge %d --yes" % n)
+            self.assertIn("Foreman finds it CLEAN, but it is not mergeable yet", out)
+            self.assertIn(reason, " ".join(out.split()))
+            self.assertEqual(board._CTX.dispatched, [])
+            self.assertEqual(board._CTX.asked, [])
+
+    def test_failing_ci_is_shown_in_the_question_but_does_not_refuse(self):
+        view = pr_view(7)
+        view["statusCheckRollup"] = [{"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "FAILURE"}]
+        self.gh.add(["pr", "view", "7"], view)
+        self.gh.add(["pr", "diff", "7"], clean_diff())
+        board.bind(FakeCtx(choice="merge"))
+        self.assertIn("merged PR #7", self.run_cmd("merge 7"))
+        self.assertTrue(board._CTX.asked[0][0].startswith("WARNING: CI failing (1 of 1)."))
+
+    def test_ci_that_could_not_be_read_is_not_no_ci(self):
+        self.assertEqual(board.ci_summary(None), "CI unknown (checks not read)")
+        self.assertEqual(board.ci_summary([]), "no CI checks")
+
     def test_merge_asks_and_cancel_merges_nothing(self):
         self.mergeable()
         board.bind(FakeCtx(choice="cancel"))
@@ -268,7 +313,8 @@ class PullRequestVerdicts(BoardCase):
         self.assertIn("cancelled; PR #7 was not merged", out)
         question, choices = board._CTX.asked[0]
         self.assertIn("Merge PR #7 (fffffff, squash) into main?", question)
-        self.assertIn("Closes: #3 · no CI", question)
+        self.assertIn("Closes: #3 · no CI checks", question)
+        self.assertTrue(question.startswith("WARNING: no CI checks."), question)
         self.assertIn("Change things", question)
         self.assertEqual([c["label"] for c in choices], ["Merge", "Cancel"])
         self.assertEqual(board._CTX.dispatched, [])
