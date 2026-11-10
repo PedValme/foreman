@@ -373,8 +373,9 @@ LOCAL_PLATFORMS = {"", "cli", "tui", "local"}
 RECORDED, SESSION, PROCESS, CONFIGURED = "recorded", "session", "process", "configured"
 HOW = {RECORDED: "the terminal's directory for this session", SESSION: "this session's working directory",
        PROCESS: "the current directory", CONFIGURED: "Hermes's working directory", "given": "the given path"}
-NO_REPOSITORY_HERE = ("Foreman could not tell which repository you mean from here. Run `/foreman status <path>`, or "
-                      "run it after the agent has used the terminal in this session.")
+NO_REPOSITORY_HERE = ("Foreman could not tell which repository you mean from here. Pick one with `/foreman use` (or "
+                      "`/foreman use <path>`), run `/foreman status <path>`, or run it after the agent has used the "
+                      "terminal in this session.")
 
 
 def _session_env(name: str) -> str:
@@ -711,7 +712,7 @@ def on_pre_tool_call(tool_name: str = "", args=None, task_id: str = "", **kwargs
         command = args.get("command")
         if not isinstance(command, str):
             return None
-        if grants.GRANTS_FILE.lower() in command.lower():
+        if _names_store(command) and not _OWN_COMMENT.match(command.strip()):
             return _store_guard()
         if not _QUICK.search(command):
             return None
@@ -729,17 +730,46 @@ def on_pre_tool_call(tool_name: str = "", args=None, task_id: str = "", **kwargs
         return None
 
 
+# Foreman's own state in its data directory: the exceptions the user granted, the repository pinned per session,
+# the reject comments waiting for `gh`, and saved model reviews. Only the user's /foreman commands change them.
+STORE_FILES = (grants.GRANTS_FILE, "foreman-board.json")
+STORE_DIRS = ("outbox", "reviews")
+_STORE_DIR_TEXT = re.compile(r"(?:plugin-data/foreman|\.foreman)/(?:%s)(?:/|$|[\s\"'])" % "|".join(STORE_DIRS))
+# What /foreman reject itself runs: gh reading the comment file it wrote.
+_OWN_COMMENT = re.compile(r'^gh pr comment \d+ --body-file "[^"$`]*/outbox/reject-\d+-[A-Za-z0-9_]+\.md"$')
+
+
+def _store_dirs_text() -> list:
+    """The store directories as they are spelt on this machine (lower case, forward slashes)."""
+    try:
+        base = grants.store_dir().replace("\\", "/").rstrip("/").lower()
+    except Exception:
+        return []
+    return [base + "/" + d for d in STORE_DIRS]
+
+
+def _names_store(text: str) -> bool:
+    """True when ``text`` (a command, a patch or a path) names one of Foreman's store files or directories."""
+    low = (text or "").lower().replace("\\", "/")
+    return (any(name in low for name in STORE_FILES) or bool(_STORE_DIR_TEXT.search(low + " "))
+            or any(d in low for d in _store_dirs_text()))
+
+
 def _is_store_path(path) -> bool:
-    """The grant store, however the path is spelt (case, trailing dots or spaces that Windows drops)."""
+    """Foreman's store, however the path is spelt (case, trailing dots or spaces that Windows drops)."""
     if not isinstance(path, str) or not path:
         return False
-    name = os.path.basename(os.path.normpath(path.replace("\\", "/").rstrip("/ "))).rstrip(". ")
-    return os.path.normcase(name).lower() == grants.GRANTS_FILE.lower()
+    clean = path.replace("\\", "/").rstrip("/ ")
+    name = os.path.basename(os.path.normpath(clean)).rstrip(". ")
+    if os.path.normcase(name).lower() in STORE_FILES:
+        return True
+    return _names_store(os.path.abspath(os.path.expanduser(clean)) + "/")
 
 
 def _store_guard() -> dict:
-    return {"action": "block", "message": "Foreman blocked this call: Foreman's exception store changes only when "
-                                          "the user runs `/foreman allow <id>`."}
+    return {"action": "block", "message": "Foreman blocked this call: Foreman's own state (its exceptions, the "
+                                          "pinned repository, reject comments, saved reviews) changes only through "
+                                          "the user's `/foreman` commands."}
 
 
 def gate_command(command: str, workdir: Optional[str] = None, task_id: str = "") -> Optional[dict]:
@@ -855,7 +885,7 @@ def gate_write(tool_name: str, args: dict, task_id: str = "") -> Optional[dict]:
     else:
         patch = args.get("patch")
         if isinstance(patch, str) and (args.get("mode") == "patch" or not args.get("old_string")):
-            if grants.GRANTS_FILE.lower() in patch.lower():
+            if _names_store(patch):
                 return _store_guard()
             edits += [(p, old, new, is_new) for p, old, new, is_new in _v4a_files(patch)
                       if detector.has_skip_marker(new)]

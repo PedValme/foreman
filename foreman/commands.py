@@ -170,7 +170,9 @@ def cmd_help(args: str = "", keys: tuple = (), platform: Optional[str] = None) -
               "Foreman blocks git commit, git push, gh pr create and gh pr merge when the change skips, deletes or "
               "moves tests, edits or weakens what the check runs, bypasses hooks or carries a secret.",
               "A false positive is marked on its line with `%s` (or, for a file, a commit-message line `%s <path>: "
-              "<reason>`). The mark never passes alone: it waits until you run `/foreman allow <id>`." % (MARKER, MARKER)]
+              "<reason>`). The mark never passes alone: it waits until you run `/foreman allow <id>`." % (MARKER, MARKER),
+              "Pull requests and issues come from the GitHub CLI (`gh`) with its own login. `/foreman merge` and "
+              "`/foreman reject` write to GitHub only when you type them, through Hermes's terminal tool."]
     return "\n".join(lines)
 
 
@@ -181,11 +183,15 @@ SUBCOMMANDS: dict = {
     "help": (cmd_help, "this help"),
 }
 
+from . import board as _board  # noqa: E402  (board.py imports this module lazily)
+
+SUBCOMMANDS.update(_board.SUBCOMMANDS)
+
 
 def handle_slash(raw_args: str = "", session_id: str = "", session_key: str = "", **kwargs) -> str:
     try:
         parts = (raw_args or "").strip().split(None, 1)
-        name = parts[0].lower() if parts else "status"
+        name = parts[0].lower() if parts else "board"
         rest = parts[1] if len(parts) > 1 else ""
         entry = SUBCOMMANDS.get(name)
         if entry is None:
