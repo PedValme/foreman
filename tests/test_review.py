@@ -96,7 +96,8 @@ class HappyPath(ReviewCase):
         self.assertIn(review.SAME_MODEL, text)
         self.assertIn(review.ADVISORY, text)
         # stored, and readable by other commands
-        saved = review.load(r["slug"], "worktree", "feature", self.root)
+        # the file name carries a hash of the root git reports (resolved symlinks and 8.3 names)
+        saved = review.load(r["slug"], "worktree", "feature", os.path.normpath(os.path.realpath(self.root)))
         self.assertEqual(saved["verdict"], "BLOCKED")
         self.assertRegex(os.path.basename(r["saved"]), r"^local__repo__worktree-feature-[0-9a-f]{8}\.json$")
 
