@@ -1,0 +1,15 @@
+name: foreman
+version: "0.1.0"
+manifest_version: 2
+api_version: 1
+description: "A green check the agent did not rig: a deterministic gate (no model) that blocks git commit, git push, gh pr create and gh pr merge when the change skips, isolates, deletes or moves tests, edits what the check runs, bypasses hooks or carries a secret, and asks the agent to undo it before it finishes a coding turn."
+author: "PedValme"
+license: MIT
+homepage: https://github.com/PedValme/foreman
+tags: [git, testing, security, coding]
+requires_hermes: ">=0.22.6"
+provides_tools:
+  - foreman_check
+provides_hooks:
+  - pre_tool_call
+  - pre_verify
