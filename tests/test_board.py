@@ -257,9 +257,58 @@ class PullRequestVerdicts(BoardCase):
         self.assertIn("Foreman will not merge PR #7: it cannot compute a verdict", out)
         self.assertEqual(board._CTX.dispatched, [])
 
+    def mergeable(self):
+        self.gh.add(["pr", "view", "7"], pr_view(7, closes=(3,)))
+        self.gh.add(["pr", "diff", "7"], clean_diff())
+
+    def test_merge_asks_and_cancel_merges_nothing(self):
+        self.mergeable()
+        board.bind(FakeCtx(choice="cancel"))
+        out = self.run_cmd("merge 7")
+        self.assertIn("cancelled; PR #7 was not merged", out)
+        question, choices = board._CTX.asked[0]
+        self.assertIn("Merge PR #7 (fffffff, squash) into main?", question)
+        self.assertIn("Closes: #3 · no CI", question)
+        self.assertIn("Change things", question)
+        self.assertEqual([c["label"] for c in choices], ["Merge", "Cancel"])
+        self.assertEqual(board._CTX.dispatched, [])
+
+    def test_merge_without_an_answer_does_not_merge(self):
+        self.mergeable()
+        for ctx in (FakeCtx(can_ask=False), FakeCtx(choice=None)):  # unavailable, or nobody answered
+            board.bind(ctx)
+            out = self.run_cmd("merge 7 --rebase")
+            self.assertIn("PR #7 was not merged", out)
+            self.assertIn("/foreman merge 7 --rebase --yes", out)
+            self.assertEqual(ctx.dispatched, [])
+
+    def test_yes_skips_the_question_but_not_the_verdict(self):
+        self.blocked_pr()
+        board.bind(FakeCtx(can_ask=False))
+        self.assertIn("will not merge PR #7: it is BLOCKED", self.run_cmd("merge 7 --yes"))
+        self.assertEqual(board._CTX.dispatched, [])
+
+    def test_merge_with_yes_runs_without_asking(self):
+        self.mergeable()
+        board.bind(FakeCtx(can_ask=False))
+        self.assertIn("merged PR #7 (squash)", self.run_cmd("merge 7 --yes"))
+        self.assertEqual(len(board._CTX.dispatched), 1)
+
+    def test_reject_close_asks_first(self):
+        self.blocked_pr()
+        board.bind(FakeCtx(can_ask=False))
+        out = self.run_cmd("reject 7 --close bad")
+        self.assertIn("nothing was posted on PR #7", out)
+        self.assertIn("/foreman reject 7 --close --yes bad", out)
+        self.assertEqual(board._CTX.dispatched, [])
+        board.bind(FakeCtx(choice="comment"))
+        self.run_cmd("reject 7 --close bad")
+        self.assertEqual([a["command"].split(" --")[0] for _n, a in board._CTX.dispatched], ["gh pr comment 7"])
+
     def test_merge_runs_through_the_terminal_tool(self):
         self.gh.add(["pr", "view", "7"], pr_view(7))
         self.gh.add(["pr", "diff", "7"], clean_diff())
+        board.bind(FakeCtx(choice="merge"))
         out = self.run_cmd("merge 7 --rebase")
         name, args = board._CTX.dispatched[0]
         self.assertEqual(name, "terminal")
@@ -273,9 +322,10 @@ class PullRequestVerdicts(BoardCase):
         self.gh.add(["pr", "view", "7"], pr_view(7))
         self.gh.add(["pr", "diff", "7"], clean_diff())
         board.bind(FakeCtx(result={"output": "", "exit_code": -1, "error": "Command denied by user",
-                                   "status": "blocked"}))
+                                   "status": "blocked"}, choice="merge"))
         self.assertIn("approval denied", self.run_cmd("merge 7"))
-        board.bind(FakeCtx(result={"output": "", "exit_code": 124, "error": "Command timed out after 180s"}))
+        board.bind(FakeCtx(result={"output": "", "exit_code": 124, "error": "Command timed out after 180s"},
+                           choice="merge"))
         self.assertIn("timed out", self.run_cmd("merge 7"))
 
     def test_reject_posts_one_comment_with_the_reasons_and_the_saved_review(self):
@@ -285,6 +335,7 @@ class PullRequestVerdicts(BoardCase):
         with open(os.path.join(reviews, "acme__widgets__7.json"), "w", encoding="utf-8") as fh:
             json.dump({"findings": [{"severity": "high", "file": "app.py", "line": 4,
                                      "message": "ask @someone about the empty catch"}, "plain finding"]}, fh)
+        board.bind(FakeCtx(choice="close"))
         out = self.run_cmd("reject 7 --close please fix the tests")
         ctx = board._CTX
         commands_run = [a["command"] for _n, a in ctx.dispatched]
@@ -371,6 +422,32 @@ class Use(BoardCase):
             gate.locate, board.pinned = old_locate, old_pinned
         self.assertIn(gate.NO_REPOSITORY_HERE, out)
         self.assertIn("/foreman use", out)
+
+
+class StoreGuard(BoardCase):
+    def test_the_agent_cannot_touch_the_pin_file_the_outbox_or_the_reviews(self):
+        store = grants.store_dir()
+        paths = [os.path.join(store, board.STORE_FILE), os.path.join(store, "outbox", "reject-7-x.md"),
+                 os.path.join(store, "reviews", "acme__widgets__7.json"),
+                 "/home/u/.hermes/plugin-data/foreman/reviews/a.json"]
+        for path in paths:
+            d = gate.on_pre_tool_call(tool_name="write_file", args={"path": path, "content": "{}"})
+            self.assertEqual(d and d["action"], "block", path)
+            d = gate.on_pre_tool_call(tool_name="terminal", args={"command": 'rm "%s"' % path})
+            self.assertEqual(d and d["action"], "block", path)
+        patch = "*** Begin Patch\n*** Add File: %s\n+{}\n*** End Patch\n" % paths[0]
+        self.assertEqual(gate.on_pre_tool_call(tool_name="patch", args={"mode": "patch", "patch": patch})["action"],
+                         "block")
+
+    def test_reject_s_own_comment_command_is_not_blocked(self):
+        path = os.path.join(grants.store_dir(), "outbox", "reject-7-abc_12.md").replace("\\", "/")
+        self.assertIsNone(gate.on_pre_tool_call(tool_name="terminal",
+                                                args={"command": 'gh pr comment 7 --body-file "%s"' % path}))
+
+    def test_an_ordinary_reviews_folder_is_not_protected(self):
+        d = gate.on_pre_tool_call(tool_name="write_file",
+                                  args={"path": os.path.join(self.root, "reviews", "a.md"), "content": "x"})
+        self.assertIsNone(d)
 
 
 class DiffFindings(unittest.TestCase):

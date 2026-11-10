@@ -932,7 +932,7 @@ def _prepare_pr(args: str, keys: tuple, platform: Optional[str], verb: str) -> t
     numbers = [w for w in words if _pr_number(w) is not None]
     if not numbers:
         return None, None, words, "Usage: /foreman %s <pr-number>%s" % (
-            verb, " [--merge|--rebase]" if verb == "merge" else " [--close] [note]")
+            verb, " [--merge|--rebase] [--yes]" if verb == "merge" else " [--close [--yes]] [note]")
     root, how = resolve(keys, platform)
     if not root:
         return None, None, words, _no_repository()
@@ -945,14 +945,35 @@ def _prepare_pr(args: str, keys: tuple, platform: Optional[str], verb: str) -> t
     return root, _pr_number(numbers[0]), rest, None
 
 
+def _confirm(question: str, options: list) -> Optional[str]:
+    """The value the person picked with Hermes's documented ``ctx.ask_choice``, or None when nothing can ask here
+    (an older Hermes, a cron job, a chat that cannot ask) or nobody answered."""
+    ask = getattr(_CTX, "ask_choice", None)
+    if not callable(ask):
+        return None
+    try:
+        return ask(question, [{"value": v, "label": l, "description": d} for v, l, d in options])
+    except Exception:
+        logger.warning("foreman: ask_choice failed", exc_info=True)
+        return None
+
+
+def _no_answer(what: str, rerun: str) -> str:
+    return wrap("Foreman: %s. It needs your confirmation, and Hermes could not ask here or nobody answered (an "
+                "unattended run, a chat without choices, or the question timed out). To confirm, type:" % what) \
+        + "\n  " + rerun
+
+
 def cmd_merge(args: str = "", keys: tuple = (), platform: Optional[str] = None) -> str:
     root, number, rest, problem = _prepare_pr(args, keys, platform, "merge")
     if problem:
         return problem
+    yes = "--yes" in rest
+    rest = [w for w in rest if w != "--yes"]
     methods = [w for w in rest if w in ("--squash", "--merge", "--rebase")]
     unknown = [w for w in rest if w not in ("--squash", "--merge", "--rebase")]
     if unknown or len(methods) > 1:
-        return "Usage: /foreman merge <pr-number> [--merge|--rebase]   (default: squash)"
+        return "Usage: /foreman merge <pr-number> [--merge|--rebase] [--yes]   (default: squash)"
     method = methods[0][2:] if methods else "squash"
     v = pr_verdict(root, number)
     if v.get("error"):
@@ -967,6 +988,16 @@ def cmd_merge(args: str = "", keys: tuple = (), platform: Optional[str] = None) 
         return "Foreman will not merge PR #%d: GitHub did not give its head commit." % number
     # --match-head-commit: GitHub merges exactly the commit Foreman inspected, or nothing.
     command = "gh pr merge %d --%s --delete-branch --match-head-commit %s" % (number, method, v["head_oid"])
+    if not yes:
+        rerun = "/foreman merge %d%s --yes" % (number, "" if method == "squash" else " --" + method)
+        question = "Merge PR #%d (%s, %s) into %s?\n%s\nCloses: %s · %s" % (
+            number, v["head_oid"][:7], method, v.get("base") or "its base", trim(v.get("title"), WIDTH),
+            ", ".join(v.get("closes") or []) or "no issue", v.get("ci") or "no CI")
+        answer = _confirm(question, [("merge", "Merge", "run `%s`" % command), ("cancel", "Cancel", "merge nothing")])
+        if answer == "cancel":
+            return "Foreman: cancelled; PR #%d was not merged." % number
+        if answer != "merge":
+            return _no_answer("PR #%d was not merged" % number, rerun)
     state, detail = _terminal(command, root)
     where = " in %s" % v["name"] if v.get("name") else ""
     lines = ["Foreman verdict for PR #%d: MERGEABLE (%s)." % (number, v.get("ci") or "no CI"),
@@ -1062,8 +1093,8 @@ def cmd_reject(args: str = "", keys: tuple = (), platform: Optional[str] = None)
     root, number, rest, problem = _prepare_pr(args, keys, platform, "reject")
     if problem:
         return problem
-    close = "--close" in rest
-    note = " ".join(w for w in rest if w != "--close").strip()
+    close, yes = "--close" in rest, "--yes" in rest
+    note = " ".join(w for w in rest if w not in ("--close", "--yes")).strip()
     v = pr_verdict(root, number)
     if v.get("error") and not note:
         return ("Foreman cannot compute a verdict for PR #%d (%s). To reject it anyway, say why: `/foreman reject "
@@ -1073,6 +1104,18 @@ def cmd_reject(args: str = "", keys: tuple = (), platform: Optional[str] = None)
                 % (number, number))
     name = v.get("name") or ""
     body = reject_comment(v, note, saved_review(name, number))
+    if close and not yes:  # closing is the part that needs a confirmation; it is asked before anything is posted
+        rerun = "/foreman reject %d --close --yes%s" % (number, " " + note if note else "")
+        answer = _confirm("Post the comment and close PR #%d?\n%s" % (number, trim(v.get("title"), WIDTH)),
+                          [("close", "Post and close", "comment, then `gh pr close %d`" % number),
+                           ("comment", "Post only", "comment, leave it open"),
+                           ("cancel", "Cancel", "post nothing")])
+        if answer == "cancel":
+            return "Foreman: cancelled; nothing was posted on PR #%d." % number
+        if answer == "comment":
+            close = False
+        elif answer != "close":
+            return _no_answer("nothing was posted on PR #%d and it was not closed" % number, rerun)
     outbox = os.path.join(grants.store_dir(), "outbox")
     os.makedirs(outbox, exist_ok=True)
     fd, body_path = tempfile.mkstemp(prefix="reject-%d-" % number, suffix=".md", dir=outbox)
@@ -1124,7 +1167,7 @@ SUBCOMMANDS: dict = {
     "prs": (cmd_prs, "open PRs: head, CI, the issues each one closes"),
     "issues": (cmd_issues, "open issues and the PR that closes each"),
     "verdict": (cmd_verdict, "[pr|branch]  MERGEABLE or BLOCKED, with reasons"),
-    "merge": (cmd_merge, "<pr> [--merge|--rebase]  merge it if MERGEABLE"),
-    "reject": (cmd_reject, "<pr> [--close] [note]  post the reasons on the PR"),
+    "merge": (cmd_merge, "<pr> [--merge|--rebase] [--yes]  if MERGEABLE, after you confirm"),
+    "reject": (cmd_reject, "<pr> [--close [--yes]] [note]  post the reasons on the PR"),
     "status": (cmd_status, "[path]  this repository: CLEAN or BLOCKED, with reasons"),
 }
