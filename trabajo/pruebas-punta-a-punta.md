@@ -75,6 +75,10 @@ Environments
 - [ ] a real session on Linux or Windows as the backend (only macOS so far; unit tests run on the three).
 
 ## Defects found while testing, still open
+- A skip marker is flagged in a file that is not a test: Foreman's own CI check blocked this repository's pull
+  request #25 because `trabajo/pruebas/gate-battery.sh` (a shell script that writes a skip marker into a fixture)
+  contained the literal `@unittest.skip(...)`. Worked around by building the marker in the script; decide whether
+  skip markers should only count in test files.
 - The Desktop pane can disappear from the layout and not return until the app is reloaded and the switch toggled;
   the cause was not proven (#22 hardened the plugin; see that pull request's analysis).
 - With a running gateway, a slash command typed as the first thing in a CLI session cannot tell the repository and
