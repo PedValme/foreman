@@ -27,3 +27,14 @@ config_schema:
     default: ""
     label: "Reviewer provider"
     description: "Hermes provider id for reviewer_model when it is not your active provider (e.g. openrouter). Needs the llm.provider_override capability."
+  notify:
+    type: str
+    choices: ["off", "on"]
+    default: "off"
+    label: "Notifications"
+    description: "Off: nothing is sent anywhere. On: a message to notify_to when a pull request waits for you, sent with `hermes send` through Hermes's terminal tool and your own bot. Same as /foreman notify on|off."
+  notify_to:
+    type: str
+    default: ""
+    label: "Notify where"
+    description: "A hermes send target: telegram (your Telegram home channel, set with /sethome), telegram:<chat id>, discord:#channel, slack:<channel id>."

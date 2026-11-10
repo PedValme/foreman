@@ -295,6 +295,87 @@ def recent() -> list:
         return list(_load_store()["recent"])
 
 
+def remember(root: str) -> None:
+    """Add ``root`` to the recently used repositories without pinning it for any session."""
+    with _lock:
+        data = _load_store()
+        data["recent"] = [root] + [r for r in data["recent"] if os.path.normcase(r) != os.path.normcase(root)]
+        data["recent"] = data["recent"][:MAX_RECENT]
+        _save_store(data)
+
+
+# ─── --repo: a repository named in the command, only one Foreman already knows ───
+
+_REPO_NAME = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_REMOTE_NAME = re.compile(r"[:/]([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?$")
+
+
+def remote_names(root: str) -> set:
+    """``owner/name`` (lower case) of every remote of ``root``, read from the local git config: no network."""
+    out = Repo(root, budget=5).try_git("remote", "-v") or ""
+    names = set()
+    for line in out.splitlines():
+        parts = line.split()
+        m = _REMOTE_NAME.search(parts[1]) if len(parts) >= 2 else None
+        if m:
+            names.add(m.group(1).lower())
+    return names
+
+
+def take_repo_option(words: list) -> tuple:
+    """(the words without ``--repo X``, X or None, a usage problem or None)."""
+    out, value, i = [], None, 0
+    while i < len(words):
+        w = words[i]
+        if w == "--repo":
+            if i + 1 >= len(words):
+                return words, None, "Usage: --repo <owner/name or path of a repository you used with /foreman use>"
+            value, i = words[i + 1], i + 2
+            continue
+        if w.startswith("--repo="):
+            value, i = w[len("--repo="):], i + 1
+            continue
+        out.append(w)
+        i += 1
+    return out, value, None
+
+
+def known_repository(value: str) -> tuple:
+    """(root, None) for ``--repo <value>``, else (None, the reason). Only a repository Foreman already knows counts:
+    one of the recently used ones (``/foreman use`` adds it), matched by its path or by its remote's
+    ``owner/name``. A command that arrives from a chat can never point Foreman at any other directory."""
+    value = (value or "").strip().strip('"').strip("'")
+    known = []
+    for r in recent():
+        if os.path.isdir(r):
+            root = detector.find_repo(r)
+            if root:
+                known.append(os.path.normpath(root))
+    refuse = ("Foreman: `--repo %s` is not a repository Foreman knows on this machine. Pin it once with "
+              "`/foreman use <path>` where it lives; then `--repo` can name it." % trim(value, 60))
+    if not value:
+        return None, refuse
+    path = os.path.expanduser(value)
+    if os.path.isabs(path):
+        root = detector.find_repo(path) if os.path.isdir(path) else None
+        if root and any(os.path.normcase(os.path.normpath(root)) == os.path.normcase(k) for k in known):
+            return os.path.normpath(root), None
+        return None, refuse
+    if not _REPO_NAME.match(value):
+        return None, refuse
+    matches = [k for k in known if value.lower() in remote_names(k)]
+    if len(matches) > 1:
+        return None, ("Foreman: several known repositories have the remote %s; use `--repo <path>` instead: %s"
+                      % (value, ", ".join(matches)))
+    return (matches[0], None) if matches else (None, refuse)
+
+
+def _repo_suffix(args: str) -> str:
+    """`` --repo X`` when the command named one, so a hint Foreman prints can be run as it is."""
+    _words, value, _problem = take_repo_option((args or "").split())
+    return " --repo %s" % value if value else ""
+
+
 def resolve(keys: tuple = (), platform: Optional[str] = None) -> tuple:
     """(repository root, how it was chosen): the repository pinned for this session, else the first of Foreman's
     usual candidates (gate.locate) inside a repository; (None, None) when nothing qualifies."""
@@ -874,10 +955,18 @@ def _pr_number(token: str) -> Optional[int]:
 
 
 def cmd_verdict(args: str = "", keys: tuple = (), platform: Optional[str] = None) -> str:
-    root, how = resolve(keys, platform)
+    words, repo_arg, problem = take_repo_option(args.split())
+    if problem:
+        return problem
+    if repo_arg is not None:
+        root, problem = known_repository(repo_arg)
+        if problem:
+            return problem
+    else:
+        root, how = resolve(keys, platform)
     if not root:
         return _no_repository()
-    target = args.strip().split()[0] if args.strip() else ""
+    target = words[0] if words else ""
     number = _pr_number(target)
     if number is not None:
         reason = _local_has_github(root)
@@ -959,12 +1048,19 @@ def _outcome_text(state: str, detail: str, what: str, command: str) -> str:
 
 def _prepare_pr(args: str, keys: tuple, platform: Optional[str], verb: str) -> tuple:
     """(root, number, words without the number, problem text)."""
-    words = args.split()
+    words, repo_arg, problem = take_repo_option(args.split())
+    if problem:
+        return None, None, words, problem
     numbers = [w for w in words if _pr_number(w) is not None]
     if not numbers:
-        return None, None, words, "Usage: /foreman %s <pr-number>%s" % (
+        return None, None, words, "Usage: /foreman %s <pr-number>%s [--repo <owner/name>]" % (
             verb, " [--merge|--rebase] [--yes]" if verb == "merge" else " [--close [--yes]] [note]")
-    root, how = resolve(keys, platform)
+    if repo_arg is not None:
+        root, problem = known_repository(repo_arg)
+        if problem:
+            return None, None, words, problem
+    else:
+        root, how = resolve(keys, platform)
     if not root:
         return None, None, words, _no_repository()
     reason = _local_has_github(root)
@@ -1004,7 +1100,7 @@ def cmd_merge(args: str = "", keys: tuple = (), platform: Optional[str] = None) 
     methods = [w for w in rest if w in ("--squash", "--merge", "--rebase")]
     unknown = [w for w in rest if w not in ("--squash", "--merge", "--rebase")]
     if unknown or len(methods) > 1:
-        return "Usage: /foreman merge <pr-number> [--merge|--rebase] [--yes]   (default: squash)"
+        return "Usage: /foreman merge <pr-number> [--merge|--rebase] [--yes] [--repo <owner/name>]   (default: squash)"
     method = methods[0][2:] if methods else "squash"
     v = pr_verdict(root, number)
     if v.get("error"):
@@ -1025,7 +1121,8 @@ def cmd_merge(args: str = "", keys: tuple = (), platform: Optional[str] = None) 
     # --match-head-commit: GitHub merges exactly the commit Foreman inspected, or nothing.
     command = "gh pr merge %d --%s --delete-branch --match-head-commit %s" % (number, method, v["head_oid"])
     if not yes:
-        rerun = "/foreman merge %d%s --yes" % (number, "" if method == "squash" else " --" + method)
+        rerun = "/foreman merge %d%s%s --yes" % (number, "" if method == "squash" else " --" + method,
+                                                 _repo_suffix(args))
         ci = v.get("ci") or "CI unknown"
         warn = "" if ci == "CI passing" else "WARNING: %s.\n" % ci
         question = "%sMerge PR #%d (%s, %s) into %s?\n%s\nCloses: %s · %s" % (
@@ -1142,7 +1239,7 @@ def cmd_reject(args: str = "", keys: tuple = (), platform: Optional[str] = None)
     name = v.get("name") or ""
     body = reject_comment(v, note, saved_review(name, number))
     if close and not yes:  # closing is the part that needs a confirmation; it is asked before anything is posted
-        rerun = "/foreman reject %d --close --yes%s" % (number, " " + note if note else "")
+        rerun = "/foreman reject %d%s --close --yes%s" % (number, _repo_suffix(args), " " + note if note else "")
         answer = _confirm("Post the comment and close PR #%d?\n%s" % (number, trim(v.get("title"), WIDTH)),
                           [("close", "Post and close", "comment, then `gh pr close %d`" % number),
                            ("comment", "Post only", "comment, leave it open"),
@@ -1203,8 +1300,8 @@ SUBCOMMANDS: dict = {
     "use": (cmd_use, "[path|n]  pin the repository for this session"),
     "prs": (cmd_prs, "open PRs: head, CI, the issues each one closes"),
     "issues": (cmd_issues, "open issues and the PR that closes each"),
-    "verdict": (cmd_verdict, "[pr|branch]  CLEAN or BLOCKED, with reasons"),
-    "merge": (cmd_merge, "<pr> [--merge|--rebase] [--yes]  if CLEAN and ready, after you confirm"),
-    "reject": (cmd_reject, "<pr> [--close [--yes]] [note]  post the reasons on the PR"),
+    "verdict": (cmd_verdict, "[pr|branch] [--repo r]  CLEAN or BLOCKED, with reasons"),
+    "merge": (cmd_merge, "<pr> [--merge|--rebase] [--yes] [--repo r]  if CLEAN and ready, after you confirm"),
+    "reject": (cmd_reject, "<pr> [--close [--yes]] [--repo r] [note]  post the reasons on the PR"),
     "status": (cmd_status, "[path]  this repository: CLEAN or BLOCKED, with reasons"),
 }
