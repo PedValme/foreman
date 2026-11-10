@@ -81,3 +81,9 @@ the owner confirms it. An option the owner turned down is a decision too and sta
   la web es correcta».
 - 2026-11-10 · The catalog pull request is opened when the work is finished, not before · Pedro: «El PR primero
   terminemos».
+- 2026-11-10 · Nothing is recorded or submitted until every function of the plugin has been tried end to end and
+  works; the video comes only after that, and it shows the whole line that was redesigned, not one small function ·
+  Pedro: «por que cojones estamos a punto de grabar el video si todavía no hemos terminado de probar punta a punta
+  el plugin y TODAS, entendido?? TODAS! Sus funcionalidades??????? […] primero resolvamos lo que falta y luego
+  cuanto tengamos todo como reloj suizo RECIEN grabamos», and earlier: «solo estamos mostrando una función mínima
+  del plugin y no todo lo que rediseñamos ayer en la tarde».
