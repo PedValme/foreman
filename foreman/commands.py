@@ -14,7 +14,7 @@ from typing import Callable, Optional
 
 from . import detector, grants, review
 from .detector import MARKER, GitError, Repo
-from .gate import HOW, NO_REPOSITORY_HERE, RECORDED, locate
+from .gate import HOW, NO_REPOSITORY_HERE, RECORDED, cwd_candidates, locate
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +38,12 @@ def verdict(path: Optional[str] = None, *keys: str, platform: Optional[str] = No
         where, how = os.path.expanduser(path), "given"
     else:
         where, how = locate(*keys, platform=platform)
+        if where is None and path:
+            # A relative path needs a trustworthy base, never the process directory as such: in a gateway that is
+            # Hermes's install root. The candidates already include it on a local surface, where it means something.
+            where, how = next(iter(cwd_candidates(*keys, platform=platform)), (None, None))
         if where is None:
-            if not path:
-                return {"verdict": "NO_REPOSITORY", "path": None, "chosen_from": None, "message": NO_REPOSITORY_HERE}
-            where = os.getcwd()
+            return {"verdict": "NO_REPOSITORY", "path": None, "chosen_from": None, "message": NO_REPOSITORY_HERE}
         if path:
             where, how = os.path.normpath(os.path.join(where, path)), "given"
     root = detector.find_repo(where)

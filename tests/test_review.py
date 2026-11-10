@@ -148,7 +148,33 @@ class EvidenceCheck(ReviewCase):
         self.assertEqual(r["verdict"], "PASS WITH NOTES")  # an unverifiable claim never blocks, never passes clean
         text = review.format_review(r)
         self.assertIn("Dropped: 4 finding(s)", text)
-        self.assertIn("none of its blocking findings could be verified", text)
+        self.assertIn("The model asked to block without verifiable evidence", text)
+
+    def test_a_block_verdict_without_findings_is_not_a_pass(self):
+        self.loosen_test()
+        r = self.review(FakeCtx(FakeLlm(parsed=answer([], verdict="BLOCK"))))
+        self.assertEqual(r["findings"], [])
+        self.assertEqual(r["dropped_unverified"], 0)
+        self.assertEqual(r["verdict"], "PASS WITH NOTES")
+        self.assertIn("The model asked to block without verifiable evidence", review.format_review(r))
+
+    def test_the_record_names_the_commit_it_reviewed(self):
+        self.loosen_test()
+        r = self.review(FakeCtx(FakeLlm(parsed=answer())))
+        head = self.git("rev-parse", "HEAD").strip()
+        self.assertEqual(r["head"], head)
+        saved = review.load(r["slug"], r["target"]["kind"], r["target"]["ref"], r["repo"])
+        self.assertEqual(saved["head"], head)
+        self.git("checkout", "-q", "-b", "other")
+        self.write("tests/test_calc.py", "def test_add():\n    assert True\n")
+        self.commit("other")
+        branch = self.review(FakeCtx(FakeLlm(parsed=answer())), args="other")
+        self.assertEqual(branch["head"], self.git("rev-parse", "other").strip())
+        old = dict(saved)
+        old.pop("head")
+        with open(r["saved"], "w", encoding="utf-8") as fh:
+            json.dump(old, fh)
+        self.assertEqual(review.load(r["slug"], r["target"]["kind"], r["target"]["ref"], r["repo"])["head"], "")
 
     def test_whitespace_and_prefix_tolerant(self):
         files = review.split_diff("diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1,2 +1,2 @@\n"

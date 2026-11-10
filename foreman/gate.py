@@ -1,7 +1,8 @@
 """Foreman's hooks inside the Hermes agent loop.
 
 ``pre_tool_call`` runs on every tool call, so it returns at once for anything that is not a git commit or push, a
-``gh pr create`` or ``gh pr merge``, or a write to a test file. It never raises: a callback that raises or times out
+``gh pr create`` or ``gh pr merge`` (always refused: merging is the user's ``/foreman merge``), a ``git config
+core.hooksPath``, or a write to a test file. It never raises: a callback that raises or times out
 makes Hermes fail closed for that tool. ``pre_verify`` runs when the agent is about to finish a turn in which it
 edited code, and asks it to undo what would rig the check.
 """
@@ -30,8 +31,16 @@ HOOK_BUDGET_SECONDS = 18.0
 MAX_LISTED = 15
 _MAX_READ_BYTES = 2 * 1024 * 1024
 
-# Cheap prefilter: the command must mention git or gh together with a gated verb.
-_QUICK = re.compile(r"\b(?:git|gh)(?:\.exe)?\b[\s\S]*\b(?:commit|push|pr)\b", re.I)
+# Cheap prefilter: the command must mention git or gh and a gated verb (or ``config``, for core.hooksPath). Two
+# independent linear searches: one regex spanning both words with ``[\s\S]*`` between them is quadratic on a long
+# command that names git many times without a verb (a 260 KB heredoc took 98 s, past Hermes's hook timeout).
+_QUICK_TOOL = re.compile(r"\b(?:git|gh)(?:\.exe)?\b", re.I)
+_QUICK_VERB = re.compile(r"\b(?:commit|push|pr|config)\b", re.I)
+_REDIR = re.compile(r">>?(?:&(?:\d+|-))?")
+
+
+def _quick(command: str) -> bool:
+    return bool(_QUICK_TOOL.search(command)) and bool(_QUICK_VERB.search(command))
 _SHELLS = {"bash", "sh", "zsh", "dash", "ksh", "fish"}
 _POWERSHELLS = {"powershell", "pwsh"}
 _WRAPPERS = {"sudo", "env", "command", "time", "nohup", "exec", "builtin", "nice"}
@@ -41,7 +50,8 @@ _SAFE_PROGS = {"echo"}
 _SAFE_GIT = {"add", "status", "diff", "log", "show", "branch"}
 _SAFE_GH = {"view", "list", "status", "checks", "diff"}
 
-_LABELS = {"commit": "`git commit`", "push": "`git push`", "pr-create": "`gh pr create`", "pr-merge": "`gh pr merge`"}
+_LABELS = {"commit": "`git commit`", "push": "`git push`", "pr-create": "`gh pr create`", "pr-merge": "`gh pr merge`",
+           "hooks-config": "`git config core.hooksPath`"}
 
 
 # ─── Command parsing (best effort) ───────────────────────────────────────────
@@ -89,7 +99,7 @@ def tokenize(command: str) -> list:
             flush()
         elif c == ">":
             flush()
-            m = re.match(r">>?(?:&(?:\d+|-))?", command[i:])
+            m = _REDIR.match(command, i)  # never command[i:]: a copy per ">" is quadratic
             tokens.append(_Redir(m.group(0)))
             i += len(m.group(0))
             continue
@@ -161,7 +171,10 @@ def parse_actions(command: str, cwd: str, located: bool = False, _depth: int = 0
     for words in segments(command):
         original = list(words)
         words, writes_file = _strip_redirs(words)
-        while words and (re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", words[0]) or _prog(words[0]) in _WRAPPERS):
+        env_bypass = ""
+        while words and (_ASSIGNMENT.match(words[0]) or _prog(words[0]) in _WRAPPERS):
+            if _ASSIGNMENT.match(words[0]) and not env_bypass:
+                env_bypass = _hook_env_bypass(words[0])
             words = words[1:]
         if not words:
             continue
@@ -199,6 +212,8 @@ def parse_actions(command: str, cwd: str, located: bool = False, _depth: int = 0
         act, sub = None, ""
         if prog == "git":
             act, sub = _parse_git(words[1:], cwd, state["git_add"], located)
+            if act is not None and env_bypass and act.kind in ("commit", "push"):
+                act.hooks_bypassed, act.bypass_flag = True, act.bypass_flag or env_bypass
             if act is None:
                 if sub == "add" and not writes_file:
                     state["git_add"] = True
@@ -280,7 +295,44 @@ def _parse_git(words: list, cwd: str, git_add_seen: bool, located: bool):
     if sub == "push":
         flag = "--no-verify" if "--no-verify" in rest else ""
         return Action("push", cwd, rest, hooks_bypassed or bool(flag), git_add_seen, bypass or flag, located), sub
+    if sub == "config" and _sets_hooks_path(rest):
+        return Action("hooks-config", cwd, rest, True, False, "git config core.hooksPath", located), sub
     return None, sub
+
+
+_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+# Environment assignments that switch off a hook manager's hooks for the command they precede: husky (HUSKY=0,
+# v4's HUSKY_SKIP_HOOKS), pre-commit (SKIP=<hook ids>, PRE_COMMIT_ALLOW_NO_CONFIG), lefthook (LEFTHOOK=0,
+# LEFTHOOK_EXCLUDE), overcommit (OVERCOMMIT_DISABLE) and git's own config through the environment.
+_HOOK_ENV_ANY = {"HUSKY_SKIP_HOOKS", "SKIP", "PRE_COMMIT_ALLOW_NO_CONFIG", "LEFTHOOK_EXCLUDE", "OVERCOMMIT_DISABLE"}
+_HOOK_ENV_OFF = {"HUSKY", "LEFTHOOK"}  # these switch hooks off only with a false value
+
+
+def _hook_env_bypass(assignment: str) -> str:
+    """``NAME=value`` when that assignment switches off git hooks, else ""."""
+    name, _, value = assignment.partition("=")
+    upper = name.upper()
+    if upper in _HOOK_ENV_ANY and value.strip():
+        return assignment
+    if upper in _HOOK_ENV_OFF and value.strip().lower() in ("0", "false", "no", "off"):
+        return assignment
+    if (upper == "GIT_CONFIG_PARAMETERS" or upper.startswith("GIT_CONFIG_KEY_")) and "hookspath" in value.lower():
+        return assignment
+    return ""
+
+
+def _sets_hooks_path(args: list) -> bool:
+    """``git config`` arguments that set or unset ``core.hooksPath`` (reading it is fine)."""
+    key = next((i for i, a in enumerate(args) if a.lower() == "core.hookspath"), None)
+    if key is None:
+        return False
+    before = [a.lower() for a in args[:key]]
+    if any(a in ("set", "unset") or a.startswith(("--unset", "--add", "--replace-all", "--rename-section",
+                                                  "--remove-section")) for a in before):
+        return True
+    if any(a in ("get", "--get", "--get-all", "--get-regexp", "-l", "--list", "list") for a in before):
+        return False
+    return any(not a.startswith("-") for a in args[key + 1:])  # a value after the key
 
 
 # git commit options that take the next word as their value
@@ -379,6 +431,15 @@ NO_REPOSITORY_HERE = ("Foreman could not tell which repository you mean from her
                       "terminal in this session.")
 
 
+_CTX = None
+
+
+def bind(ctx) -> None:
+    """Keep the plugin context Hermes passed to ``register()``; hooks reach ``ctx.session_cwd()`` through it."""
+    global _CTX
+    _CTX = ctx
+
+
 def _session_env(name: str) -> str:
     try:
         from gateway.session_context import get_session_env
@@ -436,8 +497,8 @@ def cwd_candidates(*keys: str, platform: Optional[str] = None) -> list:
 
     1. the directory the terminal tool recorded for this session's keys (it follows ``cd`` between calls) — a Hermes
        internal, read guarded;
-    2. this session's working directory: the caller's directory, which the gateway binds for a local session's
-       slash command (``agent.runtime_cwd.scoped_session_cwd()``);
+    2. this session's working directory, from the public ``ctx.session_cwd()`` (the context kept by ``bind``): a
+       local session's workspace, or the profile's terminal directory for a chat;
     3. on local surfaces (CLI, TUI), the process directory;
     4. Hermes's documented ``resolve_agent_cwd()`` (the configured terminal directory).
     Anything inside a Hermes home is dropped unless the terminal recorded it."""
@@ -451,11 +512,12 @@ def cwd_candidates(*keys: str, platform: Optional[str] = None) -> list:
             out.append((get_session_cwd(key), RECORDED))
     except Exception:
         pass
-    try:
-        from agent.runtime_cwd import scoped_session_cwd  # the session's declared cwd, empty when none is bound
-        out.append((scoped_session_cwd(), SESSION))
-    except Exception:
-        pass
+    session = getattr(_CTX, "session_cwd", None)  # public plugin API; "" when the session has none
+    if callable(session):
+        try:
+            out.append((session(), SESSION))
+        except Exception:
+            pass
     process = None
     try:
         process = os.getcwd()
@@ -513,6 +575,7 @@ class Outcome:
     errors: list = field(default_factory=list)
     repos: list = field(default_factory=list)
     sarif_notes: list = field(default_factory=list)  # non-blocking SARIF notes, shown in one compact line
+    state: list = field(default_factory=list)  # what an approval covers besides the message (the commits pushed)
 
 
 def _commit_message(act: Action) -> str:
@@ -578,8 +641,8 @@ def evaluate(act: Action, deadline: Optional[float] = None) -> Outcome:
             report = _push_report(repo, act, out)
         elif act.kind == "pr-create":
             report = _pr_create_report(repo, act)
-        else:
-            report = _pr_merge_report(repo, act, out)
+        else:  # gate_command blocks gh pr merge and git config core.hooksPath before this
+            report = None
         if report is not None:
             out.findings += report.findings
             out.errors += report.errors  # a report .foreman.json names that cannot be read: not a clean pass
@@ -594,6 +657,11 @@ def _push_report(repo: Repo, act: Action, out: Outcome):
     if any(a in ("--all", "--mirror", "--branches") for a in act.args) or len(positional) > 2:
         out.notes.append("`git push %s` publishes more than one branch; Foreman inspects only the current one. Push "
                          "each branch on its own, or approve if you have checked them." % " ".join(act.args))
+        # An "always" answer must cover only what was there when the person approved: every commit it would push.
+        refs = "refs/" if "--mirror" in act.args else "refs/heads/"
+        out.state.append(repo.try_git("for-each-ref", "--format=%(refname) %(objectname)", refs) or "")
+        out.state += ["%s %s" % (r, repo.try_git("rev-parse", "--verify", "-q", r.lstrip("+").split(":", 1)[0]
+                                                 + "^{commit}") or "?") for r in positional[1:]]
     head = "HEAD"
     if len(positional) >= 2:
         src = positional[1].lstrip("+").split(":", 1)[0]
@@ -620,19 +688,23 @@ def _pr_create_report(repo: Repo, act: Action):
     return detector.scan_branch(repo)
 
 
-def _pr_merge_report(repo: Repo, act: Action, out: Outcome):
-    """A merge always goes to a person (it is never automatic); Foreman adds what it found on the branch."""
-    target = next((a for a in act.args if not a.startswith("-")), None)
-    branch = repo.branch()
-    if target and target != branch:
-        out.notes.append("`gh pr merge %s`: Foreman cannot inspect that pull request from the local checkout; "
-                         "review it (or check it out and run `/foreman status`) before approving." % target)
-        return None
-    report = detector.scan_branch(repo)
-    if not report.blockers:
-        out.notes.append("Merging %s into %s: Foreman found no blockers on the branch; a merge always needs a person."
-                         % (branch, report.base_label or "its base"))
-    return report
+_MERGE_VALUE_OPTS = {"-t", "--subject", "-b", "--body", "-F", "--body-file", "-A", "--author-email",
+                     "--match-head-commit"}
+
+
+def _merge_target(args: list) -> str:
+    """The pull request number ``gh pr merge`` names (a number, ``#n`` or a pull request URL), or ``<n>``."""
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in _MERGE_VALUE_OPTS:
+            i += 2
+            continue
+        if not a.startswith("-"):
+            m = re.match(r"^#?(\d+)$", a) or re.match(r"^https?://[^/\s]+/[^/\s]+/[^/\s]+/pull/(\d+)", a)
+            return m.group(1) if m else "<n>"
+        i += 1
+    return "<n>"
 
 
 # ─── Directives ──────────────────────────────────────────────────────────────
@@ -665,9 +737,11 @@ _ASK_USER = ("Marked findings need the user: ask them to review each one and run
              "agree. You cannot allow it yourself.")
 
 
-def _approve(message: str) -> dict:
-    # A rule key per message: "always allow" then covers this exact case, never every terminal call.
-    key = "foreman:" + hashlib.sha256(message.encode("utf-8")).hexdigest()[:16]
+def _approve(message: str, state: Iterable[str] = ()) -> dict:
+    # A rule key per message and state: "always allow" then covers this exact case (for a push of several branches,
+    # these exact commits), never every terminal call.
+    raw = "\0".join([message, *state])
+    key = "foreman:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
     return {"action": "approve", "message": message, "rule_key": key}
 
 
@@ -706,7 +780,7 @@ def directive(what: str, outcome: Outcome) -> Optional[dict]:
     parts += outcome.notes
     if parts and outcome.sarif_notes:
         parts.append(detector.compact_notes(outcome.sarif_notes))
-    return _approve("\n\n".join(parts)) if parts else None
+    return _approve("\n\n".join(parts), outcome.state) if parts else None
 
 
 # ─── pre_tool_call ───────────────────────────────────────────────────────────
@@ -720,9 +794,9 @@ def on_pre_tool_call(tool_name: str = "", args=None, task_id: str = "", **kwargs
         command = args.get("command")
         if not isinstance(command, str):
             return None
-        if _names_store(command) and not _OWN_COMMENT.match(command.strip()):
+        if _names_store(command):
             return _store_guard()
-        if not _QUICK.search(command):
+        if not _quick(command):
             return None
         try:
             workdir = args.get("workdir") if isinstance(args.get("workdir"), str) else None
@@ -743,8 +817,9 @@ def on_pre_tool_call(tool_name: str = "", args=None, task_id: str = "", **kwargs
 STORE_FILES = (grants.GRANTS_FILE, "foreman-board.json")
 STORE_DIRS = ("outbox", "reviews")
 _STORE_DIR_TEXT = re.compile(r"(?:plugin-data/foreman|\.foreman)/(?:%s)(?:/|$|[\s\"'])" % "|".join(STORE_DIRS))
-# What /foreman reject itself runs: gh reading the comment file it wrote.
-_OWN_COMMENT = re.compile(r'^gh pr comment \d+ --body-file "[^"$`]*/outbox/reject-\d+-[A-Za-z0-9_]+\.md"$')
+# /foreman reject's own `gh pr comment --body-file <outbox file>` needs no exemption: it runs through
+# ctx.dispatch_tool -> tools.registry.dispatch, which calls the tool's handler without firing pre_tool_call (that
+# hook fires in model_tools, on the agent's own tool calls only).
 
 
 def _store_dirs_text() -> list:
@@ -782,8 +857,17 @@ def _store_guard() -> dict:
 
 def gate_command(command: str, workdir: Optional[str] = None, task_id: str = "") -> Optional[dict]:
     deadline = time.monotonic() + HOOK_BUDGET_SECONDS
-    if not parse_actions(command, os.sep):  # nothing gated: skip resolving the session directory
+    first = parse_actions(command, os.sep)
+    if not first:  # nothing gated: skip resolving the session directory
         return None
+    merge = next((a for a in first if a.kind == "pr-merge"), None)
+    if merge is not None:  # never `approve`: "always", a session answer or YOLO would let later merges through
+        return {"action": "block", "message": "Merging is the user's decision. Ask them to run `/foreman merge %s`."
+                % _merge_target(merge.args)}
+    if any(a.kind == "hooks-config" for a in first):
+        return {"action": "block", "message": "Foreman blocked `git config core.hooksPath`: it switches the "
+                "repository's git hooks off or elsewhere. Leave the hooks in place; if a hook fails, fix what it "
+                "reports. If the repository's setup needs it, ask the user to run it."}
     if workdir and os.path.isabs(os.path.expanduser(workdir)):
         cwd = os.path.normpath(os.path.expanduser(workdir))  # explicit: never replaced by another candidate
     else:
@@ -812,6 +896,7 @@ def gate_command(command: str, workdir: Optional[str] = None, task_id: str = "")
         total.reasons += o.reasons
         total.notes += o.notes
         total.sarif_notes += o.sarif_notes
+        total.state += o.state
         total.repos += o.repos
         total.errors += ["%s in %s: %s" % (_LABELS[act.kind], act.cwd, err) for err in o.errors]
     return directive(what, total)
@@ -886,21 +971,79 @@ def _v4a_files(patch: str) -> list:
     return [(p, "\n".join(r), "\n".join(a), new) for p, r, a, new in files]
 
 
+_SARIF_SUFFIXES = (".sarif", ".sarif.json")
+_MAX_WALK_UP = 64
+# (repository root, HEAD) -> the report paths the base's .foreman.json names. Resolving the base costs several git
+# calls (remote, symbolic-ref, merge-base, show); HEAD changing (a commit, a checkout) drops the entry.
+_SARIF_CACHE: dict = {}
+_SARIF_CACHE_MAX = 32
+
+
+def _config_mentions_sarif(directory: str) -> Optional[bool]:
+    """Walking up from ``directory`` to the first directory that holds ``.git``: True when a ``.foreman.json`` on
+    the way mentions ``sarif``, False when none does, None when no ``.git`` was found. No git calls."""
+    d = os.path.abspath(directory)
+    for _ in range(_MAX_WALK_UP):
+        config = os.path.join(d, detector.CONFIG_FILE)
+        if os.path.isfile(config) and "sarif" in _read(config).lower():
+            return True
+        if os.path.exists(os.path.join(d, ".git")):
+            return False
+        parent = os.path.dirname(d)
+        if parent == d:
+            return None
+        d = parent
+    return None
+
+
+def _may_be_sarif_target(paths: list, task_id: str = "") -> bool:
+    """A git-free prefilter: a written path can be a gated SARIF report only when it looks like one, or when the
+    repository around it has a .foreman.json that mentions ``sarif``. A relative path is tried against every
+    candidate session directory (found without git); when none settles it, the full check runs."""
+    if any(p.lower().endswith(_SARIF_SUFFIXES) for p in paths):
+        return True
+    bases = None
+    for path in paths:
+        full = os.path.expanduser(path)
+        if os.path.isabs(full):
+            dirs = [os.path.dirname(full)]
+        else:
+            if bases is None:
+                bases = [d for d, _how in cwd_candidates(task_id)]
+            dirs = [os.path.dirname(os.path.join(b, full)) for b in bases]
+            if not dirs:
+                return True  # no candidate directory to look in without git: run the full check
+        if any(_config_mentions_sarif(d) for d in dirs):  # None (no .git above it): not in a repository
+            return True
+    return False
+
+
+def _sarif_reports(repo: Repo) -> list:
+    head = repo.try_git("rev-parse", "--verify", "-q", "HEAD^{commit}") or ""
+    key = (os.path.normcase(repo.root), head)
+    if key not in _SARIF_CACHE:
+        if len(_SARIF_CACHE) >= _SARIF_CACHE_MAX:
+            _SARIF_CACHE.clear()
+        _SARIF_CACHE[key] = detector.sarif_paths_at_base(repo)
+    return _SARIF_CACHE[key]
+
+
 def _sarif_write_guard(paths: list, task_id: str = "") -> Optional[dict]:
     """Block a write to a report that the base's .foreman.json names under ``sarif``: emptying it (``runs: []`` is a
     valid clean scan) or adding a suppression would rig the gate. The scanner regenerates it; the agent does not edit
     it."""
+    paths = [p for p in paths if isinstance(p, str) and p]
+    if not paths or not _may_be_sarif_target(paths, task_id):
+        return None  # the common case: no git at all on an ordinary write
     deadline = time.monotonic() + HOOK_BUDGET_SECONDS
     cwd = None
     for path in paths:
-        if not isinstance(path, str) or not path:
-            continue
         cwd = cwd or session_cwd(task_id, deadline=deadline) or os.getcwd()
         root, rel = _repo_relative(_resolve(cwd, path))
         if not root:
             continue
         key = posixpath.normpath(rel)
-        reports = detector.sarif_paths_at_base(Repo(root, deadline=deadline))
+        reports = _sarif_reports(Repo(root, deadline=deadline))
         fold = (lambda p: p.lower()) if os.name == "nt" else (lambda p: p)
         if any(fold(r) == fold(key) for r in reports):
             return {"action": "block", "message": "Foreman blocked this write: %s is a SARIF report that %s names as a "

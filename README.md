@@ -14,12 +14,14 @@ command text.
 | `test-skipped` | skip, only, ignore and expected-failure markers added to tests (see *Known limits* for the list) |
 | `test-deleted` | a test code file deleted (snapshots, JSON and fixtures do not count) |
 | `test-moved` | a test code file renamed out of the tests |
-| `check-changed` | a change to a file the check command runs, or to `.foreman.json`; for `package.json`, only its `scripts` |
+| `check-changed` | with no configuration: a change to the `test`/`check`/`lint` scripts of a `package.json`, the `test`/`check`/`ci` targets of a `Makefile`, or `commands` in `[testenv*]` of `tox.ini` (one that exists at the base); plus, with `.foreman.json`, any change to a file its check command runs, or to `.foreman.json` itself |
 | `check-weakened` | `\|\| true` or `continue-on-error: true` in `.github/workflows/*` next to a test runner; `--deselect` / `--ignore=` pointing at tests in pytest config; `testPathIgnorePatterns` / `exclude` in jest or vitest config (not in coverage settings) |
 | `secret`, `env-file` | real credential formats (cloud, GitHub, model APIs, Slack, Stripe, private keys…) everywhere; key/value guesses (passwords in code, config, shell, YAML, `.env`) outside the tests, and in tests only long values mixing upper case, lower case and digits |
 | `secret-history` | a secret in any commit of what is pushed, even if a later commit removed it |
 
-It also refuses `git commit --no-verify` / `-n`, `git push --no-verify` and `git -c core.hooksPath=…`.
+It also refuses `git commit --no-verify` / `-n`, `git push --no-verify`, `git -c core.hooksPath=…`, hook-disabling
+variables in front of a commit or push (`HUSKY=0`, `SKIP=…`, `PRE_COMMIT_ALLOW_NO_CONFIG=1`, `LEFTHOOK=0`, …) and
+`git config core.hooksPath …` (set or unset).
 
 ## When it acts
 
@@ -51,11 +53,12 @@ mode, YOLO included.
 
 ### When Foreman asks for approval instead
 
-`gh pr merge` run by the agent always asks a person (a merge is never automatic; `/foreman merge` asks you in its
-own way, see *Use*). So do a push of several branches (`--all`,
-`--mirror`, several refspecs) and any command Foreman could not inspect (git error, its 18 s time budget, a working
-directory that does not exist on the Hermes host). These use Hermes's approval prompt: **in YOLO mode or with
-approvals off, Hermes lets them through without a person.**
+`gh pr merge` run by the agent is always refused: merging is your decision, through `/foreman merge` (see *Use*);
+no approval answer or YOLO lets the agent merge. A push of several branches (`--all`, `--mirror`, several refspecs)
+and any command Foreman could not inspect (git error, its 18 s time budget, a working directory that does not exist
+on the Hermes host) ask a person instead, with Hermes's approval prompt; an "always" answer for a push of several
+branches covers only those exact commits. **In YOLO mode or with approvals off, Hermes lets these through without a
+person.**
 
 ## Use
 
@@ -141,22 +144,13 @@ verdict and says what is missing; `/foreman verdict <branch>` still works.
 
 The agent can call the `foreman_check` tool for the same verdict as JSON.
 
-`check-changed` needs to know the check command. It comes from `.foreman.json` **at the base** (the branch's
-merge-base, or `HEAD` for a commit), so a change cannot redefine its own check. Without that file, `check-changed`
-is off (in CI, pass `--check`):
+`check-changed` protects the usual test entry points with no configuration (see the table). To protect the exact
+check you run, name it in `.foreman.json` **at the base** (the branch's merge-base, or `HEAD` for a commit), so a
+change cannot redefine its own check (in CI you can also pass `--check`):
 
 ```json
 {"check": "bash scripts/check.sh"}
 ```
-
-### CI mode
-
-```
-python -m foreman.detector <base> [<head>] [--check "<command>"] [--json]
-```
-
-Exits 1 when there is a blocker. Findings marked `foreman:allow` do not fail the run; they are listed for the
-reviewer.
 
 ## Use a SARIF report as a source
 
@@ -293,8 +287,9 @@ Requires Hermes Agent >= 0.22.6 and git on the PATH.
 
 ## What it does on your machine (disclosure)
 
-- **Runs `git`** as a subprocess (read-only commands: `diff`, `log`, `ls-files`, `rev-parse`, `merge-base`,
-  `cat-file`, `show`, `status`, `hash-object --stdin`) in the repository the agent works in. It never commits,
+- **Runs `git`** as a subprocess (read-only commands: `diff`, `diff-tree`, `log`, `ls-files`, `rev-parse`,
+  `rev-list`, `merge-base`, `cat-file`, `show`, `status`, `remote`, `symbolic-ref`, `for-each-ref`, `hash-object`
+  without `-w`) in the repository the agent works in. It never commits,
   pushes, merges or changes your repository.
 - **Reads files** of that repository: untracked files (up to 500, 512 KB each) to look for secrets and markers, the
   file a `write_file` would replace, `package.json` to compare its scripts, and a commit message file given with
@@ -316,7 +311,8 @@ Requires Hermes Agent >= 0.22.6 and git on the PATH.
   never by the agent. `gh pr merge --delete-branch` also deletes the pull
   request's branch on GitHub and the local branch, switching to the base branch if it was checked out.
 - Reads the working directory the terminal tool recorded for the session, through a Hermes internal
-  (`tools.terminal_tool.get_session_cwd`), guarded, with Hermes's documented `resolve_agent_cwd()` as fallback.
+  (`tools.terminal_tool.get_session_cwd`), guarded, then the public `ctx.session_cwd()`, with Hermes's documented
+  `resolve_agent_cwd()` as fallback.
   `/foreman use` also lists the directories directly inside the session's directories to find git repositories.
 - **Model calls only when you run `/foreman review`**: one call through Hermes (`ctx.llm`) with the diff, the
   title and the detector's findings; it spends tokens on your provider. For a pull request number it runs `gh pr
@@ -343,19 +339,30 @@ Requires Hermes Agent >= 0.22.6 and git on the PATH.
   `testPathIgnorePatterns` inside `package.json`.
 - Markers covered: pytest (`skip`, `xfail`, `skipif`), unittest (`skip*`, `expectedFailure`, `skipTest`),
   Jest/Vitest/Mocha/Jasmine (`.skip`, `.only`, `.concurrent`, `.each`, `.skipIf`, `xit`, `xtest`, `xdescribe`,
-  `fit`, `fdescribe`, `this.skip()`), Go (`t.Skip*`), Rust (`#[ignore]`), JUnit (`@Disabled`, `@Ignore`). A
-  conditional skip in a new test file is allowed; added to an existing test it is blocked.
-- Check protection covers the entry point named in `.foreman.json` (not everything it runs) and the narrow
-  `check-weakened` patterns above.
+  `fit`, `fdescribe`, `this.skip()`), Go (`t.Skip*`), Rust (`#[ignore]`), JUnit (`@Disabled`, `@Ignore`), and
+  `raise SkipTest` / `raise unittest.SkipTest`. A conditional skip in a new test file is allowed; added to an
+  existing test it is blocked. A test renamed so the runner stops collecting it (`def test_x` to `def _test_x`,
+  `func TestX` to `func _TestX`, `it("x", …)` to another callee in the same file) counts as skipped.
+- Check protection covers the entry point named in `.foreman.json` (not everything it runs), the default entry
+  points in the table, and the narrow `check-weakened` patterns above. A `noxfile.py`, or a test command in
+  `pyproject.toml` or `setup.cfg`, is not protected without `.foreman.json`.
+- Hook-disabling variables are seen only in front of the gated command: `export HUSKY=0` run in an earlier terminal
+  call, a variable set in the shell's profile, or a hook manager's own config file switching hooks off, is not.
+- A test switched off by renaming its class (`class TestX` to `class _TestX`), by a `return` at its top, or by a
+  decorator Foreman does not know is not detected; `/foreman review` may see it.
+- In a shared chat, any member Hermes authorises can type `/foreman merge … --yes`; Foreman does not check who typed
+  it — restrict who can talk to your Hermes.
 - Secrets are found by pattern: real credential formats reliably, key/value guesses with false negatives (and none
   inside test files).
 - Repository resolution: for `/foreman` subcommands, a repository pinned with `/foreman use` comes first. Then
   Foreman tries, in order, the directory the terminal tool recorded for the session, the
-  session's working directory that Hermes binds for a local session's command (`scoped_session_cwd()`), then (in
+  session's working directory from Hermes's public `ctx.session_cwd()`, then (in
   the CLI and TUI only) the process directory, then Hermes's `resolve_agent_cwd()`, and uses the first one inside a
   git repository. Hermes's own data is never picked unless the terminal recorded it: nothing inside a Hermes home
-  (the profile home or the root that holds the profiles), and no repository whose root contains one. The first two
-  are read from Hermes internals, guarded: if Hermes moves them, Foreman falls back to the others. When nothing
+  (the profile home or the root that holds the profiles), and no repository whose root contains one. The first is
+  read from a Hermes internal, guarded: if Hermes moves it, Foreman falls back to the others. A relative path is
+  resolved against the same candidates, never against the gateway's own directory; with none, Foreman says it cannot
+  tell. When nothing
   qualifies, `/foreman status` says it cannot tell instead of guessing, and a gated command that does not say where
   it runs is blocked with a `workdir` hint. `/foreman status` names how it chose when it did not use the terminal's
   directory. An explicit path, `workdir`, `cd` or `git -C` always wins. When a command does not say where

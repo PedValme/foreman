@@ -29,7 +29,8 @@ other commands to show; nothing reads it to grant, merge or unblock anything. It
 
     {"schema": 1, "repo": "<local root>", "slug": "<owner>/<repo>",
      "target": {"kind": "pr" | "branch" | "worktree", "ref": "<pr number or branch>", "title": "...",
-                "base": "<base label or null>"},
+                "base": "<base label or null>", "head": "<commit reviewed>"},
+     "head": "<the commit reviewed, 40 hex; empty when unknown; a worktree review also read uncommitted changes>",
      "time": "<UTC ISO 8601>",
      "verdict": "BLOCKED" | "PASS WITH NOTES" | "PASS" | "COULD NOT RUN" | "NOTHING TO REVIEW",
      "model": {"provider": "...", "model": "...", "source": "setting" | "fallback" | "default",
@@ -118,12 +119,45 @@ class FileDiff:
 def _header_paths(line: str) -> tuple:
     """``diff --git a/x b/y`` → (x, y); only a fallback when no ---/+++ or rename lines follow."""
     rest = line[len("diff --git "):]
-    m = re.match(r'^(".*?"|\S+) (".*?"|\S+)$', rest)
-    if not m:
+    pair = _two_header_words(rest)
+    if pair is None:
         half = rest.split(" b/", 1)
         return (half[0][2:] if half[0].startswith("a/") else half[0]), (half[1] if len(half) > 1 else "")
-    a, b = detector.unquote_path(m.group(1)), detector.unquote_path(m.group(2))
+    a, b = detector.unquote_path(pair[0]), detector.unquote_path(pair[1])
     return (a[2:] if a.startswith("a/") else a), (b[2:] if b.startswith("b/") else b)
+
+
+def _two_header_words(rest: str) -> Optional[tuple]:
+    """``"x" "y"``, ``"x" y``, ``x "y"`` or ``x y`` (each a C-quoted string or a word with no space), in linear
+    time; None otherwise. A lazy regex for this is quadratic on a name full of quotes."""
+    if rest.startswith('"'):
+        end = _closing_quote(rest, 0)
+        if end < 0 or rest[end + 1:end + 2] != " ":
+            return None
+        first, second = rest[:end + 1], rest[end + 2:]
+    else:
+        first, space, second = rest.partition(" ")
+        if not first or not space:
+            return None
+    if second.startswith('"'):
+        if _closing_quote(second, 0) != len(second) - 1:
+            return None
+    elif not second or any(c.isspace() for c in second):
+        return None
+    return first, second
+
+
+def _closing_quote(text: str, start: int) -> int:
+    """Index of the quote that closes the C-quoted string opening at ``start``, or -1."""
+    i = start + 1
+    while i < len(text):
+        if text[i] == "\\":
+            i += 2
+            continue
+        if text[i] == '"':
+            return i
+        i += 1
+    return -1
 
 
 def split_diff(diff: str) -> list:
@@ -601,13 +635,15 @@ class Target:
     det_blocked: bool = False
     det_note: str = ""
     omitted: dict = field(default_factory=dict)          # changed files not in ``diff``: path -> reason
+    head: str = ""                                       # the commit reviewed (40 hex), "" when unknown
 
 
 def slug_of(repo: Repo) -> str:
-    url = repo.try_git("remote", "get-url", "origin") or ""
-    m = re.search(r"[:/]([^/:\s]+)/([^/\s]+?)(?:\.git)?/?$", url)
-    if m:
-        return "%s/%s" % (m.group(1), m.group(2))
+    url = (repo.try_git("remote", "get-url", "origin") or "").rstrip("/")
+    url = url[:-4] if url.endswith(".git") else url
+    parts = re.split(r"[:/]", url)  # split, not a lazy search from every ":" or "/" (quadratic on a long value)
+    if len(parts) >= 3 and parts[-2] and parts[-1] and not re.search(r"\s", parts[-2] + parts[-1]):
+        return "%s/%s" % (parts[-2], parts[-1])
     return "local/%s" % os.path.basename(repo.root.rstrip("/\\"))
 
 
@@ -653,7 +689,7 @@ def local_target(root: str, branch: Optional[str], keys: tuple, platform: Option
         subjects = _subjects(repo, "%s..HEAD" % base) if base else ""
         title = "branch %s%s" % (name, ": " + subjects if subjects else "")
         return Target("worktree", name, title, root, slug, diff, label, det, v["verdict"] == "BLOCKED",
-                      omitted=omitted)
+                      omitted=omitted, head=(repo.try_git("rev-parse", "HEAD") or "") if has_head else "")
     if branch.startswith("-"):
         raise GitError("`%s` is not a branch name" % branch)
     head = None
@@ -671,7 +707,7 @@ def local_target(root: str, branch: Optional[str], keys: tuple, platform: Option
     det, blocked = _det_dicts(report.findings)
     subjects = _subjects(repo, "%s..%s" % (base, head))
     return Target("branch", branch, "branch %s%s" % (branch, ": " + subjects if subjects else ""), root, slug, diff,
-                  label, det, blocked)
+                  label, det, blocked, head=repo.try_git("rev-parse", "%s^{commit}" % head) or "")
 
 
 def _gh(args: list, cwd: str) -> str:
@@ -697,7 +733,7 @@ def _gh(args: list, cwd: str) -> str:
 
 
 def pr_target(root: str, number: str) -> Target:
-    meta_raw = _gh(["pr", "view", number, "--json", "number,title,url,baseRefName,headRefName"], root)
+    meta_raw = _gh(["pr", "view", number, "--json", "number,title,url,baseRefName,headRefName,headRefOid"], root)
     try:
         meta = json.loads(meta_raw)
     except ValueError:
@@ -716,7 +752,8 @@ def pr_target(root: str, number: str) -> Target:
                                                meta.get("headRefName", "?"), meta.get("baseRefName", "?"))
     return Target("pr", str(meta.get("number", number)), title, root, slug, diff, meta.get("baseRefName"), det,
                   blocked, "for a pull request diff the `check-changed` and `secret-history` rules are not evaluated; "
-                           "`/foreman status` on the checked-out branch covers them")
+                           "`/foreman status` on the checked-out branch covers them",
+                  head=str(meta.get("headRefOid") or ""))
 
 
 # ─── Store ───────────────────────────────────────────────────────────────────
@@ -761,13 +798,16 @@ def save(record: dict) -> Optional[str]:
 
 
 def load(slug: str, kind: str, ref: str, root: str = "") -> Optional[dict]:
-    """The last stored review for that repository and target, or None."""
+    """The last stored review for that repository and target, or None. Its ``head`` is the commit it read ("" in a
+    record written before Foreman stored it): a caller compares it with the current head and refuses a stale one."""
     try:
         with open(review_path(slug, kind, ref, root), "r", encoding="utf-8") as fh:
             data = json.load(fh)
     except (OSError, ValueError):
         return None
-    return data if isinstance(data, dict) and data.get("schema") == SCHEMA_VERSION else None
+    if not (isinstance(data, dict) and data.get("schema") == SCHEMA_VERSION):
+        return None
+    return dict(data, head=data.get("head") if isinstance(data.get("head"), str) else "")
 
 
 # ─── The review ──────────────────────────────────────────────────────────────
@@ -805,7 +845,9 @@ def run_review(args: str = "", keys: tuple = (), platform: Optional[str] = None,
     b.skipped.update(target.omitted)
     b.total += len(target.omitted)
     record ={"schema": SCHEMA_VERSION, "repo": root, "slug": target.slug,
-              "target": {"kind": target.kind, "ref": target.ref, "title": target.title, "base": target.base},
+              "target": {"kind": target.kind, "ref": target.ref, "title": target.title, "base": target.base,
+                         "head": target.head},
+              "head": target.head,
               "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
               "deterministic": {"blocked": target.det_blocked, "findings": target.deterministic,
                                 "note": target.det_note},
@@ -846,8 +888,9 @@ def run_review(args: str = "", keys: tuple = (), platform: Optional[str] = None,
                   model_verdict=str(parsed.get("verdict", ""))[:20])
     if target.det_blocked or any(f["severity"] == "BLOCKING" for f in kept):
         record["verdict"] = "BLOCKED"
-    elif kept or dropped or not b.complete:
-        # An unverifiable finding is not a pass either: the diff may have steered the model into bad quotes.
+    elif kept or dropped or not b.complete or record["model_verdict"].strip().upper() == "BLOCK":
+        # An unverifiable finding is not a pass either: the diff may have steered the model into bad quotes. Nor is
+        # a model that asked to block and gave nothing that can be checked.
         record["verdict"] = "PASS WITH NOTES"
     else:
         record["verdict"] = "PASS"
@@ -903,8 +946,9 @@ def format_review(r: dict) -> str:
         if r.get("summary"):
             lines.append("Model summary: %s" % r["summary"])
         mv = r.get("model_verdict", "")
-        if mv == "BLOCK" and r["verdict"] != "BLOCKED":
-            lines.append("The model's own verdict was BLOCK, but none of its blocking findings could be verified.")
+        if mv.strip().upper() == "BLOCK" and r["verdict"] != "BLOCKED":
+            lines.append("The model asked to block without verifiable evidence (its own verdict was BLOCK, and no "
+                         "BLOCKING finding quoted the diff).")
     lines.append(ADVISORY)
     if r.get("saved"):
         lines.append("Saved: %s" % r["saved"])
