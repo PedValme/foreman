@@ -16,13 +16,14 @@ requires_hermes: ">=0.22.6"
 version: "0.1.0"
 docs_url: https://github.com/PedValme/foreman/blob/main/plugin/README.md
 # Pinned to the same commit as sha: replace the placeholder in every URL too. These are the Desktop panel's code
-# rendered in a browser preview with scripted data (the README captions say so), until real-app captures replace them.
+# The first image is a real capture of the panel in Hermes Desktop v0.23.0 (demo repository data); the rest are the
+# panel's code rendered in a browser preview with scripted data (the README captions say so).
 screenshots:
-  - "https://raw.githubusercontent.com/PedValme/foreman/REPLACE_WITH_40_CHAR_COMMIT_SHA_OF_PEDVALME_FOREMAN/docs/screenshots/panel-waiting-for-owner-light.png"
+  - "https://raw.githubusercontent.com/PedValme/foreman/REPLACE_WITH_40_CHAR_COMMIT_SHA_OF_PEDVALME_FOREMAN/docs/screenshots/panel-real-app.png"
   - "https://raw.githubusercontent.com/PedValme/foreman/REPLACE_WITH_40_CHAR_COMMIT_SHA_OF_PEDVALME_FOREMAN/docs/screenshots/panel-several-changes-light.png"
-  - "https://raw.githubusercontent.com/PedValme/foreman/REPLACE_WITH_40_CHAR_COMMIT_SHA_OF_PEDVALME_FOREMAN/docs/screenshots/panel-blocked-at-gate-light.png"
   - "https://raw.githubusercontent.com/PedValme/foreman/REPLACE_WITH_40_CHAR_COMMIT_SHA_OF_PEDVALME_FOREMAN/docs/screenshots/panel-bounced-dark.png"
   - "https://raw.githubusercontent.com/PedValme/foreman/REPLACE_WITH_40_CHAR_COMMIT_SHA_OF_PEDVALME_FOREMAN/docs/screenshots/panel-narrow-360-dark.png"
+  - "https://raw.githubusercontent.com/PedValme/foreman/REPLACE_WITH_40_CHAR_COMMIT_SHA_OF_PEDVALME_FOREMAN/docs/screenshots/panel-waiting-for-owner-light.png"
 platforms: []
 capabilities:
   provides_tools:
