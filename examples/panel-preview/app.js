@@ -16,7 +16,7 @@
   var params = new URLSearchParams(location.hash.slice(1))
 
   var state = {
-    scenario: Math.min(5, Math.max(1, parseInt(params.get('s') || '3', 10) || 3)),
+    scenario: Math.min(SC.length, Math.max(1, parseInt(params.get('s') || '3', 10) || 3)),
     step: parseInt(params.get('step') || '0', 10) || 0,
     theme: params.get('theme') === 'dark' ? 'dark' : 'light',
     width: params.get('w') || '400',
@@ -44,6 +44,7 @@
   function backend (path) {
     if (path !== '/pipeline') return Promise.reject(new Error('404 Not Found'))
     if (current && current.off) return Promise.reject(new Error('404 Not Found: plugin foreman is not enabled in this profile'))
+    if (current && current.down) return Promise.reject(new Error('502 Bad Gateway: the backend is switching profiles'))
     return new Promise(function (resolve) { setTimeout(function () { resolve(JSON.parse(JSON.stringify(current))) }, 40) })
   }
 

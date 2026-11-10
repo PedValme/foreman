@@ -522,7 +522,9 @@ def record_review(ref: Ref, record: dict, then: str = "ready", bounce: bool = Fa
                 if bounce and key not in counted:
                     counted.append(key)
                     item["bounces"] = int(item.get("bounces") or 0) + 1
-                item["stage"] = "bounced"
+                # "bounced" means the finish loop sent the change back to the agent; a review that fails anywhere
+                # else (a merge, a review a person asked for) leaves it at the review, which reads "Review failed"
+                item["stage"] = "bounced" if bounce and int(item.get("bounces") or 0) > 0 else "review"
                 limit = bounce and item["bounces"] >= item["max_bounces"]
                 _event(item, "Review sent it back (%s)%s" % (detail, ", bounce %d/%d" % (
                     item["bounces"], item["max_bounces"]) if bounce else ""), at)
@@ -609,7 +611,8 @@ def record_needs_owner(ref: Ref, summary: str) -> None:
         item = _ensure(data, ref, at)
         if item["stage"] in DONE:
             return
-        item["stage"] = "bounced"
+        if int(item.get("bounces") or 0) > 0:  # never "bounced 0/3": with no bounce the stage stays where it is
+            item["stage"] = "bounced"
         _event(item, summary, at)
         _queue(meta, item, "needs_owner", "%s: %s" % (_label(item), summary))
     _mutate(apply)
@@ -764,8 +767,16 @@ def _short_detail(detail: str) -> str:
     return ", ".join(parts)
 
 
+def shown_stage(item: dict) -> str:
+    """The stage as the views name it. A state file written before a merge-time review stopped counting as a bounce
+    can hold ``bounced`` with no bounce; that is a failed review, as the Desktop panel shows it."""
+    stage = str(item.get("stage") or "?")
+    return "review" if stage == "bounced" and not int(item.get("bounces") or 0) else stage
+
+
 def line(item: dict) -> str:
-    """One line: ``gate ok > review FAIL (2 blocking) > bounced 1/3 > owner - > merge -``."""
+    """One line: ``gate ok > review FAIL (2 blocking) > bounced 1/3 > owner - > merge -``; the bounce part only when
+    the change went back to the agent at least once."""
     parts = []
     for name in ("gate", "review"):
         s = stage_of(item, name)
@@ -775,7 +786,8 @@ def line(item: dict) -> str:
             word = s["detail"].split(":")[0]
         extra = _short_detail(s.get("detail") or "") if s.get("status") == "fail" else ""
         parts.append("%s %s%s" % (name, word, " (%s)" % extra if extra else ""))
-    parts.append("bounced %d/%d" % (int(item.get("bounces") or 0), int(item.get("max_bounces") or 0)))
+    if int(item.get("bounces") or 0) > 0:
+        parts.append("bounced %d/%d" % (int(item.get("bounces") or 0), int(item.get("max_bounces") or 0)))
     owner = stage_of(item, "owner")
     word = "waiting" if item.get("stage") == "awaiting_owner" and owner.get("status") == "pending" else \
         _WORDS["owner"].get(owner.get("status"), "?")
@@ -808,7 +820,7 @@ def board_lines(slug: str, root: str, width: int = 78, limit: int = 6) -> list:
     for item in items[:limit]:
         t = item["target"]
         name = "#%s" % t.get("number") if t.get("kind") == "pr" else str(t.get("branch") or "?")
-        head = "  %s  %s" % (name, item.get("stage"))
+        head = "  %s  %s" % (name, shown_stage(item))
         out.append(head if len(head) <= width else head[:width - 3] + "...")
         text = "    " + line(item)
         out.append(text if len(text) <= width else text[:width - 3] + "...")
@@ -831,7 +843,7 @@ def format_item(item: dict, width: int = 78, events: int = 8) -> str:
         lines[0] += " (%s)" % t["branch"]
     if t.get("title"):
         lines.append("  " + _one_line(t["title"], width - 2))
-    lines.append("  stage: %s, head %s, updated %s UTC" % (item.get("stage"), (item.get("head") or "-")[:7],
+    lines.append("  stage: %s, head %s, updated %s UTC" % (shown_stage(item), (item.get("head") or "-")[:7],
                                                            _when(item.get("updated"))))
     lines.append("  " + line(item))
     for name_ in ("gate", "review", "owner", "merge"):

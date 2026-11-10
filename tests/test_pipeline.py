@@ -170,6 +170,23 @@ class Shape(PipelineCase):
         self.assertEqual(self.sent[-1]["kind"], "rejected")
         self.assertIn("Rejected and closed: tests rigged", item["events"][-1]["text"])
 
+    def test_a_failed_review_without_a_bounce_is_not_bounced(self):
+        ref = self.ref()
+        pipeline.record_gate(ref, "pass", "CLEAN", "Gate passed")
+        bad = {"verdict": "BLOCKED", "findings": [finding("BLOCKING", "a.py", "x")], "cache_key": "k1"}
+        pipeline.record_review(ref, bad)  # a review a person asked for, or the one a merge runs
+        item = pipeline.get(ref.id)
+        self.assertEqual((item["stage"], item["bounces"]), ("review", 0))
+        self.assertEqual(pipeline.line(item), "gate ok > review FAIL (1 blocking) > owner - > merge -")
+        pipeline.record_needs_owner(ref, "review budget used up (4 model calls)")
+        self.assertEqual(pipeline.get(ref.id)["stage"], "review")  # needing the owner is no bounce either
+        # a state file written before this change: "bounced" with no bounce reads as the failed review it was
+        legacy = dict(item, stage="bounced", bounces=0)
+        self.assertEqual(pipeline.shown_stage(legacy), "review")
+        self.assertNotIn("bounced", pipeline.line(legacy))
+        self.assertIn("stage: review,", pipeline.format_item(legacy))
+        self.assertEqual(pipeline.shown_stage(dict(item, stage="bounced", bounces=2)), "bounced")
+
     def test_notification_event_and_once_per_head(self):
         ref = self.ref()
         pipeline.record_gate(ref, "pass", "CLEAN")
@@ -432,7 +449,11 @@ class MergeWithReview(PipelineCase):
         self.assertEqual(ctx.dispatched, [])
         self.assertEqual(len(llm.calls), 1)
         item = pipeline.get("acme/widgets#pr:7")
-        self.assertEqual((item["stage"], pipeline.stage_of(item, "merge")["status"]), ("bounced", "refused"))
+        # a merge-time review that fails is a failed review, not a bounce back to the agent (no finish loop ran)
+        self.assertEqual((item["stage"], item["bounces"], pipeline.stage_of(item, "merge")["status"]),
+                         ("review", 0, "refused"))
+        self.assertNotIn("bounced", pipeline.line(item))
+        self.assertIn("review FAIL", pipeline.line(item))
         ctx, _out = self.merge(llm, "merge 7 --yes")  # asked again, same head: the stored review, no new call
         self.assertEqual(len(llm.calls), 1)
         self.assertEqual(ctx.dispatched, [])

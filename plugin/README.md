@@ -45,7 +45,7 @@ write -> gate -> second-model review -> bounce back to the agent -> you approve 
 session:
 
 ```
-gate ok > review FAIL (2 blocking) > bounced 0/3 > owner - > merge refused
+gate ok > review FAIL (2 blocking) > owner - > merge refused
 ```
 
 The optional Hermes Desktop panel shows the same line as cards:
@@ -78,7 +78,8 @@ board shows local branches only.
   interactive terminal. Without them the review runs on your active model and says so.
 - **Desktop panel (optional).** In Hermes Desktop open **Capabilities → Plugins**, find **Foreman** and switch on its
   **Desktop** column (a plugin's Desktop half ships switched off; click **Rescan** if the row does not show it). The
-  **Foreman** pane opens beside the chat; **Ctrl/⌘ K → Foreman: show the line** brings it back.
+  **Foreman** pane joins the right side as a tab; click the status-bar chip **Foreman · …** (or **Ctrl/⌘ K → Foreman:
+  show the line**) to bring it forward.
 
 ## Quick start (2 minutes)
 
@@ -283,7 +284,11 @@ One card per pull request or branch on the line **Gate → Review → Owner → 
 detail and the latest events; changes waiting for you come first. A status-bar chip says `Foreman · 2 waiting for
 you`. Its buttons only put a Foreman command into the chat: **Merge #6** sends `/foreman merge 6 --repo …` (which
 checks again and asks you), **Reject…** and **Review again…** put the command in the chat box for you to finish
-(never over text you are typing), and without a chat box the command is copied to the clipboard. It never runs `gh`
+(never over text you are typing). With no chat on screen (a page such as Capabilities open) **Merge** and **Show
+verdict** copy the command to the clipboard and say so; they never switch views, and a repeated click within a
+moment sends nothing twice. The chip brings the pane forward. When the pane is registered, Foreman also clears a
+remembered close of its pane (left, for example, by a layout the app assembled), so the pane comes back as a tab. If the gateway stops answering, the cards stay with a
+`reconnecting…` mark until it answers again. It never runs `gh`
 or merges by itself, and shows titles and events as plain text. It reads one read-only route,
 `GET /api/plugins/foreman/pipeline`, every 2 s while the pane is on screen, every 15 s otherwise, never while the
 window is hidden. To preview it without Hermes:

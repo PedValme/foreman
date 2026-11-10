@@ -1,6 +1,7 @@
 // Scripted snapshots for the preview, in the exact shape GET /api/plugins/foreman/pipeline returns (what
 // foreman/panel_api.py produces from pipeline.json). Each scenario is a list of steps; a step is a snapshot, or
-// { off: true } for a backend that answers 404 (Foreman not enabled for the profile).
+// { off: true } for a backend that answers 404 (Foreman not enabled for the profile), or { down: true } for one that
+// fails after answering (the panel keeps the last answer and says "reconnecting…").
 (function () {
   'use strict'
 
@@ -105,17 +106,29 @@
     ])
   }
 
+  // ── (6) what the real app did: a review that failed at merge time (no bounce), then the backend dropping ─────────
+  function realApp(step) {
+    if (step === 1) return { down: true } // a profile/connection switch or a gateway restart: the REST call fails
+    var failed = item({ repo: 'acme/app', number: 21, branch: 'feat/export', title: 'Export schedules as iCal', updated: 2,
+      stage: step === 2 ? 'bounced' : 'review', // step 3: a state file from before the fix, same reading
+      stages: [station('gate', 'pass', 'Clean: 3 files, 1 test added', 9), station('review', 'fail', '1 blocking: the export skips all-day events', 2, { model: REVIEWER }), station('owner', 'pending'), station('merge', 'refused', 'The review found blocking problems', 2)],
+      events: [[9, 'Gate passed'], [2, 'You asked to merge; the review found 1 blocking problem'], [2, 'Merge refused: the review found blocking problems']] })
+    return snap([failed, several().items[1], several().items[3]])
+  }
+
   window.__PREVIEW_SCENARIOS__ = [
     { id: 1, name: 'Empty', steps: [snap([], 'missing')] },
     { id: 2, name: 'Blocked at the gate', steps: [blocked()] },
     { id: 3, name: 'Gate → review → bounce → owner → merged', steps: [0, 1, 2, 3, 4, 5].map(story) },
     { id: 4, name: 'Several changes', steps: [several()] },
-    { id: 5, name: 'Long text, corrupt file, backend off', steps: [0, 1, 2].map(edges) }
+    { id: 5, name: 'Long text, corrupt file, backend off', steps: [0, 1, 2].map(edges) },
+    { id: 6, name: 'Failed review at merge, then reconnecting', steps: [0, 1, 2].map(realApp) }
   ]
   // Rebuilt on demand so relative times stay fresh.
   window.__PREVIEW_STEP__ = function (scenario, step) {
     if (scenario === 3) return story(step)
     if (scenario === 5) return edges(step)
+    if (scenario === 6) return realApp(step)
     return window.__PREVIEW_SCENARIOS__[scenario - 1].steps[step]
   }
 })()

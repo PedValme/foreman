@@ -35,7 +35,8 @@
     draft: atom(''),
     toasts: atom([]),
     paneVisible: atom(true),
-    busy: atom(false)
+    busy: atom(false),
+    undismissed: []          // pane ids the plugin asked the host to forget a Close for
   }
 
   function say(kind, text) { preview.chat.set(preview.chat.get().concat([{ kind: kind, text: text, at: Date.now() }]).slice(-8)) }
@@ -55,7 +56,11 @@
       setTimeout(function () { preview.toasts.set(preview.toasts.get().filter(function (x) { return x.id !== id })) }, 3500)
       return id
     },
-    paneVisibility: function () { return preview.paneVisible }
+    paneVisibility: function () { return preview.paneVisible },
+    // Desktop 0.23's reveal: fronts the pane and opens its side. Here it marks the pane visible and says so.
+    revealPane: function (id) { say('action', 'revealPane ' + id); preview.paneVisible.set(true) },
+    // Desktop 0.23's "forget a remembered Close" (no fronting). Recorded only, for the tests.
+    undismissPane: function (id) { preview.undismissed.push(id) }
   }
 
   M['@hermes/plugin-sdk'] = {

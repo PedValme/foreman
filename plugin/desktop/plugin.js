@@ -13,12 +13,18 @@
 // React text only, never as HTML. The buttons do one thing: put a Foreman slash command into the chat, exactly the
 // text a person would type (`/foreman merge 6`), and the command does the rest with its own checks and confirmation.
 // Nothing here calls gh, git or the network.
+//
+// Robustness: every host call is wrapped (a host that lacks a member or throws changes nothing here), both
+// contributions render inside their own error boundary (a bad snapshot shows a small "reload" card, never a throw into
+// the app), a failing REST call keeps the last answer on screen ("reconnecting…"), and nothing writes after dispose.
 import { atom, Button, host, PALETTE_AREA, PANES_AREA, STATUSBAR_AREAS, useValue } from '@hermes/plugin-sdk'
-import { useEffect, useRef, useState } from 'react'
+import { Component, useEffect, useRef, useState } from 'react'
 import { jsx, jsxs } from 'react/jsx-runtime'
 
 const ID = 'foreman'
 const PANE_ID = 'pane'
+const PANE_KEY = `${ID}:${PANE_ID}` // the contribution-scoped id the host knows the pane by
+const STYLE_ID = 'foreman-plugin-style'
 const EVENT = `plugin.${ID}.pipeline.updated`
 const POLL_VISIBLE_MS = 2000
 const POLL_BACKGROUND_MS = 15000
@@ -35,6 +41,18 @@ function h(type, props, ...children) {
   else if (kids.length > 1) p.children = kids
   return kids.length > 1 ? jsxs(type, p, key) : jsx(type, p, key)
 }
+
+// A host call that may be missing on this desktop build or may throw: the fallback instead.
+function safe(fn, fallback) {
+  try {
+    const v = fn()
+    return v === undefined ? fallback : v
+  } catch {
+    return fallback
+  }
+}
+
+const str = v => (typeof v === 'string' ? v : typeof v === 'number' && Number.isFinite(v) ? String(v) : '')
 
 // ─── the model: where a change stands ─────────────────────────────────────────────────────────────────────────────
 
@@ -111,9 +129,34 @@ function titleOf(item) {
   return t.title || t.branch || item.id
 }
 
+// The reader (dashboard/plugin_api.py) already validates every field; this keeps the panel from throwing on anything
+// that still slips through (a newer or hand-edited state file): strings stay strings, lists stay lists.
+// A review that failed with no bounce counted (a merge-time review, or a state file written before Foreman stopped
+// calling that a bounce) is not "bounced back": it reads as the failed review it is, at the Review station.
+function shapeOf(raw, i) {
+  const item = raw && typeof raw === 'object' ? raw : {}
+  const bounces = Number.isInteger(item.bounces) && item.bounces > 0 ? item.bounces : 0
+  const stage = item.stage === 'bounced' && !bounces ? 'review' : str(item.stage) || 'gate'
+  const t = item.target && typeof item.target === 'object' ? item.target : {}
+  return {
+    ...item,
+    id: str(item.id) || `item-${i}`,
+    repo: str(item.repo),
+    stage,
+    bounces,
+    updated: str(item.updated),
+    target: { ...t, title: str(t.title), branch: str(t.branch), url: str(t.url) || null },
+    stages: Array.isArray(item.stages) ? item.stages.filter(s => s && typeof s === 'object')
+      .map(s => ({ ...s, detail: str(s.detail), model: str(s.model) })) : [],
+    events: Array.isArray(item.events) ? item.events.filter(e => e && typeof e === 'object')
+      .map(e => ({ at: str(e.at), text: str(e.text) })) : []
+  }
+}
+
 function sortItems(items) {
   const rank = { owner: 0, blocked: 1, moving: 2, done: 3 }
   return items
+    .map(shapeOf)
     .map(item => {
       const st = stationsOf(item)
       const group = groupOf(item, st)
@@ -190,36 +233,48 @@ function actionsOf(item, st, group, oneRepo) {
   return out
 }
 
+function notify(message) {
+  safe(() => host.notify({ kind: 'info', title: 'Foreman', message }), null)
+}
+
+// Put the command where the person can send it, and never move them anywhere: host.composer answers only for a chat
+// box that is on screen (it never navigates), so when none is (a page such as Capabilities fills the main area) a
+// command that runs goes to the clipboard with a toast; a command to finish by hand goes into the chat box draft.
 async function sendCommand(ctx, action) {
-  const composer = host.composer
-  let ok = false
-  try {
-    if (action.mode === 'submit') {
-      ok = composer && typeof composer.submit === 'function' && composer.submit(null, action.command) === true
-    } else if (composer && typeof composer.setDraft === 'function') {
-      const draft = typeof composer.getDraft === 'function' ? await composer.getDraft(null) : ''
-      // Never overwrite what the person is typing.
-      if (!draft || !draft.trim()) {
-        ok = (await composer.setDraft(null, `${action.command} `)) === true
-        if (ok && typeof composer.focus === 'function') composer.focus(null)
-      }
+  const composer = safe(() => host.composer, null)
+  const call = async (name, ...args) => {
+    try {
+      return composer && typeof composer[name] === 'function' ? await composer[name](...args) : undefined
+    } catch {
+      return undefined
     }
-  } catch {
-    ok = false
   }
-  if (ok) return
+  // A second click on the same command within a moment is the same intent, not a second command.
+  const now = Date.now()
+  if (now - (recentClicks.get(action.command) || 0) < REPEAT_MS) return
+  recentClicks.set(action.command, now)
+  if (action.mode === 'submit') {
+    if ((await call('submit', null, action.command)) === true) return
+    // No chat box on screen. The draft door could land in a chat kept hidden behind the page, so the clipboard.
+  } else {
+    const draft = await call('getDraft', null)
+    // Never overwrite what the person is typing.
+    if (!(typeof draft === 'string' && draft.trim()) && (await call('setDraft', null, `${action.command} `)) === true) {
+      await call('focus', null)
+      return
+    }
+  }
   let copied = false
   try {
     copied = (await ctx.os?.writeClipboard?.(action.command)) === true
   } catch {
     copied = false
   }
-  host.notify?.({
-    kind: 'info',
-    title: 'Foreman',
-    message: copied ? `Copied ${action.command}. Paste it in the chat.` : `Type ${action.command} in the chat.`
-  })
+  notify(copied ? `No chat on screen: copied ${action.command}. Open a chat and paste it.` : `Type ${action.command} in a chat.`)
 }
+
+const REPEAT_MS = 1500
+const recentClicks = new Map()
 
 // ─── data: one store, one poller ──────────────────────────────────────────────────────────────────────────────────
 
@@ -229,26 +284,41 @@ function describeError(err) {
   return { kind: 'down', text }
 }
 
+// Is the pane on screen? host.paneVisibility is a memoized atom per pane id (safe to keep for the plugin's life); an
+// older desktop without it, or one that throws, counts as "on screen" so polling never stops.
+function paneAtom() {
+  return safe(() => (typeof host.paneVisibility === 'function' ? host.paneVisibility(PANE_KEY) : null), null)
+}
+
+function paneOnScreen(visible) {
+  return visible ? safe(() => visible.get() === true, true) : true
+}
+
 function startData(ctx, store) {
   let last = null
   let inflight = null
   let cancel = null
-  const visible = typeof host.paneVisibility === 'function' ? host.paneVisibility(`${ID}:${PANE_ID}`) : null
-  const paneOnScreen = () => (visible ? visible.get() === true : true)
+  // A poll can still be in flight when the plugin is disabled or reloaded: nothing may write or re-arm after that.
+  let disposed = false
+  const visible = paneAtom()
+  const put = value => { if (!disposed) store.set(value) }
 
   const refresh = () => {
     if (inflight) return inflight
     inflight = (async () => {
       try {
+        if (typeof ctx.rest !== 'function') throw new Error('not enabled: this desktop has no plugin REST')
         const snapshot = await ctx.rest('/pipeline')
         const key = JSON.stringify(snapshot)
         if (key !== last || store.get().phase !== 'ready' || store.get().error) {
           last = key
-          store.set({ phase: 'ready', snapshot: snapshot && Array.isArray(snapshot.items) ? snapshot : { items: [] }, error: null })
+          put({ phase: 'ready', snapshot: snapshot && Array.isArray(snapshot.items) ? snapshot : { items: [] }, error: null })
         }
       } catch (err) {
+        // A profile or connection switch, a gateway restart, a 401 while a grant is re-minted: keep the last answer
+        // on screen ("reconnecting…") and let the next poll recover.
         const prev = store.get()
-        store.set({ phase: prev.snapshot ? 'ready' : 'error', snapshot: prev.snapshot, error: describeError(err) })
+        put({ phase: prev.snapshot ? 'ready' : 'error', snapshot: prev.snapshot, error: describeError(err) })
       } finally {
         inflight = null
       }
@@ -256,49 +326,52 @@ function startData(ctx, store) {
     return inflight
   }
 
-  // A poll can still be in flight when the plugin is disabled or reloaded: nothing may re-arm after that.
-  let disposed = false
-  ctx.onDispose(() => { disposed = true; cancel?.() })
+  safe(() => ctx.onDispose(() => { disposed = true; safe(() => cancel?.(), null) }), null)
   const schedule = () => {
     if (disposed) return
-    cancel?.()
-    const ms = paneOnScreen() ? POLL_VISIBLE_MS : POLL_BACKGROUND_MS
-    cancel = ctx.setTimeout(tick, ms)
+    safe(() => cancel?.(), null)
+    const ms = paneOnScreen(visible) ? POLL_VISIBLE_MS : POLL_BACKGROUND_MS
+    cancel = safe(() => ctx.setTimeout(tick, ms), null)
   }
   const tick = async () => {
     if (disposed) return
     if (typeof document === 'undefined' || !document.hidden) await refresh()
     schedule()
   }
+  const wake = () => { if (!disposed) void refresh().then(schedule) }
 
-  ctx.onEvent(EVENT, () => void refresh())
-  ctx.onEvent('message.complete', () => void refresh())
+  safe(() => ctx.onEvent(EVENT, () => void refresh()), null)
+  safe(() => ctx.onEvent('message.complete', () => void refresh()), null)
   if (typeof document !== 'undefined') {
-    ctx.addEventListener(document, 'visibilitychange', () => {
-      if (!document.hidden) void refresh().then(schedule)
-    })
+    safe(() => ctx.addEventListener(document, 'visibilitychange', () => { if (!document.hidden) wake() }), null)
   }
   if (visible && typeof visible.listen === 'function') {
-    ctx.onDispose(visible.listen(on => { if (on) void refresh().then(schedule) }))
+    const stop = safe(() => visible.listen(on => { if (on) wake() }), null)
+    if (typeof stop === 'function') safe(() => ctx.onDispose(stop), null)
   }
   void tick()
   return refresh
 }
 
+// Bring the pane into view: host.revealPane (desktop 0.23+, the same reveal the app's own toggles use) fronts the
+// tab, opens its side, restores its zone and puts a closed pane back. It never toggles anything closed. On a desktop
+// without it, say where the pane is instead of guessing with a sidebar toggle (view.toggleRightSidebar is the file
+// browser's ⌘J and acts on whichever column sits outermost on the right, not on this pane).
+const WHERE = 'Open the right side (Ctrl+J, ⌘J on a Mac) and pick the Foreman tab; if its zone is folded, click the ' +
+  'rail. No tab? Capabilities → Plugins (Capacidades → Plugins), Foreman: turn its Desktop switch off and on.'
+
 function reveal(ctx) {
-  const visible = typeof host.paneVisibility === 'function' ? host.paneVisibility(`${ID}:${PANE_ID}`) : null
-  if (visible && visible.get() === true) return
-  const closed = () => host.notify?.({ kind: 'info', title: 'Foreman',
-    message: 'Open the Foreman tab on the right side. If it was closed, turn Foreman back on in Capabilities → Plugins, or use Reset layout.' })
-  const result = ctx.runAction?.('view.toggleRightSidebar')
-  if (!result || result.ok === false) return closed()
-  // A toggle: if it hid the right side instead of showing our pane, put it back and say where the pane is.
-  ctx.setTimeout(() => {
-    if (visible && visible.get() !== true) {
-      ctx.runAction?.('view.toggleRightSidebar')
-      closed()
-    }
-  }, 150)
+  const visible = paneAtom()
+  if (visible && paneOnScreen(visible)) return
+  const revealed = safe(() => {
+    if (typeof host.revealPane !== 'function') return false
+    host.revealPane(PANE_KEY)
+    return true
+  }, false)
+  if (!revealed) return notify(`Foreman’s pane is not on screen. ${WHERE}`)
+  safe(() => ctx.setTimeout(() => {
+    if (visible && !paneOnScreen(visible)) notify(`Foreman could not bring its pane forward. ${WHERE}`)
+  }, 300), null)
 }
 
 // ─── hooks ────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -444,7 +517,7 @@ function Actions({ ctx, item, st, group, oneRepo }) {
         onClick: () => void sendCommand(ctx, a)
       }, a.label)),
       url ? h(Button, { key: 'open', size: 'sm', variant: 'ghost', title: url, 'aria-label': `Open ${refOf(item)} in the browser`,
-        onClick: () => void ctx.os?.openExternal?.(url) }, 'Open ↗') : null),
+        onClick: () => void Promise.resolve(safe(() => ctx.os.openExternal(url), null)).catch(() => null) }, 'Open ↗') : null),
     hint ? h('p', { className: 'fm-hint' }, hint) : null)
 }
 
@@ -512,16 +585,16 @@ function Panel({ ctx, store, refresh }) {
   const state = useValue(store)
   const reduced = useReducedMotion()
   const now = useNow(30000)
-  const [doneOpen, setDoneOpen] = useState(() => ctx.storage?.get?.('doneOpen', false) === true)
+  const [doneOpen, setDoneOpen] = useState(() => safe(() => ctx.storage.get('doneOpen', false), false) === true)
   const toggleDone = () => {
     const next = !doneOpen
     setDoneOpen(next)
-    try { ctx.storage?.set?.('doneOpen', next) } catch { /* storage is a convenience */ }
+    safe(() => ctx.storage.set('doneOpen', next), null) // storage is a convenience
   }
   const items = state.snapshot && Array.isArray(state.snapshot.items) ? state.snapshot.items : []
   const rows = sortItems(items)
   const counts = countsOf(items)
-  const oneRepo = new Set(items.map(i => i.repo || '')).size <= 1
+  const oneRepo = new Set(rows.map(r => r.item.repo)).size <= 1
   let body
   if (state.phase === 'loading') body = h(Loading, null)
   else if (state.phase === 'error') body = h(Failure, { error: state.error, onRetry: () => void refresh() })
@@ -576,6 +649,38 @@ function Chip({ ctx, store }) {
   h('span', { className: 'fm-chip-dot', 'aria-hidden': true }),
   h('span', null, 'Foreman'),
   text ? h('span', { className: 'fm-chip-text' }, `· ${text}`) : null)
+}
+
+// The blast wall inside our own contributions: a render error in the panel or the chip shows a small card with a
+// Reload button (a fresh render from the current data) instead of reaching the host's boundary.
+class Guard extends Component {
+  constructor(props) {
+    super(props)
+    this.state = { failed: false }
+  }
+
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+
+  componentDidCatch(error) {
+    safe(() => console.warn('[foreman] the panel hit an error and shows its reload card', error), null)
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children
+    const reload = () => this.setState({ failed: false })
+    if (this.props.chip) {
+      return h('button', { type: 'button', className: 'fm-chip', 'data-tone': 'idle', onClick: reload,
+        title: 'Foreman hit an error. Click to reload.', 'aria-label': 'Foreman hit an error. Reload.' },
+      h('span', { className: 'fm-chip-dot', 'aria-hidden': true }), h('span', null, 'Foreman · reload'))
+    }
+    return h('div', { className: 'fm' },
+      h('div', { className: 'fm-empty', role: 'alert' },
+        h('p', { className: 'fm-empty-title' }, 'Foreman panel hit an error'),
+        h('p', { className: 'fm-empty-text' }, 'Nothing on the line changed; only this view failed to draw.'),
+        h('button', { type: 'button', className: 'fm-group-toggle', onClick: reload }, 'Reload')))
+  }
 }
 
 // ─── styles: theme variables only, so every theme and both modes repaint it ───────────────────────────────────────
@@ -702,14 +807,24 @@ export default {
   id: ID,
   name: 'Foreman',
   register(ctx) {
-    const style = document.createElement('style')
-    style.setAttribute('data-plugin', ID)
-    style.textContent = CSS
-    document.head.append(style)
-    ctx.onDispose(() => style.remove())
+    // Idempotent: a reload disposes the previous incarnation first, but a copy left by a module the host could not
+    // unload must not stack, so the one style element is found by its id and replaced.
+    // Nothing before registerMany may throw: a throw in register() makes the host roll back every contribution, the
+    // pane included, and a pane that is not registered is the one thing layout adoption cannot put back.
+    safe(() => {
+      if (typeof document === 'undefined') return
+      document.getElementById(STYLE_ID)?.remove()
+      const style = document.createElement('style')
+      style.id = STYLE_ID
+      style.setAttribute('data-plugin', ID)
+      style.textContent = CSS
+      document.head.append(style)
+      ctx.onDispose(() => style.remove())
+    }, null)
 
     const store = atom({ phase: 'loading', snapshot: null, error: null })
-    const refresh = startData(ctx, store)
+    let refreshNow = () => Promise.resolve()
+    const refresh = () => refreshNow()
 
     ctx.registerMany([
       {
@@ -717,13 +832,13 @@ export default {
         area: PANES_AREA,
         title: 'Foreman',
         data: { placement: 'right', width: '380px' },
-        render: () => jsx(Panel, { ctx, store, refresh })
+        render: () => jsx(Guard, { children: jsx(Panel, { ctx, store, refresh }) })
       },
       {
         id: 'chip',
         area: STATUSBAR_AREAS.right,
         order: 140,
-        render: () => jsx(Chip, { ctx, store })
+        render: () => jsx(Guard, { chip: true, children: jsx(Chip, { ctx, store }) })
       },
       {
         id: 'show',
@@ -731,5 +846,14 @@ export default {
         data: { id: 'foreman.show', label: 'Foreman: show the line', keywords: ['foreman', 'pipeline', 'gate', 'review', 'merge'], run: () => reveal(ctx) }
       }
     ])
+
+    // A remembered dismissal keeps adoption from ever placing the pane again (store.ts adoptContributedPanes skips
+    // dismissed ids). For a one-pane plugin the user's own Close turns the plugin off instead of dismissing, so a
+    // dismissal of this pane never comes from the user's tab ✕: forget it, so adoption puts the pane back where its
+    // placement says, without fronting it or opening a side (host.undismissPane, desktop 0.23).
+    safe(() => (typeof host.undismissPane === 'function' ? host.undismissPane(PANE_KEY) : null), null)
+
+    const run = safe(() => startData(ctx, store), null)
+    if (typeof run === 'function') refreshNow = run
   }
 }
