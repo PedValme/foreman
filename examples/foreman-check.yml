@@ -5,17 +5,20 @@
 # edit it, so a green result here does not depend on the agent.
 #
 # Exit codes of the detector: 0 = clean, 1 = at least one blocker, 2 = the run could not be done (not a repository,
-# git failed, or a --sarif file that cannot be read: CI must not pass silently).
+# git failed, or a SARIF report that cannot be read, whether given with --sarif or named in .foreman.json: CI must
+# not pass silently).
 #
-# Findings the author marked with `foreman:allow` (marker-only findings) are LISTED and exit 0 in CI: Foreman does
-# not wave anything through on its own, it hands those to a person. A human reviews them in the PR: read that list
-# in the log of this job before you merge.
+# Marker-only findings: a finding the author marked with `foreman:allow` is LISTED and exits 0 in CI, and when
+# GITHUB_ACTIONS is set (it is) each one is also shown as a `::warning` annotation on the pull request's files. A
+# human reviews them in the PR. If your policy is that nobody waves a finding through, add `--strict` below: marked
+# findings then count as blockers (exit 1).
 #
 # The check command (and with it `check-changed`) and the optional SARIF reports come from `.foreman.json` at the
 # PR's base, so the pull request cannot redefine them. You can also pass `--check "<command>"` below.
 #
 # On a pull_request event, actions/checkout checks out the merge of the PR into its base, so
-# `origin/<base> .. HEAD` is exactly what the PR changes.
+# `origin/<base> .. HEAD` is exactly what the PR changes. The base branch name goes through `env`, never straight
+# into the script, so a branch name cannot inject shell.
 
 name: foreman
 
@@ -30,11 +33,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      # Pin actions by full commit SHA (this is v4.2.2 / v5.6.0); update them on purpose, after reading the release.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0   # the detector reads the whole range, history included (a secret removed later still counts)
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.13"
 
@@ -48,12 +52,15 @@ jobs:
           tar -xzf "$RUNNER_TEMP/foreman.tar.gz" -C "$RUNNER_TEMP/foreman" --strip-components=1
 
       # Optional: run your scanner in an earlier step and write a SARIF report (for example results.sarif), then add
-      # `--sarif results.sarif` below. Foreman never runs a scanner itself; it only reads the file. A --sarif file
-      # that is missing or unreadable fails this job (exit 2).
+      # `--sarif results.sarif` below, or list it under "sarif" in .foreman.json. Foreman never runs a scanner itself;
+      # it only reads the file. By default only results in files the pull request touches (or new ones) block; use
+      # `--sarif-scope all` to let old findings block too.
 
       - name: Foreman
         env:
+          BASE: ${{ github.base_ref }}
           PYTHONPATH: ${{ runner.temp }}/foreman
-        run: python -m foreman.detector "origin/${{ github.base_ref }}" HEAD
-        # With a report:
-        #   run: python -m foreman.detector "origin/${{ github.base_ref }}" HEAD --sarif results.sarif --sarif-threshold error
+        run: python -m foreman.detector "origin/$BASE" HEAD
+        # Variants:
+        #   python -m foreman.detector "origin/$BASE" HEAD --strict
+        #   python -m foreman.detector "origin/$BASE" HEAD --sarif results.sarif --sarif-threshold error

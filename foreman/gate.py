@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import posixpath
 import re
 import time
 from collections import Counter
@@ -510,6 +511,7 @@ class Outcome:
     notes: list = field(default_factory=list)    # reasons a person must approve
     errors: list = field(default_factory=list)
     repos: list = field(default_factory=list)
+    sarif_notes: list = field(default_factory=list)  # non-blocking SARIF notes, shown in one compact line
 
 
 def _commit_message(act: Action) -> str:
@@ -579,6 +581,8 @@ def evaluate(act: Action, deadline: Optional[float] = None) -> Outcome:
             report = _pr_merge_report(repo, act, out)
         if report is not None:
             out.findings += report.findings
+            out.errors += report.errors  # a report .foreman.json names that cannot be read: not a clean pass
+            out.sarif_notes += report.notes
     except GitError as e:
         out.errors.append(str(e))
     return out
@@ -691,12 +695,16 @@ def directive(what: str, outcome: Outcome) -> Optional[dict]:
             parts.append(_list(blocking + waiting))
         if waiting:
             parts.append(_ASK_USER)
+        if outcome.sarif_notes:
+            parts.append(detector.compact_notes(outcome.sarif_notes))
         return {"action": "block", "message": "\n".join(parts)}
     parts = []
     if outcome.errors:
         parts.append("Foreman could not inspect %s: %s. Approve only if you have checked the change yourself."
-                     % (what, "; ".join(outcome.errors)))
+                     % (what, "; ".join(dict.fromkeys(outcome.errors))))
     parts += outcome.notes
+    if parts and outcome.sarif_notes:
+        parts.append(detector.compact_notes(outcome.sarif_notes))
     return _approve("\n\n".join(parts)) if parts else None
 
 
@@ -773,6 +781,7 @@ def gate_command(command: str, workdir: Optional[str] = None, task_id: str = "")
         total.findings += o.findings
         total.reasons += o.reasons
         total.notes += o.notes
+        total.sarif_notes += o.sarif_notes
         total.repos += o.repos
         total.errors += ["%s in %s: %s" % (_LABELS[act.kind], act.cwd, err) for err in o.errors]
     return directive(what, total)
@@ -847,10 +856,38 @@ def _v4a_files(patch: str) -> list:
     return [(p, "\n".join(r), "\n".join(a), new) for p, r, a, new in files]
 
 
+def _sarif_write_guard(paths: list, task_id: str = "") -> Optional[dict]:
+    """Block a write to a report that the base's .foreman.json names under ``sarif``: emptying it (``runs: []`` is a
+    valid clean scan) or adding a suppression would rig the gate. The scanner regenerates it; the agent does not edit
+    it."""
+    deadline = time.monotonic() + HOOK_BUDGET_SECONDS
+    cwd = None
+    for path in paths:
+        if not isinstance(path, str) or not path:
+            continue
+        cwd = cwd or session_cwd(task_id, deadline=deadline) or os.getcwd()
+        root, rel = _repo_relative(_resolve(cwd, path))
+        if not root:
+            continue
+        key = posixpath.normpath(rel)
+        reports = detector.sarif_paths_at_base(Repo(root, deadline=deadline))
+        fold = (lambda p: p.lower()) if os.name == "nt" else (lambda p: p)
+        if any(fold(r) == fold(key) for r in reports):
+            return {"action": "block", "message": "Foreman blocked this write: %s is a SARIF report that %s names as a "
+                    "gate. Run the scanner again to regenerate it; do not edit it." % (rel, detector.CONFIG_FILE)}
+    return None
+
+
 def gate_write(tool_name: str, args: dict, task_id: str = "") -> Optional[dict]:
     edits = []  # (path, old text or None to read it, new text or None to build it, new file or None to check)
     if _is_store_path(args.get("path")):
         return _store_guard()
+    targets = [args.get("path")]
+    if tool_name != "write_file" and isinstance(args.get("patch"), str):
+        targets += [p for p, _old, _new, _is_new in _v4a_files(args["patch"])]
+    guard = _sarif_write_guard(targets, task_id)
+    if guard:
+        return guard
     if tool_name == "write_file":
         path, content = args.get("path"), args.get("content")
         if isinstance(path, str) and isinstance(content, str) and detector.has_skip_marker(content):

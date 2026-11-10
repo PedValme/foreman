@@ -13,6 +13,9 @@ Severity of one result, first match wins:
 3. ``properties["security-severity"]`` on the rule;
 4. the result's ``level``; then the rule's ``defaultConfiguration.level``; then SARIF's default, ``warning``.
 
+Only results in files the change touches (or with ``baselineState`` new or updated) can block, unless the scope is
+``all``; results whose ``kind`` is present and not ``fail`` are ignored.
+
 Suppressed results (an accepted or status-less suppression) and results whose ``baselineState`` is ``absent`` never
 block and are not listed.
 
@@ -25,13 +28,15 @@ import json
 import os
 import posixpath
 import re
+import sys
 from dataclasses import dataclass, field
 from typing import Optional
 from urllib.parse import unquote
 
-from .detector import Finding, fingerprint
+from .detector import Finding, GitTimeout, fingerprint, _check_deadline
 
 MAX_BYTES = 20 * 1024 * 1024
+_DEADLINE_EVERY = 5000  # results between two looks at the clock
 MAX_NOTES = 25  # below-threshold results listed one by one; the rest are counted
 DEFAULT_THRESHOLD = 7.0
 NAMED_THRESHOLDS = {"error": 7.0, "warning": 4.0}
@@ -49,6 +54,7 @@ class SarifError(Exception):
 class SarifResult:
     blockers: list = field(default_factory=list)
     notes: list = field(default_factory=list)
+    errors: list = field(default_factory=list)  # (path, reason) of reports that could not be read, when asked for
 
 
 def parse_threshold(value) -> float:
@@ -238,18 +244,35 @@ def _read_json(path: str) -> dict:
     return doc
 
 
-def parse_file(path: str, root: str = "", threshold: float = DEFAULT_THRESHOLD, label: Optional[str] = None) -> SarifResult:
-    """Findings of one SARIF file. Raises SarifError when the file cannot be read as SARIF 2.1.0."""
+def _key(path: str) -> str:
+    return path.lower() if sys.platform == "win32" else path
+
+
+def parse_file(path: str, root: str = "", threshold: float = DEFAULT_THRESHOLD, label: Optional[str] = None,
+               changed=None, deadline: Optional[float] = None) -> SarifResult:
+    """Findings of one SARIF file. Raises SarifError when the file cannot be read as SARIF 2.1.0.
+
+    ``changed`` is the set of repository paths the change touches: when given, only a result located in one of
+    them, or with ``baselineState`` new or updated, can block; every other result is a note (old debt does not stop a
+    change that did not cause it). ``None`` means every result can block. ``deadline`` (``time.monotonic()``) is
+    checked every few thousand results and raises ``GitTimeout``."""
     name = label or path
     doc = _read_json(path)
     out, below = SarifResult(), []
+    touched = None if changed is None else {_key(p) for p in changed}
+    seen = 0
     for run in doc["runs"]:
         run = _dict(run)
         tool = _tool_name(run)
         rules = _list(_dict(_dict(run.get("tool")).get("driver")).get("rules"))
         for raw in _list(run.get("results")):
+            seen += 1
+            if seen % _DEADLINE_EVERY == 0:
+                _check_deadline(deadline)
             result = _dict(raw)
             if not result or _suppressed(result) or result.get("baselineState") == "absent":
+                continue
+            if result.get("kind") not in (None, "fail"):  # pass, review, open, informational, notApplicable
                 continue
             rule = _rule_for(result, rules)
             rule_id = next((x for x in (result.get("ruleId"), _dict(result.get("rule")).get("id"), rule.get("id"))
@@ -261,8 +284,11 @@ def parse_file(path: str, root: str = "", threshold: float = DEFAULT_THRESHOLD, 
             file = repo_path(uri, art.get("uriBaseId"), run, root) if isinstance(uri, str) else ""
             start = _dict(loc.get("region")).get("startLine")
             line = start if isinstance(start, int) and not isinstance(start, bool) and start > 0 else 0
-            blocks = score >= threshold
-            message = "%s (%s)" % (_message(result, rule, rule_id), why)
+            in_scope = (touched is None or result.get("baselineState") in ("new", "updated")
+                        or (bool(file) and _key(file) in touched))
+            blocks = score >= threshold and in_scope
+            message = "%s (%s%s)" % (_message(result, rule, rule_id), why,
+                                     ", outside the change" if score >= threshold and not in_scope else "")
             f = _make("sarif:%s/%s" % (tool, rule_id), file, line, message, "blocker" if blocks else "note", name)
             if blocks:
                 out.blockers.append(f)
@@ -276,21 +302,32 @@ def parse_file(path: str, root: str = "", threshold: float = DEFAULT_THRESHOLD, 
     return out
 
 
-def collect(paths, root: str = "", threshold: float = DEFAULT_THRESHOLD, newest: Optional[float] = None) -> SarifResult:
-    """Findings of several SARIF files, never raising: an unreadable file is one non-blocking note. ``newest`` is the
-    timestamp of the newest change the reports gate; a report last written before it gets a staleness note."""
+def collect(paths, root: str = "", threshold: float = DEFAULT_THRESHOLD, newest: Optional[float] = None,
+            changed=None, deadline: Optional[float] = None, unreadable: str = "note") -> SarifResult:
+    """Findings of several SARIF files, never raising (but for ``GitTimeout``, the hook's time budget). An unreadable
+    file is one non-blocking note, or with ``unreadable="error"`` an entry of ``errors`` for the caller to refuse a
+    verdict on. ``newest`` is the timestamp of the newest change the reports gate; a report last written before it
+    gets a staleness note. ``changed`` and ``deadline`` as in ``parse_file``."""
     total = SarifResult()
+
+    def fail(label, reason):
+        if unreadable == "error":
+            total.errors.append((label, reason))
+        else:
+            total.notes.append(note("sarif:unreadable", label, "could not read SARIF: %s" % reason))
+
     for path in paths:
         label = _one_line(path, 120)
         try:
-            part = parse_file(path, root, threshold, label)
+            part = parse_file(path, root, threshold, label, changed, deadline)
             total.blockers += part.blockers
             total.notes += part.notes
             if newest is not None and os.path.getmtime(path) < newest:
                 total.notes.append(note("sarif:stale", label, STALE))
+        except GitTimeout:
+            raise
         except SarifError as e:
-            total.notes.append(note("sarif:unreadable", label, "could not read SARIF: %s" % e))
+            fail(label, str(e))
         except Exception as e:  # a malformed file must never take the gate down
-            total.notes.append(note("sarif:unreadable", label,
-                                     "could not read SARIF: unexpected shape (%s)" % e.__class__.__name__))
+            fail(label, "unexpected shape (%s)" % e.__class__.__name__)
     return total

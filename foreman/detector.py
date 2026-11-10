@@ -16,13 +16,15 @@ fail the run. The agent cannot wave itself through.
 CI usage::
 
     python -m foreman.detector <base> [<head>] [--check "<check command>"] [--json] [--repo <path>]
-        [--sarif FILE]... [--sarif-threshold error|warning|<number>]
+        [--sarif FILE]... [--sarif-threshold error|warning|<number>] [--sarif-scope changed|all] [--strict]
 
 SARIF 2.1.0 reports (see ``foreman.sarif``) are a second source of blockers: given with ``--sarif``, or listed in the
 ``sarif`` key of .foreman.json at the base.
 
 The exit status is 1 when there is at least one blocker that is not allowed, 2 when the run could not be done
-(not a repository, git failed, a ``--sarif`` file that cannot be read).
+(not a repository, git failed, a SARIF report that cannot be read, whether given with ``--sarif`` or named in
+.foreman.json). With ``GITHUB_ACTIONS`` set, every marked finding is also printed as a ``::warning`` annotation;
+``--strict`` makes marked findings blockers.
 """
 from __future__ import annotations
 
@@ -713,7 +715,8 @@ class Report:
     head: Optional[str] = None
     check: Optional[str] = None
     findings: list = field(default_factory=list)
-    notes: list = field(default_factory=list)  # non-blocking: SARIF results below the threshold, unreadable reports
+    notes: list = field(default_factory=list)  # non-blocking: SARIF results below the threshold, stale reports
+    errors: list = field(default_factory=list)  # a SARIF report the base's config names that cannot be read: no verdict
 
     @property
     def blockers(self) -> list:
@@ -733,7 +736,7 @@ class Report:
         return {"verdict": self.verdict, "repo": self.repo, "scope": self.scope, "base": self.base,
                 "base_label": self.base_label, "head": self.head, "check": self.check,
                 "blockers": [f.to_dict() for f in self.blockers], "allowed": [f.to_dict() for f in self.allowed],
-                "notes": [f.to_dict() for f in self.notes]}
+                "notes": [f.to_dict() for f in self.notes], "errors": list(self.errors)}
 
 
 def format_findings(findings: Iterable[Finding], indent: str = "  ") -> str:
@@ -806,18 +809,27 @@ def _sarif_paths(repo: Repo, base_rev: Optional[str], explicit=()) -> list:
             + [os.path.abspath(p) for p in explicit])
 
 
+def sarif_scope_of(config: dict) -> str:
+    return config["sarif_scope"] if config.get("sarif_scope") in ("changed", "all") else "changed"
+
+
 def sarif_findings(repo: Repo, base_rev: Optional[str], explicit=(), threshold: Optional[float] = None,
-                   newest: Optional[float] = None) -> tuple:
-    """(blockers, notes) from SARIF reports: the ``sarif`` / ``sarif_threshold`` keys of .foreman.json at the base
-    (files read from the working tree, relative to the repository), plus ``explicit`` paths. Never raises for a bad
-    report; a hit of the time budget does raise GitTimeout, like every other step."""
+                   newest: Optional[float] = None, scope: Optional[str] = None, changed=None) -> tuple:
+    """(blockers, notes, errors) from SARIF reports: the ``sarif`` / ``sarif_threshold`` / ``sarif_scope`` keys of
+    .foreman.json at the base (files read from the working tree, relative to the repository), plus ``explicit`` paths.
+    With the scope ``changed`` (the default) only results in ``changed`` files, or new or updated ones, can block.
+    A report that cannot be read is an *error* (the caller must not report CLEAN), not a note, and so is a path that
+    leaves the repository. A bad ``sarif_threshold`` is a note and the default applies. A hit of the time budget raises
+    GitTimeout, like every other step."""
     from . import sarif
     config, outside = config_at(repo, base_rev), []
-    _config_sarif_paths(config, outside)
-    paths = _sarif_paths(repo, base_rev, explicit)
-    notes = [sarif.note("sarif:unreadable", p, "could not read SARIF: the path leaves the repository") for p in outside]
-    if not paths:
-        return [], notes
+    named = [os.path.join(repo.root, *p.split("/")) for p in _config_sarif_paths(config, outside)]
+    errors = ["could not read the SARIF report %s named in %s: the path leaves the repository" % (p, CONFIG_FILE)
+              for p in outside]
+    given = [os.path.abspath(p) for p in explicit]
+    notes = []
+    if not (named or given):
+        return [], notes, errors
     if threshold is None:
         threshold = sarif.DEFAULT_THRESHOLD
         if "sarif_threshold" in config:
@@ -826,9 +838,36 @@ def sarif_findings(repo: Repo, base_rev: Optional[str], explicit=(), threshold: 
             except ValueError as e:
                 notes.append(sarif.note("sarif:unreadable", CONFIG_FILE,
                                         "ignoring sarif_threshold, using %s: %s" % (threshold, e)))
+    scope = scope or sarif_scope_of(config)
+    scoped = None if scope == "all" else (changed if changed is not None else ())
     _check_deadline(repo.deadline)
-    result = sarif.collect(list(dict.fromkeys(paths)), repo.root, threshold, newest)
-    return result.blockers, notes + result.notes
+    blockers, seen = [], set()
+    for paths, where in ((named, " named in " + CONFIG_FILE), (given, "")):
+        paths = [p for p in dict.fromkeys(paths) if p not in seen]
+        seen.update(paths)
+        result = sarif.collect(paths, repo.root, threshold, newest, scoped, repo.deadline, unreadable="error")
+        blockers += result.blockers
+        notes += result.notes
+        errors += ["could not read the SARIF report %s%s: %s" % (label, where, reason)
+                   for label, reason in result.errors]
+    return blockers, notes, errors
+
+
+def compact_notes(notes) -> str:
+    """One line for the non-blocking SARIF notes: how many, and the first two."""
+    notes = list(notes or [])
+    if not notes:
+        return ""
+    shown = "; ".join("%s: %s" % (n.location, n.message) for n in notes[:2])
+    more = " (+%d more)" % (len(notes) - 2) if len(notes) > 2 else ""
+    return "SARIF: %d note(s), not blocking: %s%s" % (len(notes), shown, more)
+
+
+def sarif_paths_at_base(repo: Repo) -> list:
+    """The repository-relative paths of the reports the base's .foreman.json names (the base is the merge-base with
+    the default branch, else HEAD): the files an agent must not write."""
+    base, _label = repo.base_ref()
+    return _config_sarif_paths(config_at(repo, base or ("HEAD" if repo.has_head() else None)))
 
 
 def _commit_time(repo: Repo, *revs: str) -> Optional[float]:
@@ -861,7 +900,7 @@ def _read_text(path: str) -> Optional[str]:
 
 def scan_range(repo: Repo, base: Optional[str], head: str = "HEAD", check: Optional[str] = None,
                extra_messages: str = "", scope: str = "range", base_label: Optional[str] = None,
-               sarif=(), sarif_threshold: Optional[float] = None) -> Report:
+               sarif=(), sarif_threshold: Optional[float] = None, sarif_scope: Optional[str] = None) -> Report:
     """What publishing ``base..head`` would publish: the final diff, plus every commit's patch for secrets. Without a
     base (a branch with no ancestor on the remote), the whole history of ``head``. SARIF reports (the base's
     .foreman.json ``sarif`` key, plus the explicit ``sarif`` paths) add their blockers and notes."""
@@ -878,9 +917,10 @@ def scan_range(repo: Repo, base: Optional[str], head: str = "HEAD", check: Optio
                       version_of=version_of, deadline=repo.deadline)
     check = check_command_at(repo, base, check)
     findings += _check_findings(repo, base, check, paths, allowed_paths, lambda p: repo.show(head, p), version_of)
-    blockers, notes = sarif_findings(repo, base, sarif, sarif_threshold, _commit_time(repo, rev_range))
+    blockers, notes, errors = sarif_findings(repo, base, sarif, sarif_threshold, _commit_time(repo, rev_range),
+                                             sarif_scope, paths)
     report = Report(repo.root, scope, base, base_label, repo.try_git("rev-parse", head), check, findings + blockers)
-    report.notes = notes
+    report.notes, report.errors = notes, errors
     return report
 
 
@@ -910,7 +950,7 @@ def _untracked_diff(repo: Repo) -> tuple:
 
 def scan_worktree(repo: Repo, staged_only: bool = False, include_untracked: bool = True, check: Optional[str] = None,
                   extra_messages: str = "", scope: str = "worktree", sarif=(),
-                  sarif_threshold: Optional[float] = None) -> Report:
+                  sarif_threshold: Optional[float] = None, sarif_scope: Optional[str] = None) -> Report:
     """The uncommitted changes against HEAD: staged and unstaged (or only staged), plus untracked files."""
     has_head = repo.has_head()
     base = "HEAD" if has_head else repo.empty_tree
@@ -946,14 +986,15 @@ def scan_worktree(repo: Repo, staged_only: bool = False, include_untracked: bool
                 newest = max(newest or 0, os.path.getmtime(full))
         except OSError:
             pass  # deleted
-    blockers, notes = sarif_findings(repo, head_rev, sarif, sarif_threshold, newest)
+    blockers, notes, errors = sarif_findings(repo, head_rev, sarif, sarif_threshold, newest, sarif_scope, paths)
     report = Report(repo.root, scope, repo.try_git("rev-parse", "HEAD") if has_head else None, "HEAD",
                     None, check, findings + blockers)
-    report.notes = notes
+    report.notes, report.errors = notes, errors
     return report
 
 
-def scan_branch(repo: Repo, check: Optional[str] = None, sarif=(), sarif_threshold: Optional[float] = None) -> Report:
+def scan_branch(repo: Repo, check: Optional[str] = None, sarif=(), sarif_threshold: Optional[float] = None,
+                sarif_scope: Optional[str] = None) -> Report:
     """The current branch against the merge-base with the remote's default branch (or a local main/master)."""
     if not repo.has_head():
         return Report(repo.root, "branch", findings=[])
@@ -961,7 +1002,7 @@ def scan_branch(repo: Repo, check: Optional[str] = None, sarif=(), sarif_thresho
     if not base:
         return Report(repo.root, "branch", head=repo.try_git("rev-parse", "HEAD"), findings=[])
     return scan_range(repo, base, "HEAD", check=check, scope="branch", base_label=label, sarif=sarif,
-                      sarif_threshold=sarif_threshold)
+                      sarif_threshold=sarif_threshold, sarif_scope=sarif_scope)
 
 
 # ─── CI entry point ──────────────────────────────────────────────────────────
@@ -986,40 +1027,63 @@ def main(argv=None) -> int:
                         help="a SARIF 2.1.0 report to read as a source of findings (repeatable); unreadable = exit 2")
     parser.add_argument("--sarif-threshold", metavar="LEVEL", type=_threshold_arg,
                         help="error (default, 7.0), warning (4.0) or a number 0-10: results at or above it block")
+    parser.add_argument("--sarif-scope", choices=("changed", "all"),
+                        help="changed (default): only results in files the change touches, or new ones, block; "
+                             "all: every result can block")
+    parser.add_argument("--strict", action="store_true",
+                        help="findings marked %s count as blockers (exit 1) instead of being listed for review" % MARKER)
     args = parser.parse_args(argv)
     root = find_repo(args.repo)
     if not root:
         print("foreman: %s is not inside a git repository" % args.repo, file=sys.stderr)
         return 2
-    from . import sarif
-    explicit = [os.path.abspath(p) for p in args.sarif]
-    for path in explicit:  # asked for on the command line: an unreadable report must fail the run, not pass it
-        try:
-            sarif.parse_file(path, root)
-        except sarif.SarifError as e:
-            print("foreman: cannot read SARIF %s: %s" % (path, e), file=sys.stderr)
-            return 2
     try:
-        report = scan_range(Repo(root), args.base, args.head, check=args.check, sarif=explicit,
-                            sarif_threshold=args.sarif_threshold)
+        report = scan_range(Repo(root), args.base, args.head, check=args.check,
+                            sarif=[os.path.abspath(p) for p in args.sarif], sarif_threshold=args.sarif_threshold,
+                            sarif_scope=args.sarif_scope)
     except GitError as e:
         print("foreman: %s" % e, file=sys.stderr)
         return 2
+    blocking = report.blockers + (report.allowed if args.strict else [])
+    marked = [] if args.strict else report.allowed
+    for err in report.errors:  # a report that was asked for and cannot be read: the run says so and fails
+        print("foreman: %s" % err, file=sys.stderr)
+    out = sys.stderr if args.json else sys.stdout
+    if os.environ.get("GITHUB_ACTIONS"):
+        for f in report.allowed:
+            print(annotation("error" if args.strict else "warning", f), file=out)
     if args.json:
-        print(json.dumps(report.to_dict(), indent=2))
+        print(json.dumps(dict(report.to_dict(), strict=args.strict), indent=2))
     else:
-        print("foreman: %s (%d blocker(s), %d marked %s)" % (report.verdict, len(report.blockers),
-                                                            len(report.allowed), MARKER))
-        if report.blockers:
-            print(format_findings(report.blockers))
-        if report.allowed:
-            print("Marked %s by the author; they do not fail this run, review them:" % MARKER)
-            print(format_findings(report.allowed))
+        label = "INCOMPLETE" if report.errors and not blocking else ("BLOCKED" if blocking else report.verdict)
+        print("foreman: %s (%d blocker(s), %d marked %s)" % (label, len(blocking), len(marked), MARKER))
+        if blocking:
+            print(format_findings(blocking))
+        if marked:
+            print("Marked %s by the author; they do not fail this run, review them (or use --strict):" % MARKER)
+            print(format_findings(marked))
         if report.notes:
             print("Notes (they do not block):")
             for n in report.notes:
                 print("  [%s] %s  %s" % (n.rule, n.location, n.message))
-    return 1 if report.blockers else 0
+    return 2 if report.errors else (1 if blocking else 0)
+
+
+def _escape_annotation(text: str, prop: bool = False) -> str:
+    text = text.replace("%", "%25").replace(chr(13), "%0D").replace(chr(10), "%0A")
+    return text.replace(":", "%3A").replace(",", "%2C") if prop else text
+
+
+def annotation(level: str, f: Finding) -> str:
+    """A GitHub Actions workflow command that shows the finding on the pull request's files."""
+    props = []
+    if f.file:
+        props.append("file=" + _escape_annotation(f.file, True))
+        if f.line:
+            props.append("line=%d" % f.line)
+    props.append("title=" + _escape_annotation("foreman: " + f.rule, True))
+    text = "%s (marked %s; a person must review it)" % (f.message, MARKER)
+    return "::%s %s::%s" % (level, ",".join(props), _escape_annotation(text))
 
 
 if __name__ == "__main__":

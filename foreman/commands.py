@@ -59,6 +59,8 @@ def verdict(path: Optional[str] = None, *keys: str, platform: Optional[str] = No
     blockers = [f for f in findings if not f.allowed]
     marked = [f for f in findings if f.allowed and not grants.is_granted(f.fingerprint)]
     granted = [f for f in findings if f.allowed and grants.is_granted(f.fingerprint)]
+    errors = list(dict.fromkeys(branch.errors + worktree.errors))  # reports .foreman.json names and cannot be read
+    notes = _dedupe(branch.notes + worktree.notes)
     if marked:
         try:
             grants.record_pending(marked, root)
@@ -70,7 +72,7 @@ def verdict(path: Optional[str] = None, *keys: str, platform: Optional[str] = No
         ahead = int(count) if count and count.isdigit() else None
     dirty = repo.try_git("status", "--porcelain")
     return {
-        "verdict": "BLOCKED" if blockers or marked else "CLEAN",
+        "verdict": "BLOCKED" if blockers or marked else ("NEEDS_APPROVAL" if errors else "CLEAN"),
         "repo": root,
         "chosen_from": how,
         "branch": repo.branch(),
@@ -82,6 +84,8 @@ def verdict(path: Optional[str] = None, *keys: str, platform: Optional[str] = No
         "blockers": [f.to_dict() for f in blockers],
         "marked": [f.to_dict() for f in marked],
         "allowed_by_user": [f.to_dict() for f in granted],
+        "errors": errors,
+        "notes": [f.to_dict() for f in notes],
     }
 
 
@@ -115,6 +119,13 @@ def format_verdict(v: dict) -> str:
     if v.get("allowed_by_user"):
         lines.append("Allowed by you:")
         lines += [_format_finding(d, with_id=True) for d in v["allowed_by_user"]]
+    if v.get("errors"):
+        lines.append("Could not inspect (do not treat this as clean; approve only after you have checked it yourself):")
+        lines += ["  " + e for e in v["errors"]]
+    if v.get("notes"):
+        shown = "; ".join("%s: %s" % (n["location"], n["message"]) for n in v["notes"][:2])
+        lines.append("SARIF: %d note(s), not blocking: %s%s" % (len(v["notes"]), shown,
+                                                                 " (+%d more)" % (len(v["notes"]) - 2) if len(v["notes"]) > 2 else ""))
     if v["verdict"] == "CLEAN":
         lines.append("No skipped, deleted or moved tests, no change to the check, no secrets.")
     return "\n".join(lines)

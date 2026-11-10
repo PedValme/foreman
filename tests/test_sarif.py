@@ -12,7 +12,7 @@ import time
 import unittest
 from unittest import mock
 
-from foreman import detector, sarif
+from foreman import commands, detector, gate, sarif
 from tests_support import GitRepoCase
 
 SKIP = "@pytest.mark." + "skip"
@@ -326,15 +326,16 @@ class Sources(SarifCase):
         self.assertEqual(len(report.blockers), 1)
         self.assertTrue(any("sarif_threshold" in n.message for n in report.notes))
 
-    def test_a_missing_or_broken_configured_report_is_a_note_not_a_failure(self):
+    def test_a_missing_or_broken_configured_report_is_an_error_not_a_clean_pass(self):
         base = self.base_with_config(sarif=["gone.sarif", "broken.sarif", "../escape.sarif", "/abs/x.sarif", "C:\\x.sarif", 7])
         self.sarif_file(None, "broken.sarif", raw="{")
         self.write("app.py", "x = 2\n")
         self.commit("change")
         report = detector.scan_range(detector.Repo(self.root), base)
         self.assertEqual(report.blockers, [])
-        self.assertEqual(len(report.notes), 5)
-        self.assertTrue(all(n.message.startswith("could not read SARIF:") for n in report.notes))
+        self.assertEqual(len(report.errors), 5)
+        self.assertTrue(all("could not read the SARIF report" in e and detector.CONFIG_FILE in e for e in report.errors))
+        self.assertEqual(report.to_dict()["errors"], report.errors)
 
     def test_config_is_read_at_the_base_so_a_change_cannot_point_it_elsewhere(self):
         base = self.base_with_config(sarif=["report.sarif"])
@@ -342,6 +343,7 @@ class Sources(SarifCase):
         self.git("checkout", "-q", "-b", "feature")
         self.write(detector.CONFIG_FILE, json.dumps({"sarif": ["clean.sarif"], "sarif_threshold": 10}))
         self.sarif_file(doc([]), "clean.sarif")
+        self.write("app.py", "x = 9\n")  # the base's report points at app.py: a change to it is gated
         self.commit("point the gate at an empty report")
         report = detector.scan_range(detector.Repo(self.root), base)
         rules = sorted(f.rule for f in report.blockers)
@@ -353,6 +355,7 @@ class Sources(SarifCase):
         base = self.base_with_config(sarif=["report.sarif"])
         self.blocking_report()
         self.write(detector.CONFIG_FILE, "{}")
+        self.write("app.py", "x = 9\n")
         self.commit("drop the sarif key")
         report = detector.scan_range(detector.Repo(self.root), base)
         self.assertEqual(sorted(f.rule for f in report.blockers), ["check-changed", "sarif:scanner/SQLI"])
@@ -435,7 +438,7 @@ class CommandLine(SarifCase):
         self.assertEqual(json.loads(out)["blockers"][0]["rule"], "sarif:scanner/SQLI")
 
     def test_below_the_threshold_exits_zero_and_lists_the_note(self):
-        path = self.sarif_file(doc([result("MINOR", level="warning")]))
+        path = self.sarif_file(doc([result("MINOR", uri="app.py", level="warning")]))
         code, out, _ = self.run_cli("--sarif", path)
         self.assertEqual(code, 0)
         self.assertIn("Notes (they do not block)", out)
@@ -447,7 +450,7 @@ class CommandLine(SarifCase):
 
     def test_several_reports_and_a_clean_one(self):
         a = self.sarif_file(doc([]), "a.sarif")
-        b = self.sarif_file(doc([result("X", level="error")]), "b.sarif")
+        b = self.sarif_file(doc([result("X", uri="app.py", level="error")]), "b.sarif")
         self.assertEqual(self.run_cli("--sarif", a)[0], 0)
         self.assertEqual(self.run_cli("--sarif", a, "--sarif", b)[0], 1)
 
@@ -457,7 +460,7 @@ class CommandLine(SarifCase):
         for path in (os.path.join(self.root, "missing.sarif"), broken, wrong):
             code, out, err = self.run_cli("--sarif", path)
             self.assertEqual(code, 2)
-            self.assertIn("cannot read SARIF", err)
+            self.assertIn("could not read the SARIF report", err)
             self.assertNotIn("CLEAN", out)  # nothing was reported as passing
 
     def test_bad_threshold_is_a_usage_error(self):
@@ -471,7 +474,7 @@ class CommandLine(SarifCase):
         # base carries the configuration; the change leaves it alone
         self.git("checkout", "-q", "-b", "other", self.base)
         self.write(detector.CONFIG_FILE, json.dumps({"sarif": ["report.sarif"], "sarif_threshold": 10}))
-        self.sarif_file(doc([result("W", level="warning")]))
+        self.sarif_file(doc([result("W", uri="app.py", level="warning")]))
         self.commit("config")
         self.base = self.git("rev-parse", "HEAD").strip()
         self.write("app.py", "x = 5\n")
@@ -481,7 +484,8 @@ class CommandLine(SarifCase):
 
     def test_a_report_that_names_a_missing_file_still_gates(self):
         path = self.sarif_file(doc([result("X", uri="file:///no/such/place.py", level="error")]))
-        self.assertEqual(self.run_cli("--sarif", path)[0], 1)
+        self.assertEqual(self.run_cli("--sarif", path)[0], 0)  # not in a file the change touches: a note
+        self.assertEqual(self.run_cli("--sarif", path, "--sarif-scope", "all")[0], 1)
 
 
 if __name__ == "__main__":
