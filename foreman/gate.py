@@ -814,7 +814,10 @@ def _repo_relative(path: str) -> tuple:
     root = detector.find_repo(os.path.dirname(path) or ".")
     if root:
         try:
-            return root, os.path.relpath(path, root).replace("\\", "/")
+            # git reports the real path of the root (/private/var on macOS, a long name for a Windows 8.3 one), so
+            # the directory of the file must be resolved too, or the "relative" path climbs out of the repository.
+            real = os.path.join(os.path.realpath(os.path.dirname(path) or "."), os.path.basename(path))
+            return root, os.path.relpath(real, os.path.realpath(root)).replace("\\", "/")
         except ValueError:
             pass
     return None, path.replace("\\", "/")

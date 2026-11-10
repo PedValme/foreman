@@ -389,6 +389,10 @@ class SessionDirectory(GitRepoCase):
     def norm(self, p):
         return os.path.normpath(p)
 
+    def real(self, p):
+        """What git reports as the repository's root: symlinks (/private/var) and 8.3 names resolved."""
+        return os.path.normpath(os.path.realpath(p))
+
     def test_on_the_cli_the_process_directory_comes_before_the_configured_one(self):
         with self.fake_hermes(self.home), mock.patch.object(gate.os, "getcwd", return_value=self.root):
             self.assertEqual([p for p, _ in gate.cwd_candidates(platform="cli")],
@@ -422,7 +426,7 @@ class SessionDirectory(GitRepoCase):
         a, b, c = self.fake_gateway(session=self.root)
         with a, b, c:
             out = commands.handle_slash("status", session_id="s1", platform="cli")
-        self.assertIn("Repository: %s (from this session's working directory)" % self.norm(self.root), out)
+        self.assertIn("Repository: %s (from this session's working directory)" % self.real(self.root), out)
         self.assertNotIn(self.norm(self.hermes) + "\n", out)
 
     def test_in_the_gateway_process_without_a_session_cwd_foreman_says_so(self):
@@ -447,7 +451,7 @@ class SessionDirectory(GitRepoCase):
         self.git("init", "-q", cwd=other)
         with self.fake_hermes(self.home, recorded=self.root), mock.patch.object(gate.os, "getcwd", return_value=other):
             out = commands.handle_slash("status", session_id="s1", platform="cli")
-        self.assertIn("Repository: %s\n" % self.norm(self.root), out)
+        self.assertIn("Repository: %s\n" % self.real(self.root), out)
 
     def test_an_explicit_path_is_accepted(self):
         with self.fake_hermes(self.home), mock.patch.object(gate.os, "getcwd", return_value=self.home):
