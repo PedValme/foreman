@@ -2,6 +2,8 @@
 .env.*
 !.env.example
 node_modules/
+__pycache__/
+*.py[co]
 .local/
 .claude/settings.local.json
 .claude/worktrees/
