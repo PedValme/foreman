@@ -2,14 +2,16 @@
 .env.*
 !.env.example
 node_modules/
+__pycache__/
+*.py[co]
 .local/
 .claude/settings.local.json
 .claude/worktrees/
 
-# Caché que deja el CLI de Codex cuando un agente lo corre en el repo
+# Cache left by coding-agent CLIs run in the repository
 .atl/
 
-# Binarios: viven en Drive, no en git (regla global de Pedro). Aquí se versiona la fuente (Markdown, HTML, scripts).
+# Binary documents are not versioned; keep their source (Markdown, HTML, scripts) instead
 *.pdf
 *.docx
 *.pptx
