@@ -1101,8 +1101,8 @@ def saved_review(name_with_owner: str, number: int, head_oid: str = "", head_bra
     return out
 
 
-_ZWSP = "​"  # zero-width space, written as an escape: never a literal invisible character in the source
-_CONTROL = re.compile(r"[\x00-\x1f\x7f\x85  ]+")
+_ZWSP = "\u200b"  # zero-width space, written as an escape: never a literal invisible character in the source
+_CONTROL = re.compile(r"[\x00-\x1f\x7f\x85\u2028\u2029]+")
 _MENTION = re.compile(r"(?<![\w])@(?=[A-Za-z0-9])")
 _ISSUE_REF = re.compile(r"(?:(?<![\w&])#|\b(?:GH|gh)-)(?=\d)")
 _URL = re.compile(r"(?i)\b(https?|ftp|mailto|www)(:|\.)")

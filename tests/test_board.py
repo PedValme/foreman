@@ -394,7 +394,7 @@ class PullRequestVerdicts(BoardCase):
         self.assertIn("- **test-skipped** `tests/test_x.py:2`: test skipped or isolated.", body)
         self.assertIn("  Fix: Remove the marker", body)
         self.assertIn("#### Model review", body)
-        self.assertIn("- **high** `app.py:4` ask @​someone about the empty catch", body)
+        self.assertIn("- **high** `app.py:4` ask @\u200bsomeone about the empty catch", body)
         self.assertIn("- plain finding", body)
         self.assertIn("#### Note from the reviewer\n\nplease fix the tests", body)
         self.assertIn(body, out)  # the exact text is shown in the chat
