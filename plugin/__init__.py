@@ -14,6 +14,7 @@ def register(ctx):
     board.bind(ctx)   # ask_choice and dispatch_tool, from /foreman use, merge and reject only
     gate.bind(ctx)    # ctx.session_cwd(), to find the session's repository
     review.bind(ctx)  # ctx.llm: /foreman review, /foreman merge (auto_review: merge) and foreman_review (finish)
+    review.register_task(ctx)  # "Foreman review" in Hermes's auxiliary-model pickers; default: the first fallback
     ctx.register_hook("pre_tool_call", gate.on_pre_tool_call)
     ctx.register_hook("pre_verify", gate.on_pre_verify)
     ctx.register_command(

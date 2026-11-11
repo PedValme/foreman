@@ -138,6 +138,9 @@ def _summary(rec: dict) -> dict:
 
 
 def foreman_review_tool(args: dict = None, task_id: str = "", **kwargs) -> str:
+    from . import gate as _gate
+    if _gate.turned_off():
+        return json.dumps({"verdict": "OFF", "message": _gate.TURNED_OFF, "advisory": TOOL_ADVISORY})
     pipeline.flush_notifications()  # outside any hook: send what hooks queued
     try:
         return json.dumps(_tool(args or {}, task_id if isinstance(task_id, str) else ""))

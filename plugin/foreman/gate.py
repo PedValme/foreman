@@ -969,10 +969,55 @@ def directive(what: str, outcome: Outcome) -> Optional[dict]:
 
 # ─── pre_tool_call ───────────────────────────────────────────────────────────
 
+PLUGIN_NAME = "foreman"
+TURNED_OFF = ("Foreman is turned off (Capabilities → Plugins, or `hermes plugins enable foreman`): it blocks nothing "
+              "and runs no review. Hermes keeps a turned-off plugin's command until its gateway restarts.")
+
+
+def turned_off() -> bool:
+    """Foreman is disabled in Hermes's config. A running gateway keeps a disabled plugin's hooks, commands and tools
+    until it restarts (enabling takes effect at once; disabling does not: found in a real session), so Foreman reads
+    the switch itself and stands down at once. Hermes's cached config reader: about 0.3 ms."""
+    try:
+        from hermes_cli.config import load_config_readonly
+        plugins = (load_config_readonly() or {}).get("plugins")
+        disabled = plugins.get("disabled") if isinstance(plugins, dict) else None
+        return isinstance(disabled, list) and PLUGIN_NAME in disabled
+    except Exception:
+        return False
+
+
+_HERMES = re.compile(r"(?i)\bhermes(?:\.exe|_cli)?\b")  # also `python -m hermes_cli.main plugins …`
+_PLUGIN_OFF = re.compile(r"(?i)\bplugins\s+(?:disable|remove|uninstall|rm)\b")
+_FOREMAN_WORD = re.compile(r"(?i)\bforeman\b")
+_CONFIG_WRITE = re.compile(r"(?i)\bconfig\s+(?:set|edit|unset)\b")
+_PLUGINS_WORD = re.compile(r"(?i)\bplugins\b")
+
+
+def _switches_foreman_off(command: str) -> bool:
+    """A terminal command that turns Foreman off or rewrites the plugins config: since a turned-off Foreman stands
+    down at once, the agent could otherwise turn the gate off and commit on the next call (found in review). Each
+    part of the line on its own, linear searches only."""
+    for part in re.split(r"[;&|\n]+", command or ""):
+        if not _HERMES.search(part):
+            continue
+        if (_PLUGIN_OFF.search(part) and _FOREMAN_WORD.search(part)) or (_CONFIG_WRITE.search(part)
+                                                                        and _PLUGINS_WORD.search(part)):
+            return True
+    return False
+
+
 def on_pre_tool_call(tool_name: str = "", args=None, task_id: str = "", **kwargs) -> Optional[dict]:
     """The hook Hermes calls. Inside it nothing is sent anywhere (``pipeline.hook_context``)."""
     if tool_name not in TERMINAL_TOOLS and tool_name not in WRITE_TOOLS:
         return None  # the common case, before anything else
+    command = args.get("command") if tool_name in TERMINAL_TOOLS and isinstance(args, dict) else None
+    if isinstance(command, str) and _switches_foreman_off(command):
+        return {"action": "block", "message": "Foreman blocked this command: turning Foreman off or changing the "
+                "plugins configuration is the user's decision (Capabilities → Plugins, or their own terminal). "
+                "If Foreman is in the way, tell the user why."}
+    if turned_off():
+        return None
     from . import pipeline
     sid = kwargs.get("session_id")
     token = _HOOK_SESSION.set(sid if isinstance(sid, str) else "")
@@ -1365,7 +1410,7 @@ def on_pre_verify(coding: bool = False, attempt: int = 0, changed_paths=None, se
     the review loop (``finish.step``), which only reads stored reviews: the model runs in the tool, never here.
     Inside it nothing is sent anywhere: a notification is queued and sent from the next /foreman command or tool."""
     try:
-        if not coding:
+        if not coding or turned_off():
             return None
         from . import pipeline
         with pipeline.hook_context():

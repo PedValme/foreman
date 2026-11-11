@@ -78,6 +78,10 @@ ADVISORY = "Advisory only: this review grants, merges and unblocks nothing."
 SAME_MODEL = ("Reviewed by the same model that wrote the code — set `reviewer_model` for an independent review.")
 UNKNOWN_MODEL = ("Could not tell whether the reviewer differs from the model that wrote the code (Hermes's main "
                  "model is not readable) — check `reviewer_model`.")
+TASK_SAME_MODEL = ("Reviewed by the same model that wrote the code — pick another model for Foreman review in "
+                   "Hermes's auxiliary models (Desktop: Settings → Models → Auxiliary; CLI: hermes model).")
+TASK_UNSURE = ("Foreman cannot tell whether this reviewer differs from the model that wrote the code — pick another "
+               "model for Foreman review in Hermes's auxiliary models for an independent review.")
 ROUTED_MODEL = ("Hermes chose this model, not Foreman: it may or may not be the one that wrote the code — set "
                 "`reviewer_model` for an independent review.")
 
@@ -460,13 +464,64 @@ def build_input(title: str, deterministic: list, b: Bounded, token: Optional[str
 class Choice:
     provider: Optional[str]
     model: Optional[str]
-    source: str                    # setting | fallback | default
+    source: str                    # setting | task | fallback | default
     notes: list = field(default_factory=list)
     transient: bool = False        # the last call failed because the provider was busy
+    task: Optional[str] = None     # Foreman's own auxiliary task: Hermes routes it, no override needed
 
     @property
     def override(self) -> bool:
         return bool(self.model)
+
+
+# Foreman's review as one of Hermes's auxiliary tasks: it is listed in every model picker Hermes has (`hermes model`
+# → Configure auxiliary models, the dashboard's Models page, Desktop → Settings → Models → Auxiliary), so a person
+# picks the reviewer from the providers and models already configured, and calling it needs no override capability.
+# Its default is the first fallback model (another model, often another provider). The owner asked for a dropdown of
+# the configured models (DECISIONES.md, 2026-11-11).
+TASK = "foreman_review"
+TASK_TITLE = "Foreman review"
+_TASK_REGISTERED = False
+_TASK_DEFAULTS: dict = {}  # what the task was registered with; Hermes overlays auxiliary.<task> on it
+
+
+def register_task(ctx: Any) -> bool:
+    """Register the auxiliary task; False on a Hermes without the API (the review then works as before)."""
+    global _TASK_REGISTERED, _TASK_DEFAULTS
+    register = getattr(ctx, "register_auxiliary_task", None)
+    if not callable(register):
+        return False
+    try:
+        cfg = hermes_config()
+        main_provider, main_model = main_route(cfg)
+        provider, model = first_fallback(cfg)
+        independent = model and not (same_model(model, main_model)
+                                     and (not provider or provider.lower() == main_provider))
+        defaults = {"provider": provider, "model": model} if independent else None
+        register(TASK, display_name=TASK_TITLE,
+                 description="The second model that reviews each change's diff before you merge it (Foreman). By "
+                             "default your first fallback model.",
+                 defaults=defaults)
+        _TASK_REGISTERED, _TASK_DEFAULTS = True, dict(defaults or {})
+    except Exception:
+        logger.warning("foreman: cannot register the review as an auxiliary task", exc_info=True)
+        _TASK_REGISTERED = False
+    return _TASK_REGISTERED
+
+
+def task_route(cfg: dict) -> tuple:
+    """(provider, model) the task resolves to, as Hermes resolves it: the person's pick in ``auxiliary.foreman_review``
+    laid key by key over the defaults it was registered with; provider "auto" (or none) is the main provider, and no
+    model is the main model."""
+    aux = cfg.get("auxiliary") if isinstance(cfg.get("auxiliary"), dict) else {}
+    pick = aux.get(TASK) if isinstance(aux.get(TASK), dict) else {}
+    merged = dict(_TASK_DEFAULTS)
+    merged.update({k: v for k, v in pick.items() if k in ("provider", "model")})
+    provider, model = str(merged.get("provider") or "").strip(), str(merged.get("model") or "").strip()
+    main_provider, main_model = main_route(cfg)
+    if not provider or provider.lower() == "auto":
+        return main_provider, model or main_model
+    return provider, model or main_model
 
 
 def hermes_config() -> dict:
@@ -558,6 +613,8 @@ def choose_model(ctx: Any, cfg: dict) -> Choice:
     main_provider, main_model = main_route(cfg)
     model, provider = _setting(ctx, "reviewer_model"), _setting(ctx, "reviewer_provider")
     source = "setting"
+    if not model and _TASK_REGISTERED:
+        return Choice(None, None, "task", task=TASK)
     if not model:
         provider, model = first_fallback(cfg)
         source = "fallback"
@@ -638,9 +695,16 @@ def _call_model_once(ctx: Any, choice: Choice, instructions: str, inputs: list) 
             call["model"] = choice.model
         if choice.provider:
             call["provider"] = choice.provider
+        if choice.task:
+            call["task"] = choice.task
         try:
             return llm.complete_structured(**call), None
         except Exception as e:  # noqa: BLE001 — every failure becomes "could not run", never a pass
+            if attempt == 0 and choice.task and _is_trust_error(e):  # a Hermes that does not route plugin tasks
+                choice.notes.append("Hermes refused Foreman's auxiliary task (%s); using the host's model."
+                                    % _short(str(e)))
+                choice.task, choice.source = None, "default"
+                continue
             if attempt == 0 and choice.override and _is_trust_error(e):
                 choice.notes.append("Hermes refused %s for Foreman (%s); using the host's model."
                                     % (_label(choice.provider, choice.model), _short(str(e))))
@@ -872,9 +936,12 @@ PROMPT_VERSION = "1"  # bump when the prompt or the schema changes: older stored
 
 
 def reviewer_key(choice: "Choice", cfg: dict) -> str:
-    """Who reviews: the model asked for, or the host's main model when none is (it can change in Hermes)."""
+    """Who reviews: the model asked for, the task's pick, or the host's main model when none is (it can change in
+    Hermes)."""
     if choice.model:
         return "%s/%s" % (choice.provider or "", choice.model)
+    if choice.task:
+        return "task:%s/%s" % task_route(cfg)
     provider, model = main_route(cfg)
     return "host:%s/%s" % (provider, model)
 
@@ -1014,13 +1081,24 @@ def run_review(args: str = "", keys: tuple = (), platform: Optional[str] = None,
     # the same model; ids that still differ are named, but never claimed independent (the author may have switched
     # model in the session): unknown, not "different".
     ran = str(_attr(result, "model", "") or "").strip() if result is not None and not error else ""
-    if not choice.override:
+    shown_provider, shown_model = choice.provider or "", choice.model or ""
+    if choice.task:
+        # A task call is attributed from the route Hermes chose (provider and the model that answered), so it can be
+        # named; before an answer, the pick as Foreman reads it from the config.
+        picked_provider, picked_model = task_route(cfg)
+        shown_provider = str(_attr(result, "provider", "") or "") if ran else picked_provider
+        shown_model = ran or picked_model
+        if picked_model and main_model and not same_model_id(picked_model, main_model):
+            same = same_model_id(shown_model, main_model)  # another model was picked: named, independent unless not
+        else:  # the pick is the main model (or unknown): never claimed independent on a differing id alone
+            same = None if ran and main_model and not same_model_id(ran, main_model) else (True if main_model else None)
+    elif not choice.override:
         same = None if ran and main_model and not same_model_id(ran, main_model) else True
     elif not main_model:
         same = None
     else:  # what was asked for, not the provider's canonical id (an alias and its dated id would not match)
         same = same_model(choice.model or "", main_model)
-    record["model"] = {"provider": choice.provider or "", "model": choice.model or "", "source": choice.source,
+    record["model"] = {"provider": shown_provider, "model": shown_model, "source": choice.source,
                        "same_as_author": same, "attributed_to": attributed, "ran": ran}
     record["model_notes"] = list(choice.notes)
     # The key of the reviewer that really ran (Hermes may have refused the override); the requested key points to
@@ -1116,13 +1194,14 @@ def format_review(r: dict, platform: Optional[str] = None) -> str:
         elif m["source"] == "default" or not m["model"]:
             lines.append("Reviewer: the host's default model")  # its name is not reliably known to a plugin
         else:
-            how = {"setting": "the reviewer_model setting", "fallback": "your Hermes fallback model"}[m["source"]]
+            how = {"setting": "the reviewer_model setting", "fallback": "your Hermes fallback model",
+                   "task": "%s in Hermes's auxiliary models" % TASK_TITLE}[m["source"]]
             lines.append("Reviewer: %s (%s)" % (_label(m["provider"] or None, m["model"]), how))
         lines += r.get("model_notes", [])
         if not r.get("error") and m["same_as_author"] is True:
-            lines.append(SAME_MODEL)
+            lines.append(TASK_SAME_MODEL if m["source"] == "task" else SAME_MODEL)
         elif not r.get("error") and m["same_as_author"] is None:
-            lines.append(ROUTED_MODEL if routed else UNKNOWN_MODEL)
+            lines.append(TASK_UNSURE if m["source"] == "task" else ROUTED_MODEL if routed else UNKNOWN_MODEL)
     lines.append("Coverage: %s." % r["coverage"]["note"])
     det = r["deterministic"]
     lines.append("Deterministic gate: %s" % (det.get("verdict") or ("BLOCKED" if det["blocked"] else "CLEAN")))

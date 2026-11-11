@@ -132,6 +132,14 @@ as the button text.
   itself used Codex fine) and fell back to the first `fallback_providers` entry. The result's attribution then
   mixes the two: `provider=openai-codex model=<the fallback provider's model>`. A plugin cannot tell which model answered, nor
   ask for "the model the agent uses".
+- **The capability consent prompt hides its answers.** `hermes_cli/plugins_cmd_capabilities.py:88` asks
+  `"  Grant these capabilities? [y/N] "` through Rich's `console.input`, which reads `[y/N]` as markup and drops it:
+  the user sees "Grant these capabilities?" with no hint that `y` is the answer. Escaping it (`\\[y/N]` or
+  `rich.markup.escape`) shows it.
+- **Disabling a plugin does not unload it from a running gateway.** Enabling one in Desktop (Capabilities → Plugins)
+  takes effect at once, but disabling it only writes `plugins.disabled`: the gateway keeps running the plugin's hooks,
+  commands and tools until it restarts. A gate plugin that the user turned off keeps blocking. Foreman now reads
+  `plugins.disabled` itself on each gated call; a plugin should not have to.
 - **Desktop keeps the spinner after a plugin's question.** After a slash command that called `ctx.ask_choice` and
   returned its reply, the chat keeps the busy spinner until the user sends another message.
 

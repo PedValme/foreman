@@ -100,3 +100,10 @@ the owner confirms it. An option the owner turned down is a decision too and sta
   lo que queremos del plugin) grabamos y colocamos el PR en el repo de HErmes», and «usa mi hermes desktop de este
   win durante la noche si lo necesitas, si encuentras issues o cosas a corregir, las corriges, fluye mientras voy a
   descansar».
+- 2026-11-11 · Reviewer picked from the configured models · Pedro: «sobre el desplegable si ok construyelo en
+  paralelo»: a dropdown of the models already configured in the user's Hermes, built in parallel with the recording
+  on its own branch (merged and re-pinned only if reviewed and tested in time, else after the submission), after «es que es
+  realmente un desproposito que no pueda mostrar un simple combo con las opciones de proveedores y modelos ya
+  configurados» and «tiene que haber manera de llamarlo orgánicamente». Ajustes del agente: the dropdown is
+  Hermes's own auxiliary-model picker (Foreman registers its review as an auxiliary task, by default on the first
+  fallback model, no capability needed) rather than a page Foreman draws itself.
