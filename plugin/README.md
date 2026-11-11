@@ -411,12 +411,13 @@ Desktop, or via `hermes config set plugins.entries.foreman.settings.<key> <value
 - **Model calls** only through Hermes (`ctx.llm`; Foreman never sees your keys), as `auto_review` sets them or when
   you type `/foreman review`: one call per exact diff, sending the bounded diff, the pull request or branch title,
   commit subjects (for a branch) and the detector's findings to the provider you configured. It spends tokens. With
-  `finish`, the agent's tool makes at most `max_bounces + 1` model calls per change until you merge, reject or
-  review it yourself.
-- **Notifications**, only after `/foreman notify on`: one `hermes send --to <target> --file <message> --quiet` per
+  `finish`, the agent's tool makes at most `max_bounces + 1` reviews per change until you merge, reject or
+  review it yourself. A review whose provider answers "overloaded" or "rate limited" (HTTP 429 or 5xx) is tried
+  up to two more times, 4 s and 12 s later, before it is reported as not run.
+- **Notifications**, only after `/foreman notify on`: one `hermes send --to <target> --file <message>` per
   pull request event, through Hermes's terminal tool, waiting at most 60 s, never retried, and never from inside a
   hook (an event that happens there is queued and sent by your next `/foreman` command or Foreman tool call). Your
-  Hermes and your own bot deliver it.
+  Hermes and your own bot deliver it; what Hermes answered (e.g. the chat id) is shown by `/foreman notify`.
 - **Desktop panel**, only when you switch it on: polls `GET /api/plugins/foreman/pipeline`, a read-only route Hermes
   mounts for the plugin, which returns a bounded, sanitised snapshot of Foreman's own `pipeline.json`. It writes
   nothing and calls no network.

@@ -88,7 +88,22 @@ Environments
   was reported as a skipped test: fixed by the owner's decision of 2026-11-10 (pull request
   `claude/skip-markers-tests-only`).
 
+## The owner's sitting, 2026-11-10 night (Telegram, his real profile, Foreman at 3cba39b)
+- `/foreman review 15` answered COULD NOT RUN (HTTP 429), then PASS WITH NOTES on `--fresh`; `/foreman review 13`
+  429 again. Cause: Hermes routes a plugin's call with no override through its auxiliary client, which on his
+  machine cannot use Codex ("no Codex OAuth token found") and falls back to opencode-go, overloaded that night.
+  `/foreman notify test` and a hand-run `hermes send` of the exact ready text both arrived; the automatic ready
+  notice was logged as sent (exit 0 under `--quiet`) but did not arrive, cause not found.
+- Fixed in the pull request `claude/review-resilience`: a busy provider is tried three times before "could not
+  run"; the model that answered is named when Hermes routed the review elsewhere, and never claimed independent;
+  the saved review's path is no longer printed in messaging (Telegram attached the JSON file); `hermes send` runs
+  without `--quiet` and its answer (the chat id) is kept and shown by `/foreman notify`.
+- Still to do in the sitting: the ready notice again, the confirmation card (`merge 15` → Cancel), `reject 13
+  --close` → Post only, then the Desktop panel.
+
 ## Defects found while testing, still open
+- Unresolved: on the owner's real profile, the automatic "ready" notice for PR #15 was logged as sent and did
+  not arrive (the test notice and hand-run sends did); the next one keeps Hermes's answer to tell where it went.
 - A change bounced by the review whose agent ends the turn without changing it stays "bounced 1/3": no notice to
   the owner until the limit, which a refusing agent never reaches.
 - The Desktop pane can disappear from the layout and not return until the app is reloaded and the switch toggled;

@@ -78,6 +78,8 @@ ADVISORY = "Advisory only: this review grants, merges and unblocks nothing."
 SAME_MODEL = ("Reviewed by the same model that wrote the code — set `reviewer_model` for an independent review.")
 UNKNOWN_MODEL = ("Could not tell whether the reviewer differs from the model that wrote the code (Hermes's main "
                  "model is not readable) — check `reviewer_model`.")
+ROUTED_MODEL = ("Hermes chose this model, not Foreman: it may or may not be the one that wrote the code — set "
+                "`reviewer_model` for an independent review.")
 
 # The context Hermes handed to register(); the review needs ``ctx.llm``, ``ctx.get_config`` and
 # ``ctx.has_capability``. Tests pass their own.
@@ -460,6 +462,7 @@ class Choice:
     model: Optional[str]
     source: str                    # setting | fallback | default
     notes: list = field(default_factory=list)
+    transient: bool = False        # the last call failed because the provider was busy
 
     @property
     def override(self) -> bool:
@@ -533,6 +536,24 @@ def same_model(a: str, b: str) -> bool:
     return bool(a and b) and (a == b or a.rsplit("/", 1)[-1] == b.rsplit("/", 1)[-1])
 
 
+def _model_key(model_id: str) -> str:
+    """A model id without vendor prefix, tag, version suffix or date, with "." and "-" equal: "anthropic.claude-
+    sonnet-4.5-v1:0", "claude-sonnet-4-5-20250929" and "claude-sonnet-4-5" give the same key."""
+    s = (model_id or "").strip().lower()
+    s = re.split(r"[/]", s)[-1]
+    s = re.sub(r"^[a-z0-9_]+\.(?=[a-z])", "", s)            # bedrock "anthropic." prefix
+    s = re.sub(r"(?:-v\d+)?(?::[\w.-]*)?$", "", s)          # "-v1:0", ":latest"
+    s = s.replace(".", "-")
+    s = re.sub(r"-(?:\d{8}|\d{4}-\d{2}-\d{2}|latest)$", "", s)  # a dated or "latest" id
+    return s
+
+
+def same_model_id(a: str, b: str) -> bool:
+    """Whether two ids may name the same model (spelling, prefixes and dates aside)."""
+    ka, kb = _model_key(a), _model_key(b)
+    return bool(ka and kb) and (ka == kb or ka.startswith(kb + "-") or kb.startswith(ka + "-"))
+
+
 def choose_model(ctx: Any, cfg: dict) -> Choice:
     main_provider, main_model = main_route(cfg)
     model, provider = _setting(ctx, "reviewer_model"), _setting(ctx, "reviewer_provider")
@@ -574,9 +595,37 @@ def _attr(obj: Any, name: str, default: Any = None) -> Any:
     return getattr(obj, name, default)
 
 
+# A provider that is overloaded or rate-limited answers again a few seconds later (a real session got HTTP 429
+# "The inference service is overloaded" twice in a row): retry before saying the review could not run.
+_TRANSIENT = re.compile(r"(?i)\b(429|500|502|503|529)\b|rate.?limit|overloaded|temporarily unavailable|"  # 504: a timeout
+                        r"try again later|connection (?:reset|aborted|error)")  # not a timeout: it used its time
+TRANSIENT_WAITS = (4.0, 12.0)  # seconds before the second and third tries
+_sleep = time.sleep  # replaced in tests
+
+
+def _is_transient(e: BaseException) -> bool:
+    return bool(_TRANSIENT.search("%s %s" % (type(e).__name__, e)))
+
+
 def call_model(ctx: Any, choice: Choice, instructions: str, inputs: list) -> tuple:
     """(result, None) or (None, reason). One retry on the host's model when Hermes refuses the override (the
-    refusal comes before any provider call, so nothing is spent twice)."""
+    refusal comes before any provider call, so nothing is spent twice); up to two more tries, with a pause, when the
+    provider is overloaded or rate-limited."""
+    result, error = _call_model_once(ctx, choice, instructions, inputs)
+    for wait in TRANSIENT_WAITS:
+        if result is not None or not choice.transient:
+            break
+        logger.info("foreman: the reviewer model is busy; trying again in %.0f s", wait)
+        _sleep(wait)
+        result, error = _call_model_once(ctx, choice, instructions, inputs)
+    if result is None and choice.transient:
+        error = ("the reviewer model is overloaded or rate-limited (tried %d times): %s. This is the provider, not "
+                 "the change; run `/foreman review --fresh` in a minute" % (len(TRANSIENT_WAITS) + 1, error))
+    return result, error
+
+
+def _call_model_once(ctx: Any, choice: Choice, instructions: str, inputs: list) -> tuple:
+    choice.transient = False
     llm = getattr(ctx, "llm", None) if ctx is not None else None
     if llm is None or not callable(getattr(llm, "complete_structured", None)):
         return None, "this Hermes does not give plugins model access (ctx.llm.complete_structured)"
@@ -598,6 +647,7 @@ def call_model(ctx: Any, choice: Choice, instructions: str, inputs: list) -> tup
                 choice.provider, choice.model, choice.source = None, None, "default"
                 continue
             logger.info("foreman: review model call failed", exc_info=True)
+            choice.transient = _is_transient(e)
             return None, "%s: %s" % (type(e).__name__, _short(str(e)) or "no detail")
     return None, "the model call was refused"
 
@@ -955,17 +1005,23 @@ def run_review(args: str = "", keys: tuple = (), platform: Optional[str] = None,
     _main_provider, main_model = main_route(cfg)
     # What Hermes attributes the call to. Without an override its provider (and, when the provider's response has
     # no model id, its model) come from Hermes's own idea of the main route, not from what ran: kept in the record
-    # for inspection, never printed as the reviewer's name.
+    # for inspection; its provider is never printed.
     attributed = ("%s / %s" % (_attr(result, "provider", "") or "?", _attr(result, "model", "") or "?")
                   if result is not None else "")
+    # The model that answered, as the provider's response names it. Without an override Hermes may still route the
+    # call elsewhere (its auxiliary route, then a fallback provider): a real session's review was answered by the
+    # fallback's model while Foreman said "the same model that wrote the code". Ids that differ only in spelling are
+    # the same model; ids that still differ are named, but never claimed independent (the author may have switched
+    # model in the session): unknown, not "different".
+    ran = str(_attr(result, "model", "") or "").strip() if result is not None and not error else ""
     if not choice.override:
-        same = True
+        same = None if ran and main_model and not same_model_id(ran, main_model) else True
     elif not main_model:
         same = None
     else:  # what was asked for, not the provider's canonical id (an alias and its dated id would not match)
         same = same_model(choice.model or "", main_model)
     record["model"] = {"provider": choice.provider or "", "model": choice.model or "", "source": choice.source,
-                       "same_as_author": same, "attributed_to": attributed}
+                       "same_as_author": same, "attributed_to": attributed, "ran": ran}
     record["model_notes"] = list(choice.notes)
     # The key of the reviewer that really ran (Hermes may have refused the override); the requested key points to
     # the same record, which names the model that ran, so asking again does not call the model again.
@@ -1037,7 +1093,11 @@ def cache_save(key: str, record: dict) -> None:
 
 # ─── Text output ─────────────────────────────────────────────────────────────
 
-def format_review(r: dict) -> str:
+TEXT_PLATFORMS = {"", "cli", "local", "tui"}  # where a reply stays text: a file path in it is not sent as a file
+
+
+def format_review(r: dict, platform: Optional[str] = None) -> str:
+    show_path = (platform or "").lower() in TEXT_PLATFORMS
     if r.get("verdict") in ("NO_REPOSITORY", "ERROR"):
         return "Foreman review: %s. %s" % ("no repository" if r["verdict"] == "NO_REPOSITORY" else "could not run",
                                            r.get("message", ""))
@@ -1050,7 +1110,10 @@ def format_review(r: dict) -> str:
                                         else "", r.get("slug", "")))
     m = r.get("model")
     if m:
-        if m["source"] == "default" or not m["model"]:
+        routed = (m["source"] == "default" or not m["model"]) and m.get("ran") and m.get("same_as_author") is None
+        if routed:
+            lines.append("Reviewer: %s (the model Hermes routed the review to)" % m["ran"])
+        elif m["source"] == "default" or not m["model"]:
             lines.append("Reviewer: the host's default model")  # its name is not reliably known to a plugin
         else:
             how = {"setting": "the reviewer_model setting", "fallback": "your Hermes fallback model"}[m["source"]]
@@ -1059,7 +1122,7 @@ def format_review(r: dict) -> str:
         if not r.get("error") and m["same_as_author"] is True:
             lines.append(SAME_MODEL)
         elif not r.get("error") and m["same_as_author"] is None:
-            lines.append(UNKNOWN_MODEL)
+            lines.append(ROUTED_MODEL if routed else UNKNOWN_MODEL)
     lines.append("Coverage: %s." % r["coverage"]["note"])
     det = r["deterministic"]
     lines.append("Deterministic gate: %s" % (det.get("verdict") or ("BLOCKED" if det["blocked"] else "CLEAN")))
@@ -1094,7 +1157,9 @@ def format_review(r: dict) -> str:
             lines.append("The model asked to block without verifiable evidence (its own verdict was BLOCK, and no "
                          "BLOCKING finding quoted the diff).")
     lines.append(ADVISORY)
-    if r.get("saved"):
+    # A messaging gateway turns a local file path in a reply into an attachment (Telegram sent the review's JSON,
+    # found in a real session), so the path is shown only where it stays text.
+    if r.get("saved") and show_path:
         lines.append("Saved: %s" % r["saved"])
     return "\n".join(lines)
 
@@ -1116,7 +1181,7 @@ def cmd_review(args: str = "", keys: tuple = (), platform: Optional[str] = None)
             pipeline.reset_model_calls(ref)
     except Exception:
         logger.warning("foreman: cannot reset the review budget", exc_info=True)
-    return format_review(r)
+    return format_review(r, platform)
 
 
 def _pipeline_ref(r: dict):
