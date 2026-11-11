@@ -75,10 +75,13 @@ hermes plugins enable foreman
 Requires Hermes Agent >= 0.22.6 and git on the PATH. The GitHub CLI (`gh`, logged in) is optional: without it the
 board shows local branches only.
 
-- **Second-model review on another model.** Foreman declares two capabilities, `llm.model_override` and
-  `llm.provider_override`. Hermes asks you to grant them only when you run `hermes plugins enable foreman` in an
-  interactive terminal (installing or enabling from the Desktop app does not ask). Without them the review runs on
-  the model Hermes picks for plugins and says so.
+- **Second-model review on another model, picked from your configured models.** Foreman registers its review as
+  one of Hermes's auxiliary tasks, **Foreman review**: pick its model where you pick the others, from the providers
+  and models your Hermes already has (Desktop: **Settings → Models → Auxiliary**; CLI: `hermes model` → *Configure
+  auxiliary models*; the dashboard's Models page). Until you pick one it uses your first fallback model, and it
+  needs no extra permission. The optional `reviewer_model` setting overrides it; that one needs the
+  `llm.model_override` capability (and `llm.provider_override` for another provider), which Hermes asks for only when
+  you run `hermes plugins enable foreman` in an interactive terminal.
 - **Desktop panel (optional).** In Hermes Desktop open **Capabilities → Plugins**, find **Foreman** and switch on its
   **Desktop** column (a plugin's Desktop half ships switched off; click **Rescan** if the row does not show it). The
   **Foreman** pane joins the right side as a tab; click the status-bar chip **Foreman · …** (or **Ctrl/⌘ K → Foreman:
@@ -225,9 +228,10 @@ None". The review sent it back with one blocking finding, the agent restored the
 and `/foreman pipeline` showed `gate ok > review ok > bounced 1/3 > owner - > merge -`. Nothing was committed or merged
 by the loop.
 
-- **Which model.** The `reviewer_model` setting (with `reviewer_provider` when it is on another provider); without it,
-  the first model of your Hermes fallback chain (`fallback_providers`); without one, your active model. A fallback on
-  a custom endpoint (`base_url`) cannot be selected by a plugin: Foreman says so and uses the active model. The output
+- **Which model.** The `reviewer_model` setting, if you typed one (with `reviewer_provider` when it is on another
+  provider); otherwise the model picked for **Foreman review** in Hermes's auxiliary models, by default the first
+  model of your Hermes fallback chain (`fallback_providers`); without either, your active model. On a Hermes that
+  cannot route a plugin's own auxiliary task, the fallback needs the two capabilities, as before. The output
   names the model that reviewed, and says so when it is the same one that wrote the code.
 - **Cost.** One call per exact diff: up to about 30k tokens of diff (120,000 characters; each file cut at 30,000;
   lockfiles, generated and binary files left out, tests and check files first) plus an answer of at most 4,096
@@ -366,7 +370,7 @@ review, or a ruleset): a pull request runs its own copy of the workflow, so an u
 | | `sarif_scope` | `changed` | `changed` or `all` |
 | plugin settings | `auto_review` | `merge` | `merge`, `finish` or `off` (see *Second-model review*) |
 | | `max_bounces` | `3` | how often a change goes back to the agent with `finish` |
-| | `reviewer_model` | empty | the reviewer model, as your provider names it |
+| | `reviewer_model` | empty | optional: a reviewer model typed by hand, overriding the **Foreman review** pick in Hermes's auxiliary models |
 | | `reviewer_provider` | empty | its Hermes provider id, when not your active one |
 | | `notify` | `off` | `on` or `off` |
 | | `notify_to` | empty | a `hermes send` target |
