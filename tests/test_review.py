@@ -444,7 +444,8 @@ class ModelChoice(ReviewCase):
     def test_the_review_goes_through_foremans_auxiliary_task(self):
         # The owner asked for a dropdown of the configured models (DECISIONES.md, 2026-11-11): the review is Hermes's
         # auxiliary task "Foreman review", picked in Hermes's own model pickers, with no override capability.
-        with mock.patch.object(review, "_TASK_REGISTERED", True):
+        defaults = {"provider": "otherprov", "model": "other-model"}
+        with mock.patch.object(review, "_TASK_REGISTERED", True), mock.patch.object(review, "_TASK_DEFAULTS", defaults):
             llm = FakeLlm(parsed=answer(), provider="otherprov", model="other-model")
             r = self.review(FakeCtx(llm), cfg=WITH_FALLBACK)
             self.assertEqual(llm.calls[0]["task"], review.TASK)
@@ -466,6 +467,28 @@ class ModelChoice(ReviewCase):
                         fresh=True)
             self.assertEqual(llm.calls[0]["model"], "judge-model")
             self.assertNotIn("task", llm.calls[0])
+
+    def test_a_task_on_the_main_model_is_never_claimed_independent(self):
+        # From review: no independent default (or a pick reset to auto) runs the task on the main model; a provider
+        # alias in the answer must not read as another model.
+        with mock.patch.object(review, "_TASK_REGISTERED", True), mock.patch.object(review, "_TASK_DEFAULTS", {}):
+            r = self.review(FakeCtx(FakeLlm(parsed=answer(), model="vendor-alias-of-main")))
+            self.assertIsNone(r["model"]["same_as_author"])
+            self.assertIn(review.TASK_UNSURE, review.format_review(r))
+
+    def test_the_cache_follows_the_tasks_real_route(self):
+        # From review: the key must change when the main model or the person's pick changes.
+        choice = review.Choice(None, None, "task", task=review.TASK)
+        with mock.patch.object(review, "_TASK_DEFAULTS", {"provider": "otherprov", "model": "other-model"}):
+            a = review.reviewer_key(choice, MAIN)
+            b = review.reviewer_key(choice, dict(MAIN, auxiliary={"foreman_review": {"provider": "auto", "model": "x"}}))
+            c = review.reviewer_key(choice, dict(MAIN, auxiliary={"foreman_review": {"provider": "p2", "model": "m2"}}))
+            self.assertEqual(len({a, b, c}), 3)
+            self.assertEqual(review.task_route(dict(MAIN, auxiliary={"foreman_review": {"provider": "auto", "model": "x"}})),
+                             ("mainprov", "x"))
+        with mock.patch.object(review, "_TASK_DEFAULTS", {}):
+            other_main = {"model": {"provider": "mainprov", "default": "newer-model"}}
+            self.assertNotEqual(review.reviewer_key(choice, MAIN), review.reviewer_key(choice, other_main))
 
     def test_a_hermes_that_refuses_the_task_falls_back_to_the_host_model(self):
         class NoTask(FakeLlm):

@@ -80,6 +80,8 @@ UNKNOWN_MODEL = ("Could not tell whether the reviewer differs from the model tha
                  "model is not readable) — check `reviewer_model`.")
 TASK_SAME_MODEL = ("Reviewed by the same model that wrote the code — pick another model for Foreman review in "
                    "Hermes's auxiliary models (Desktop: Settings → Models → Auxiliary; CLI: hermes model).")
+TASK_UNSURE = ("Foreman cannot tell whether this reviewer differs from the model that wrote the code — pick another "
+               "model for Foreman review in Hermes's auxiliary models for an independent review.")
 ROUTED_MODEL = ("Hermes chose this model, not Foreman: it may or may not be the one that wrote the code — set "
                 "`reviewer_model` for an independent review.")
 
@@ -480,11 +482,12 @@ class Choice:
 TASK = "foreman_review"
 TASK_TITLE = "Foreman review"
 _TASK_REGISTERED = False
+_TASK_DEFAULTS: dict = {}  # what the task was registered with; Hermes overlays auxiliary.<task> on it
 
 
 def register_task(ctx: Any) -> bool:
     """Register the auxiliary task; False on a Hermes without the API (the review then works as before)."""
-    global _TASK_REGISTERED
+    global _TASK_REGISTERED, _TASK_DEFAULTS
     register = getattr(ctx, "register_auxiliary_task", None)
     if not callable(register):
         return False
@@ -494,11 +497,12 @@ def register_task(ctx: Any) -> bool:
         provider, model = first_fallback(cfg)
         independent = model and not (same_model(model, main_model)
                                      and (not provider or provider.lower() == main_provider))
+        defaults = {"provider": provider, "model": model} if independent else None
         register(TASK, display_name=TASK_TITLE,
                  description="The second model that reviews each change's diff before you merge it (Foreman). By "
                              "default your first fallback model.",
-                 defaults={"provider": provider, "model": model} if independent else None)
-        _TASK_REGISTERED = True
+                 defaults=defaults)
+        _TASK_REGISTERED, _TASK_DEFAULTS = True, dict(defaults or {})
     except Exception:
         logger.warning("foreman: cannot register the review as an auxiliary task", exc_info=True)
         _TASK_REGISTERED = False
@@ -506,16 +510,18 @@ def register_task(ctx: Any) -> bool:
 
 
 def task_route(cfg: dict) -> tuple:
-    """(provider, model) the task resolves to as far as Foreman can read it: the person's pick in
-    ``auxiliary.foreman_review``, else the default it was registered with (the first fallback); ("", "") for "auto"."""
+    """(provider, model) the task resolves to, as Hermes resolves it: the person's pick in ``auxiliary.foreman_review``
+    laid key by key over the defaults it was registered with; provider "auto" (or none) is the main provider, and no
+    model is the main model."""
     aux = cfg.get("auxiliary") if isinstance(cfg.get("auxiliary"), dict) else {}
     pick = aux.get(TASK) if isinstance(aux.get(TASK), dict) else {}
-    provider, model = str(pick.get("provider") or "").strip(), str(pick.get("model") or "").strip()
-    if model and provider.lower() != "auto":
-        return provider, model
-    if provider.lower() == "auto" and not model:
-        return "", ""
-    return first_fallback(cfg)
+    merged = dict(_TASK_DEFAULTS)
+    merged.update({k: v for k, v in pick.items() if k in ("provider", "model")})
+    provider, model = str(merged.get("provider") or "").strip(), str(merged.get("model") or "").strip()
+    main_provider, main_model = main_route(cfg)
+    if not provider or provider.lower() == "auto":
+        return main_provider, model or main_model
+    return provider, model or main_model
 
 
 def hermes_config() -> dict:
@@ -1082,7 +1088,10 @@ def run_review(args: str = "", keys: tuple = (), platform: Optional[str] = None,
         picked_provider, picked_model = task_route(cfg)
         shown_provider = str(_attr(result, "provider", "") or "") if ran else picked_provider
         shown_model = ran or picked_model
-        same = None if not (shown_model and main_model) else same_model_id(shown_model, main_model)
+        if picked_model and main_model and not same_model_id(picked_model, main_model):
+            same = same_model_id(shown_model, main_model)  # another model was picked: named, independent unless not
+        else:  # the pick is the main model (or unknown): never claimed independent on a differing id alone
+            same = None if ran and main_model and not same_model_id(ran, main_model) else (True if main_model else None)
     elif not choice.override:
         same = None if ran and main_model and not same_model_id(ran, main_model) else True
     elif not main_model:
@@ -1192,7 +1201,7 @@ def format_review(r: dict, platform: Optional[str] = None) -> str:
         if not r.get("error") and m["same_as_author"] is True:
             lines.append(TASK_SAME_MODEL if m["source"] == "task" else SAME_MODEL)
         elif not r.get("error") and m["same_as_author"] is None:
-            lines.append(ROUTED_MODEL if routed else UNKNOWN_MODEL)
+            lines.append(TASK_UNSURE if m["source"] == "task" else ROUTED_MODEL if routed else UNKNOWN_MODEL)
     lines.append("Coverage: %s." % r["coverage"]["note"])
     det = r["deterministic"]
     lines.append("Deterministic gate: %s" % (det.get("verdict") or ("BLOCKED" if det["blocked"] else "CLEAN")))

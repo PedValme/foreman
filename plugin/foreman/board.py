@@ -1317,7 +1317,7 @@ def _review_for_merge(root: str, number: int, v: dict, keys: tuple, platform: Op
     if m and m.get("same_as_author") is True and not rec.get("error"):
         out["notes"].append("  " + (review.TASK_SAME_MODEL if m.get("source") == "task" else review.SAME_MODEL))
     elif m and m.get("same_as_author") is None and m.get("ran") and not rec.get("error"):
-        out["notes"].append("  " + review.ROUTED_MODEL)
+        out["notes"].append("  " + (review.TASK_UNSURE if m.get("source") == "task" else review.ROUTED_MODEL))
     if verdict == "COULD NOT RUN":
         out["unreviewed"] = rec.get("error") or "unknown reason"
         return out
