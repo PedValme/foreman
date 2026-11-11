@@ -607,8 +607,22 @@ class TurnedOff(GitRepoCase):
         with self.config(["some-other-plugin"]):
             self.assertFalse(gate.turned_off())
             self.assertEqual(terminal("git commit -m x", self.root)["action"], "block")
-        self.assertFalse(gate.turned_off())  # no Hermes config reader: never off by accident
-        self.assertEqual(terminal("git commit -m x", self.root)["action"], "block")
+        with mock.patch.dict(sys.modules, {"hermes_cli": None, "hermes_cli.config": None}):
+            self.assertFalse(gate.turned_off())  # no Hermes config reader: never off by accident
+            self.assertEqual(terminal("git commit -m x", self.root)["action"], "block")
+
+    def test_the_agent_cannot_turn_foreman_off(self):
+        # Found in review: turned off takes effect at once, so an agent could switch the gate off and commit next.
+        for command in ("hermes plugins disable foreman", "hermes -p default plugins remove foreman",
+                        "hermes plugins uninstall Foreman", "echo ok && hermes plugins disable foreman",
+                        "hermes config set plugins.disabled '[foreman]'", "hermes config unset plugins.enabled"):
+            d = gate.on_pre_tool_call(tool_name="terminal", args={"command": command, "workdir": self.root})
+            self.assertEqual(d["action"], "block", command)
+            self.assertIn("user's decision", d["message"])
+        for command in ("hermes plugins list", "hermes plugins disable some-other-plugin", "hermes config get model",
+                        "echo foreman"):
+            self.assertIsNone(gate.on_pre_tool_call(tool_name="terminal", args={"command": command,
+                                                                                  "workdir": self.root}), command)
 
 
 class WriteGate(GitRepoCase):

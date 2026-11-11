@@ -987,10 +987,34 @@ def turned_off() -> bool:
         return False
 
 
+_HERMES = re.compile(r"(?i)\bhermes(?:\.exe)?\b")
+_PLUGIN_OFF = re.compile(r"(?i)\bplugins\s+(?:disable|remove|uninstall|rm)\b")
+_FOREMAN_WORD = re.compile(r"(?i)\bforeman\b")
+_CONFIG_WRITE = re.compile(r"(?i)\bconfig\s+(?:set|edit|unset)\b")
+_PLUGINS_WORD = re.compile(r"(?i)\bplugins\b")
+
+
+def _switches_foreman_off(command: str) -> bool:
+    """A terminal command that turns Foreman off or rewrites the plugins config: since a turned-off Foreman stands
+    down at once, the agent could otherwise turn the gate off and commit on the next call (found in review). Each
+    part of the line on its own, linear searches only."""
+    for part in re.split(r"[;&|\n]+", command or ""):
+        if not _HERMES.search(part):
+            continue
+        if (_PLUGIN_OFF.search(part) and _FOREMAN_WORD.search(part)) or (_CONFIG_WRITE.search(part)
+                                                                        and _PLUGINS_WORD.search(part)):
+            return True
+    return False
+
+
 def on_pre_tool_call(tool_name: str = "", args=None, task_id: str = "", **kwargs) -> Optional[dict]:
     """The hook Hermes calls. Inside it nothing is sent anywhere (``pipeline.hook_context``)."""
     if tool_name not in TERMINAL_TOOLS and tool_name not in WRITE_TOOLS:
         return None  # the common case, before anything else
+    if tool_name in TERMINAL_TOOLS and isinstance(args, dict) and isinstance(args.get("command"), str)             and _switches_foreman_off(args["command"]):
+        return {"action": "block", "message": "Foreman blocked this command: turning Foreman off or changing the "
+                "plugins configuration is the user's decision (Capabilities → Plugins, or their own terminal). "
+                "If Foreman is in the way, tell the user why."}
     if turned_off():
         return None
     from . import pipeline
