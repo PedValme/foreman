@@ -143,4 +143,17 @@ as the button text.
 - **Desktop keeps the spinner after a plugin's question.** After a slash command that called `ctx.ask_choice` and
   returned its reply, the chat keeps the busy spinner until the user sends another message.
 
+## 6. Let a plugin's settings pick the model for its own auxiliary task with the native picker
+
+A plugin that calls `ctx.register_auxiliary_task("foreman_review", …)` gets a row in Settings → Models → Auxiliary,
+but its own Settings → Plugins page cannot offer the same choice: `config.set` refuses `auxiliary.*` keys
+(`tui_gateway/methods_config_set.py`), `POST /api/model/set` is reachable from a desktop plugin only through the raw
+`window.hermesDesktop` bridge that catalog rule 8 forbids, and a free-text `config_schema` field duplicates the choice
+and needs `llm.model_override`. Either would do: (1) a `config_schema` field type `auxiliary_model` with a `task:` key
+naming a task the same plugin registered, rendered with the Auxiliary row's provider/model select and saved through
+`/api/model/set {scope: "auxiliary", task}`; or (2) a gateway method `model.assign_auxiliary` plus an SDK verb
+`ctx.models.setAuxiliary(task, route)` that refuses tasks the calling plugin did not register. Please also list
+`ModelCatalogMenu` / `ModelMenuController` in the SDK docs' export table (exported in `sdk/index.ts`, used by the
+bundled kanban plugin).
+
 Happy to test any of these against Foreman, or to send a PR for the first one if you agree on its shape.
