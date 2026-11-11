@@ -6,17 +6,17 @@
 ## Next session
 - Was doing: the overnight final review (DECISIONES.md, 2026-11-11): five reviewers (catalog rules, an adversarial
   attack on the gate, docs against code, verification coverage, fresh install and privacy), each finding verified and
-  fixed in the pull request `claude/final-review`, its gate and detector changes reviewed twice by another agent.
-  The deadline is 2026-11-11 17:00 (Lima).
-- Tried: both gate batteries re-run on the current code (18/18), the detector CLI by hand, a real merge and reject
-  with the merged/rejected notices. The new video script is `trabajo/demo-video.md` (one change through the whole
-  line, every step asked in plain words so each take behaves the same), with `trabajo/pruebas/prepare-recording.sh`
-  (dry run by default) to reset `foreman-demo` and the panel before each take.
-- Next action (morning, with the owner): merge `claude/final-review`, reinstall Foreman at its commit in the real
-  profile and `foremandev`; the owner grants the two capabilities with `hermes plugins enable foreman` in a terminal
-  on the Hermes machine; `prepare-recording.sh --go`; rehearse the script once; record; then pin the commit in
-  `trabajo/catalog/foreman.yaml`, open the Hermes issue, the catalog pull request (noreply email), the X post, the
-  form.
+  fixed in #33 (merged), its gate and detector changes reviewed twice by another agent. Foreman d6fb66b is installed
+  in the real profile (settings kept) and `foremandev`; the catalog entry is pinned to d6fb66b (#34; Hermes's
+  catalog validator OK, the screenshots 200). The deadline is 2026-11-11 17:00 (Lima).
+- Tried: both gate batteries re-run on d6fb66b (18/18), the detector CLI by hand, a real merge and reject with the
+  merged/rejected notices. The new video script is `trabajo/demo-video.md` (one change through the whole line,
+  every step asked in plain words so each take behaves the same), with `trabajo/pruebas/prepare-recording.sh` (dry
+  run by default) to reset `foreman-demo` and the panel before each take.
+- Next action (morning, with the owner): he grants the two capabilities with `hermes plugins enable foreman` in a
+  terminal on the Hermes machine; `prepare-recording.sh --go`; rehearse the script once (section (e)); record; then
+  open the Hermes issue, the catalog pull request (noreply email, steps at the top of `trabajo/catalog-pr.md`), the
+  X post, the form. If anything in the plugin changes before submitting, pin the entry again.
 - Waits for the owner: say yes to opening `trabajo/catalog-pr.md`, `trabajo/catalog/foreman.yaml` and `trabajo/hermes-issue-seams.md` with his account, after everything is verified (he read the summaries and approved the four changes to the entry) · Verified by: the pull request and the issue open in NousResearch/hermes-agent
 - Waits for the owner: record the video once the plugin is fully verified, then publish it on X tagging @NousResearch and submit the form
 - Waits for the owner: his personal email is the author of commits in the public history of `PedValme/foreman` and `foreman-demo` (rewriting shared history is not allowed here) · Recommended: accept it for the existing commits and set the GitHub noreply address for future ones (and "Block command line pushes that expose my email" on GitHub)
