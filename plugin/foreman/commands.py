@@ -211,8 +211,9 @@ def cmd_help(args: str = "", keys: tuple = (), platform: Optional[str] = None) -
     lines += ["  %-14s %s" % (name, doc) for name, (_fn, doc) in SUBCOMMANDS.items()]
     lines += ["", "Verdicts:", verdicts.table()]
     lines += ["",
-              "Foreman blocks git commit, git push, gh pr create and gh pr merge when the change skips, deletes or "
-              "moves tests, edits or weakens what the check runs, bypasses hooks or carries a secret.",
+              "Foreman blocks git commit, git push and gh pr create when the change skips, deletes or moves tests, "
+              "edits or weakens what the check runs, bypasses hooks or carries a secret; an agent-run gh pr merge is "
+              "always blocked (merging is yours: /foreman merge).",
               "A false positive is marked on its line with `%s` (or, for a file, a commit-message line `%s <path>: "
               "<reason>`). The mark never passes alone: it waits until you run `/foreman allow <id>`." % (MARKER, MARKER),
               "Pull requests and issues come from the GitHub CLI (`gh`) with its own login. `/foreman merge` and "

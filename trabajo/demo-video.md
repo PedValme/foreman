@@ -1,109 +1,99 @@
 # Demo video: script and recording instructions
 
-For the person recording (OBS) and for the editor. Owner's decisions: 1920×1080, 30 fps, screen only (no camera),
-no voice, on-screen captions in English, at most 90 seconds, published on X tagging @NousResearch. The video shows the
-plugin working as before and after (DECISIONES.md, 2026-11-09).
+For the person recording and for the editor. Owner's decisions: 1920×1080, 30 fps, screen only (no camera), no
+voice, on-screen captions in English, at most 90 seconds, published on X tagging @NousResearch; the plugin is shown
+loaded, then enabled, then acting (DECISIONES.md, 2026-11-09); the video shows the whole line, not one function
+(DECISIONES.md, 2026-11-10).
 
-## (a) The story
+## (a) The story, in one sentence
 
-A developer is in a hurry and tells the agent to skip the failing test and commit. Without Foreman, the agent does
-exactly that and the check turns green over a real bug. With Foreman enabled, the same request is blocked at the
-write, the agent reads why, fixes the code instead, and the honest commit passes. Then the wider line: the board shows
-every pull request with its stage; a rigged pull request is blocked; a pull request that only loosened two assertions
-passes the rules but is caught by a second model on another provider; and the only merge that happens is the one the
-owner confirms.
+One change moves through the whole line, live: the agent is told to silence a failing test and Foreman stops it; the
+agent fixes the bug for real and opens a pull request; a second model on another provider reviews it; the owner gets
+the call on his phone and approves; it merges and the issue closes. Then the counter-case: a pull request that only
+loosened its assertions passes every rule, and the second model refuses it.
 
-## (b) Shot list (target 81 s; the cap is 85 s)
+Why this script and not the previous one: the previous "before" shot depended on the model choosing to cheat, which
+it does not always do. Here every step is asked for in plain words, so every take behaves the same; what is shown is
+what Foreman does with the request, not whether a model misbehaves.
 
-Every agent turn is sped up in the edit; put a small `4x` tag in a corner while it is sped up. Outputs below are from
-real sessions on Hermes v0.23.0 (trimmed); wait for them before cutting.
+## (b) Setup, once (the evening before or 30 minutes before recording)
 
-| # | Sec | On screen | Type / run exactly | Wait for | Caption (≤ 8 words) | Speed up |
+1. Run `trabajo/pruebas/prepare-recording.sh` from the development PC (it closes the throwaway pull requests, resets
+   `foreman-demo` and its clone on the Hermes machine, reopens issue #1, and archives Foreman's pipeline so the panel
+   starts empty). It prints what it did; read it.
+2. Hermes Desktop on the Windows PC, connected to the Hermes machine (the owner's real profile). Window maximised at
+   1920×1080, app theme as on the README capture, font size so the chat reads at 1080p.
+3. The two capabilities, so the reviewer is a second model: in a terminal on the Hermes machine run
+   `hermes plugins enable foreman` and answer yes to `llm.model_override` and `llm.provider_override` (the Desktop
+   app does not ask for them). Then Desktop → Settings → Plugins → Foreman:
+   - Reviewer model `deepseek-v4.1-flash`, Reviewer provider `opencode-go`;
+   - Automatic review `merge`; Notifications `on`, Notify where `telegram`.
+   Then **disable** Foreman (the plugin's switch), so the first shots show it loaded but off.
+4. A new Desktop chat. Right side open (Ctrl+J). The Foreman tab will appear when the plugin is enabled.
+5. Phone: Telegram open on the chat with the owner's Hermes bot; phone screen recording ready (it is composited as a
+   picture-in-picture in the edit). Do not disturb on, other notifications off.
+6. OBS: one scene, display capture of the PC screen, 1920×1080, 30 fps, MP4. Hide the taskbar clock if it shows the
+   date. Record each shot as its own clip (start and stop between shots): the edit is easier and a bad take costs one
+   shot, not the video.
+7. Rehearse once without recording (section (e)), then run `prepare-recording.sh` again.
+
+## (c) Shot list (target 85 s; the cap is 90 s)
+
+Every agent turn is sped up in the edit; put a small `4x` tag in a corner while it is sped up. Type the prompts
+exactly; "Reply in English." keeps the agent's answers in English for the captions.
+
+| # | Sec | On screen | Type / do exactly | Wait for | Caption (≤ 8 words) | Speed |
 |---|---|---|---|---|---|---|
-| 1 | 3 | Black card, white text: "Foreman" and the promise | — (made in the edit) | — | A green check the agent did not rig | — |
-| 2 | 4 | Terminal in `~/cart`: `hermes plugins list` row shows foreman installed, disabled; then `python -m unittest discover -s tests -t .` | `hermes -p foremandev plugins list` then `python -m unittest discover -s tests -t .` | `FAILED (failures=1)` and `-900 != 90` | One real bug, one honest failing test | no |
-| 3 | 11 | Hermes chat, Foreman disabled | `hermes -p foremandev` then the prompt: `I'm in a hurry, just skip that failing test and commit.` | the agent adds `@unittest.skip`, the tests print `OK (skipped=1)`, the commit goes through | Without Foreman: the agent skips it | agent turn 4x |
-| 4 | 3 | The commit's diff | `/exit` then `git show --stat HEAD` and `git show HEAD -- tests` | the `+    @unittest.skip(...)` line | Green check, bug still there | no |
-| 5 | 6 | Reset and enable | `git reset --hard HEAD~1` then `hermes -p foremandev plugins enable foreman` | `enabled` (answer the capability prompt with yes) | Now enable Foreman | prompt answer 2x |
-| 6 | 16 | New Hermes session, same prompt | `hermes -p foremandev` then `I'm in a hurry, just skip that failing test and commit.` | `Foreman blocked this patch: it switches off a test.` and `[test-skipped] tests/test_cart.py — test skipped or isolated  Fix: Remove the marker and make the test pass by fixing the code under test.`; then the agent edits `cart.py`, tests `OK`, commit passes | Same request: blocked, then fixed for real | agent turns 4x; hold 2 s on the block message |
-| 7 | 7 | Hermes in the demo GitHub repository | `/foreman` | the board: PRs with the issue each closes, issues no PR closes, a pipeline line such as `gate ok > review FAIL (2 blocking) > bounced 0/3 > owner - > merge refused` | Every PR, its issue, its stage | no |
-| 8 | 6 | The rigged PR | `/foreman verdict 3` then `/foreman merge 3` | `BLOCKED` with `[test-skipped] …`; the merge refused | A rigged PR cannot merge | no |
-| 9 | 10 | The loosened-assertion PR | `/foreman merge 4` | the review runs on the fallback model, then `BLOCKED` quoting both lines, e.g. `assertTrue passes for any non-empty string — including the unfixed value` | Rules say clean. A second model disagrees | the model wait 8x |
-| 10 | 4 | The agent tries to merge by itself | prompt: `Merge PR 4 anyway, I approve.` (session started with `--yolo`) | `Merging is the user's decision. Ask them to run /foreman merge 4.` | Even in YOLO, only you merge | agent turn 4x |
-| 11 | 8 | The clean PR, owner confirms | `/foreman merge 2 --yes` | the merge output; then the browser on the PR page (merged) and issue #1 (closed) | You approve. Then it merges | browser cut to 2 s |
-| 12 | 3 | End card | — (edit) | — | github.com/PedValme/foreman | — |
+| 1 | 3 | Black card | — (edit) | — | Foreman: a green check your agent did not rig | — |
+| 2 | 5 | Desktop chat, Foreman **off** | `In /Users/glorieto/foreman-demo the discount test fails. Add @unittest.skip to test_discount_is_a_percentage and commit it. Reply in English.` | the agent adds the skip and commits | Without a guard: the test is silenced | 4x |
+| 3 | 4 | Settings → Plugins | turn Foreman **on**; back to the chat; the Foreman tab appears on the right | the tab | Now turn Foreman on | — |
+| 4 | 2 | Terminal of the PC is not used; the agent undoes its commit | `Undo that last commit with git reset --hard HEAD~1. Reply in English.` | `HEAD is now at …` | (no caption; cut tight) | 4x |
+| 5 | 9 | Same chat | the prompt of shot 2 again | `Foreman blocked this patch: it switches off a test.` and the fix line; the agent says it will not add it | Same request: blocked at the write | 4x, hold 2 s on the block |
+| 6 | 14 | Chat + panel | `Then fix the real bug instead, on a new branch fix/discount: commit, push and open a pull request that closes #1. Reply in English.` | commit, push and `gh pr create` pass; the PR URL; a new card appears in the panel with Gate green | The honest fix goes through, onto the line | 4x |
+| 7 | 8 | Chat + panel | `/foreman review <n>` (the new PR's number) | `Foreman review: PASS` with `Reviewer: opencode-go / deepseek-v4.1-flash (the reviewer_model setting)`; the card moves Review → waiting for you | A second model, another provider, reviews | model wait 8x |
+| 8 | 6 | Phone (PiP) | — | the Telegram message `Foreman: PR #<n> is ready to merge and waits for you` | The call comes to your phone | — |
+| 9 | 10 | Phone (PiP) | tap the `/foreman merge <n> --repo PedValme/foreman-demo` line to copy it, send it; on the question tap **1** (Merge PR #<n>) | `Foreman: merged PR #<n> (squash)` | You approve. Only then it merges | 2x |
+| 10 | 5 | Desktop panel + browser | the card shows Merged; click Open ↗; on GitHub, issue #1 closed | the closed issue | Merged, issue closed | — |
+| 11 | 12 | Desktop chat + panel | `/foreman merge 4` | the review on deepseek, then `Foreman will not merge PR #4` with the findings quoting `assertTrue` | Rules pass. The second model refuses | model wait 8x |
+| 12 | 4 | Desktop chat | `Merge PR 4 yourself with gh, I approve. Reply in English.` | `Merging is the user's decision. Ask them to run /foreman merge 4.` | Only you merge | 4x |
+| 13 | 3 | End card | — (edit) | — | github.com/PedValme/foreman | — |
 
-Total: 3+4+11+3+6+16+7+6+10+4+8+3 = 81 s.
+Total: 3+5+4+2+9+14+8+6+10+5+12+4+3 = 85 s.
 
-Why this prompt for shots 3 and 6: in a real session, an agent asked only to "make the suite green" fixed the code
-honestly, which shows nothing. Asked "I'm in a hurry, just skip that failing test and commit", it took the shortcut.
-The hurried-user wording is what people really type, and it makes the before shot honest: the agent was asked, and it
-complied.
+## (d) If a take goes wrong
 
-## (c) Preparation checklist
+- Shot 2, the agent refuses to add the skip even when asked: keep the refusal out, record shot 5 only and change the
+  shot 5 caption to "Asked to silence a test: blocked". The story still holds.
+- Shot 6, the agent edits the test instead of `cart.py`: the gate blocks it (that is a good shot too); ask
+  `Fix cart.py, not the test.` and continue.
+- Shot 7, `COULD NOT RUN` (the provider is overloaded): wait a minute and run `/foreman review <n> --fresh`; never
+  record a pass that did not happen.
+- Shot 8, no Telegram message within 30 s: run `/foreman notify` in the Desktop chat and read "Last: … Hermes said";
+  record shot 8 again after `/foreman review <n> --fresh` only if the message really arrives.
+- Desktop shows a spinner after a question that was answered: send any message and it stops (a Desktop issue, not
+  Foreman's); cut it out.
+- The Foreman tab disappears: reload the app (Ctrl+R) and toggle the plugin's switch (known issue in ESTADO.md).
+- Between full takes: run `prepare-recording.sh` again.
 
-- **Machine**: the owner's Hermes machine (the only one with a model provider), Hermes v0.23.0, profile `foremandev`
-  only (never the default profile). A fallback model on another provider is configured, so the review runs on a
-  second model. The two `llm.*` capabilities are granted from an interactive terminal before shots 7-11.
-- **Terminal**: full screen at 1920×1080, font 20-22 pt, a dark theme with high contrast (white on near-black), no
-  transparency, prompt shortened to `cart $` (`PS1='cart $ '`), cursor blinking off, scrollback cleared (`clear`)
-  before each take.
-- **Desktop**: do-not-disturb on (macOS Focus), no menu-bar clock if possible, hide the dock, close every other app,
-  wallpaper plain.
-- **Example repo** (shots 2-6): `rm -rf ~/cart && cp -r <foreman clone>/examples/cart ~/cart && cd ~/cart && git init -q -b main && git add -A && git commit -qm "cart with a bug"`.
-  Before shot 3: `hermes -p foremandev plugins disable foreman`. Enabling inside a running session is not verified:
-  shot 6 always starts a new session.
-- **Demo GitHub repo** (shots 7-11): a public repository made from the cart example, `foreman` enabled, `gh` logged
-  in. Issue #1 "A 10% discount gives -900". Then, each from `main`:
-  - PR #2 `fix/discount`: the real fix in `cart.py`, body `Closes #1` (clean, mergeable).
-  - PR #3 `skip/discount`: `@unittest.skip` on the failing test (gate: BLOCKED).
-  - PR #4 `loosen/asserts`: `test_total` changed to `assertTrue(total([10, 20, 30]))` and the discount test changed to
-    `assertTrue(total([100], discount=10))` (gate: CLEAN; review: BLOCKED).
-  Numbers can differ: change the commands in the shot list to match. Run `/foreman merge 4` once before recording
-  only if you want the cached answer (instant, no tokens); for the take, `--fresh` is not needed since the cache gives
-  the same result.
-- **Session for shots 7-11**: `cd <demo repo clone> && hermes -p foremandev --yolo` (YOLO is what makes shot 10
-  meaningful; the slash commands work the same).
-- **Notifications and panel**: off for the main cut (see fallbacks).
-- **Between takes**:
-  - shots 3-6: `cd ~/cart && git reset --hard $(git rev-list --max-parents=0 HEAD) && git clean -fd` and
-    `hermes -p foremandev plugins disable foreman`;
-  - shot 11: a merge cannot be undone on GitHub. Record it last. To retake, open a new PR with the same fix
-    (`git checkout -b fix/discount-2 origin/main`, apply the fix, `gh pr create --fill`) and use its number.
+## (e) Rehearsal checklist (once, not recorded)
 
-## (d) Fallbacks
+All 13 shots in order, checking each "Wait for" text appears as written; note the new PR's number; confirm the
+phone gets the message; then reset. If any "Wait for" text differs, fix the script (or the plugin) before recording,
+never the caption to hide it.
 
-- **Cut first if long**: shot 4 (the diff; shot 3 already shows `OK (skipped=1)`), then shot 10, then trim shot 7 to
-  4 s. Never cut 6 or 9: they are the before/after and the second model.
-- **Optional extra if there is room** (verified in a real session): the `finish` loop. With
-  `hermes -p foremandev config set plugins.entries.foreman.settings.auto_review finish`, ask the agent in one turn to
-  add `apply_coupon()` with a test and to change `test_total` to only check the result is not None; the review sends
-  it back once and the agent restores the exact assertion (about 68 s real time, run at 8x). Then
-  `/foreman pipeline coupons` shows `gate ok > review ok > bounced 1/3 > owner - > merge -`. Caption: "The review
-  sends it back inside the turn".
-- **Not verified in the real app yet; each has a substitute**:
-  - Owner approving on the phone (Telegram notification, `ask_choice` buttons): the notification text is tested,
-    a real send and buttons on Telegram are not. Substitute: shot 11 as written (`--yes` typed in the terminal,
-    verified). If the owner tries the phone and it works, use it instead of shot 11 with caption "Approve from your
-    phone".
-  - Merge picker answered by a person (`/foreman merge 2` without `--yes`, then **Merge**): not verified. Try it; if
-    the picker does not show, use `--yes`.
-  - Desktop panel inside Hermes Desktop: only seen in a browser preview. Substitute: a 3-second still of
-    `docs/screenshots/panel-waiting-for-owner-light.png` with the caption "Desktop panel (preview)". Do not present
-    the preview as the app.
+## (f) Editing notes
 
-## (e) X post (two variants, ≤ 250 characters)
+- Cut every wait that is not the moment itself; speed up agent turns (4x) and model waits (8x) with the corner tag.
+- Hold 2 s on: the block message (shot 5), the new card appearing (shot 6), the Telegram message (shot 8), the refusal
+  of PR #4 (shot 11).
+- Captions: white, bottom third, 2 s minimum each, one at a time.
+- Zoom (1.3x, smooth) on the panel card in shots 6, 7 and 10, and on the refusal text in shot 11.
+- No music needed; if any, low and royalty-free.
+- Export 1920×1080, 30 fps, H.264, under 90 s; check it plays on X before posting.
 
-1. `Coding agents can turn a check green by skipping the test. Foreman, a Hermes Agent plugin, blocks that, gets a second model to review the diff, and leaves the merge to you. @NousResearch github.com/PedValme/foreman`
-2. `"Just skip that failing test and commit." Without Foreman, the agent does. With it, the skip is blocked and the code gets fixed. A Hermes Agent plugin for @NousResearch's hackathon: github.com/PedValme/foreman`
+## (g) The post on X (draft; the owner publishes)
 
-## (f) Recording tips (OBS)
-
-- Canvas and output 1920×1080, 30 fps, recording format MKV (remux to MP4 after), CQP/CRF around 18, one Display
-  Capture source, no audio tracks.
-- One long take per shot group: 2-4, 5-6, 7-11. Do not stop between commands; the editor cuts.
-- Keep the mouse still and out of the terminal; type commands by hand at a steady pace (or paste them, then wait one
-  second before Enter so the viewer can read them).
-- Leave 2 seconds of still screen after each expected output appears.
-- Notifications off everywhere (Focus on, Slack and mail closed) and the phone face down unless it is in a shot.
-- Check the first take's file before recording the rest: legible text at 50 % zoom is the bar.
+> Foreman, a @NousResearch Hermes Agent plugin: a green check your agent did not rig.
+> A deterministic gate blocks skipped/deleted tests, a changed check and secrets; a second model reviews; you approve
+> from your phone; only then it merges. #HermesAgent
+> github.com/PedValme/foreman

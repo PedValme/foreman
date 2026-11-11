@@ -4,30 +4,33 @@
 
 <!-- pic-method: next-session -->
 ## Next session
-- Was doing: end-to-end verification before the video (DECISIONES.md, 2026-11-10). Done: every CLI case and the
-  owner's sitting on Telegram and Desktop (2026-11-10/11 night) all work; the list is `trabajo/pruebas-punta-a-punta.md`.
+- Was doing: the overnight final review (DECISIONES.md, 2026-11-11): five reviewers (catalog rules, an adversarial
+  attack on the gate, docs against code, verification coverage, fresh install and privacy), each finding verified and
+  fixed in the pull request `claude/final-review`, its gate and detector changes reviewed twice by another agent.
   The deadline is 2026-11-11 17:00 (Lima).
-- Tried: the real sessions found ten defects, all fixed and merged (#26, #29, #30, and the remembered-repository
-  pull request `claude/gated-repo`); what remains open is Hermes's (numbered Telegram buttons, the Desktop spinner
-  after a plugin question, plugin model calls through the auxiliary client) and two small items in the list.
-  Foreman on the owner's real profile was reinstalled from the Desktop app (his settings restored: notify on to
-  telegram, auto_review merge); `foremandev` runs d5e6f6f. `foreman-demo`: the video's clean fix is PR #15.
-- Next action: rewrite the video script around one change moving through the whole line (`trabajo/demo-video.md`
-  no longer holds), rehearse, record; then pin the commit, the catalog pull request and the issue with the owner's
-  account, the X post, the form. #31 is merged and installed at 2bed849 in the real profile and `foremandev`; the
-  Hermes findings are in `trabajo/hermes-issue-seams.md` (section 5).
+- Tried: both gate batteries re-run on the current code (18/18), the detector CLI by hand, a real merge and reject
+  with the merged/rejected notices. The new video script is `trabajo/demo-video.md` (one change through the whole
+  line, every step asked in plain words so each take behaves the same), with `trabajo/pruebas/prepare-recording.sh`
+  (dry run by default) to reset `foreman-demo` and the panel before each take.
+- Next action (morning, with the owner): merge `claude/final-review`, reinstall Foreman at its commit in the real
+  profile and `foremandev`; the owner grants the two capabilities with `hermes plugins enable foreman` in a terminal
+  on the Hermes machine; `prepare-recording.sh --go`; rehearse the script once; record; then pin the commit in
+  `trabajo/catalog/foreman.yaml`, open the Hermes issue, the catalog pull request (noreply email), the X post, the
+  form.
 - Waits for the owner: say yes to opening `trabajo/catalog-pr.md`, `trabajo/catalog/foreman.yaml` and `trabajo/hermes-issue-seams.md` with his account, after everything is verified (he read the summaries and approved the four changes to the entry) · Verified by: the pull request and the issue open in NousResearch/hermes-agent
 - Waits for the owner: record the video once the plugin is fully verified, then publish it on X tagging @NousResearch and submit the form
+- Waits for the owner: his personal email is the author of commits in the public history of `PedValme/foreman` and `foreman-demo` (rewriting shared history is not allowed here) · Recommended: accept it for the existing commits and set the GitHub noreply address for future ones (and "Block command line pushes that expose my email" on GitHub)
+- Waits for the owner: DECISIONES.md quotes his words with the names of his private tooling (the factory, its guardian) · Recommended: keep them (they are words, not hosts or secrets; the hostname and accounts were already redacted)
 
 ## Delivered
-- The plugin, version 0.1.0, in `plugin/`: 370 tests, CI on Linux, macOS and Windows, `hermes plugins validate
+- The plugin, version 0.1.0, in `plugin/`: 376 tests, CI on Linux, macOS and Windows, `hermes plugins validate
   plugin` passing with one guarded private-import warning; the catalog entry draft passing Hermes's validator
   (short description, category `automation`, a real-app capture first).
 - `PedValme/foreman-demo` (public) as the demo repository; the README as one page with the real capture.
 - End-to-end verification in real sessions, the owner's sitting included (`trabajo/pruebas-punta-a-punta.md`).
 
 ## In progress
-- The video.
+- The video (script ready), then the catalog submission.
 
 ## Next steps
 1. The video script rewritten (one change through the whole line: gate, second model, bounce, notification,

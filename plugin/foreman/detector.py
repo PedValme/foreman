@@ -121,6 +121,7 @@ SKIPPED_TEST = tuple(re.compile(x) for x in (
 CONDITIONAL_SKIP = tuple(re.compile(x) for x in (
     r"\bpytest\.mark\.skipif\b", r"@unittest\.skip(?:If|Unless)\b",
     r"\b(?:it|test|describe)(?:\.concurrent)?\.skipIf\s*\(",
+    r"\bimportorskip\s*\(",  # a module skipped when a dependency is missing
 ))
 # Documentation names markers without switching anything off.
 DOCS = re.compile(r"(?i)\.(md|markdown|rst|txt|adoc)$")
@@ -130,6 +131,9 @@ ENV_TEMPLATE = re.compile(r"\.(example|sample|template)$")
 TEST_CODE = re.compile(r"(?i)\.(py|pyw|js|jsx|mjs|cjs|ts|tsx|mts|cts|go|rs|java|kt|kts|scala|groovy|rb|php|cs|fs|vb|"
                        r"swift|m|mm|c|cc|cpp|cxx|h|hpp|ex|exs|erl|clj|cljs|dart|lua|pl|r|jl|sh|bash|bats|ps1|vue|"
                        r"svelte|feature)$")
+# File names test runners collect by default (pytest/unittest, Go, Jest/Vitest/Mocha, JUnit, .NET, RSpec).
+COLLECTED_NAME = re.compile(r"(^|/)(test_[^/]+\.py|[^/]+_test\.(py|go|rb|exs)|[^/]+\.(test|spec)\.[A-Za-z]+|"
+                            r"[^/]*(?:Tests?|IT|TestCase)\.(java|kt|scala|groovy|cs|fs|vb|swift)|[^/]+_spec\.rb)$")
 NOT_TEST_CODE = re.compile(r"(?i)(^|/)(fixtures?|__fixtures__|__snapshots__|snapshots|testdata|__mocks__)/")
 # Lines that neutralise a check, in well-known places only.
 WORKFLOW = re.compile(r"(^|/)\.github/workflows/[^/]+\.ya?ml$", re.I)
@@ -327,12 +331,32 @@ def code_only(text: str, path: str = "") -> str:
     return comment.sub("", _QUOTED.sub('""', text))
 
 
+# Python only, on a decorator line: a skip imported or aliased (`from unittest import skip` + `@skip(...)`,
+# `import unittest as u` + `@u.skip`, `from pytest import mark` + `@mark.skip` / `@mark.skipif(...)`), and a module
+# marked whole (`pytestmark = mark.skip`). Found in the final review; anchored to Python so GraphQL's `@skip(if:)`,
+# Ruby's `@skip`, Vue's `@skip=` or a `@skip.setter` are not read as tests switched off.
+PY_ALIAS_SKIP = re.compile(r"^\s*@(?:\w+\.)*(?:skip|xfail|expectedFailure)\s*(?:\(|#|$)")
+PY_ALIAS_CONDITIONAL = re.compile(r"^\s*@(?:\w+\.)*(?:skipif|skipIf|skipUnless)\s*\(")
+PY_MODULE_SKIP = re.compile(r"^\s*pytestmark\s*=.*\bmark\.(?:skip|xfail)\b(?!if)")
+PY_FILE = re.compile(r"(?i)\.pyw?$")
+
+
 def skip_marker_at(text: str, path: Optional[str]) -> Optional[str]:
     """``has_skip_marker`` for a line of ``path``: as written in a test file or a file that runs the check, as code
-    anywhere else."""
+    anywhere else; plus Python's imported or aliased skips in a Python file."""
     if path and not is_test_path(path) and not CHECK_SURFACE.search(path):
         text = code_only(text, path)
-    return has_skip_marker(text)
+    kind = has_skip_marker(text)
+    if kind is None and path and PY_FILE.search(path):
+        if PY_ALIAS_SKIP.match(text) or PY_MODULE_SKIP.match(text):
+            return "skip"
+        if PY_ALIAS_CONDITIONAL.match(text):
+            return "conditional"
+    return kind
+
+
+def any_skip_marker(text: str, path: Optional[str]) -> bool:
+    return any(skip_marker_at(line, path) for line in (text or "").splitlines())
 
 
 def weakens_check(text: str, path: Optional[str], before: Iterable[str] = (), after: Iterable[str] = ()) -> bool:
@@ -713,7 +737,10 @@ def detect(diff: str, deleted: Iterable[str] = (), history: str = "", renamed: I
         if is_test_code(path):
             found.append(finding("test-deleted", path, 0, allowed=path in allowed_paths, version="deleted"))
     for old, new in renamed:
-        if is_test_code(old) and not TEST_PATH.search(new):
+        # Out of the tests, or kept in them under a name the runner no longer collects (tests/test_a.py to
+        # tests/a_check.py or tests/test_a.py.bak: found in the final review).
+        if is_test_code(old) and (not TEST_PATH.search(new) or (
+                COLLECTED_NAME.search(old) and not (is_test_code(new) and COLLECTED_NAME.search(new)))):
             found.append(finding("test-moved", old, 0, "to %s" % new, allowed=old in allowed_paths,
                                  version=new + "@" + version(new)))
     # A secret in the history is reported even when the final diff already has another finding at that place.

@@ -184,14 +184,15 @@ class SkipMarkers(unittest.TestCase):
     )
     CONDITIONAL = ("@pytest.mark." + "skipif(sys.platform == 'win32', reason='posix')",
                    "@unittest." + "skipIf(IS_WINDOWS, 'x')", "@unittest." + "skipUnless(HAS_GPU, 'gpu')",
-                   "it." + "skipIf(isWindows)('x', f)", "@pytest.mark." + "skipif(TRUE_ON_CI, reason='x')")
+                   "it." + "skipIf(isWindows)('x', f)", "@pytest.mark." + "skipif(TRUE_ON_CI, reason='x')",
+                   "np = pytest." + "importorskip('numpy')")
 
     def test_markers_switch_tests_off(self):
         for marker in self.MARKERS:
             self.assertEqual(detector.has_skip_marker(marker), "skip", marker)
         for marker in self.CONDITIONAL:
             self.assertEqual(detector.has_skip_marker(marker), "conditional", marker)
-        for text in ("skipTests = 3", "@JsonIgnore", "def skip(self):", "items.skip(2)"):
+        for text in ("skipTests = 3", "@JsonIgnore", "def skip(self):", "items.skip(2)", "@skipper"):
             self.assertIsNone(detector.has_skip_marker(text), text)
 
     def test_documentation_only_names_markers(self):
@@ -292,6 +293,41 @@ class DeletedTestFiles(unittest.TestCase):
         for path in ("tests/__snapshots__/a.test.ts.snap", "tests/fixtures/user.py", "tests/data.json",
                      "tests/testdata/input.txt", "tests/README.md"):
             self.assertEqual(detector.detect("", deleted=[path]), [], path)
+
+
+class AliasedSkips(unittest.TestCase):
+    def test_python_only_on_a_decorator_line(self):
+        # Found in the final review: imported or aliased skips; then, in its review, the first pattern also hit
+        # GraphQL, Ruby, Vue, Perl and a property setter. Python decorator lines only.
+        py = "tests/test_a.py"
+        for line in ("@" + "skip('x')", "    @u." + "skip('x')", "@mark." + "skip", "    @mark." + "xfail(reason='x')",
+                     "pytestmark = mark." + "skip", "pytestmark = pytest.mark." + "skip",
+                     "@" + "skip  # flaky", "    @mark." + "skip  # later"):
+            self.assertEqual(detector.skip_marker_at(line, py), "skip", line)
+        for line in ("@" + "skipIf(sys.platform == 'win32', 'x')", "    @mark." + "skipif(X, reason='x')",
+                     "@" + "skipUnless(HAS_GPU, 'x')"):
+            self.assertEqual(detector.skip_marker_at(line, py), "conditional", line)
+        for line, path in (("avatar @" + "skip(if: $light)", "src/query.graphql"),
+                           ("const q = gql`avatar @" + "skip(if: $light)`", "src/q.ts"),
+                           ("    @" + "skip.setter", py), ("return if @" + "skip", "lib/a.rb"),
+                           ("my @" + "skip = qw(a b);", "lib/a.pl"), ('<Step @' + 'skip="next" />', "src/A.vue"),
+                           ("EMAIL = 'ops@" + "skip.io'", py), ("@" + "skip_if_no_gpu", py),
+                           ("@mark." + "parametrize('x', [1])", py), ("@pytest.fixture", py)):
+            self.assertIsNone(detector.skip_marker_at(line, path), (line, path))
+
+
+class RenamedOutOfCollection(unittest.TestCase):
+    def test_a_test_renamed_inside_the_tests_to_a_name_the_runner_skips(self):
+        # Found in the final review: tests/test_a.py to tests/a_check.py stays under tests/ but is never collected.
+        for old, new in (("tests/test_a.py", "tests/a_check.py"), ("tests/test_a.py", "tests/test_a.py.bak"),
+                         ("tests/test_a.py", "tests/test_a.txt"), ("src/a.test.ts", "src/a.ts.off"),
+                         ("pkg/a_test.go", "pkg/a_check.go")):
+            self.assertEqual([f.rule for f in detector.detect("", renamed=[(old, new)])], ["test-moved"], (old, new))
+        for old, new in (("tests/test_a.py", "tests/test_b.py"), ("tests/test_a.py", "tests/unit/test_a.py"),
+                         ("src/a.test.ts", "src/b.test.ts"), ("tests/helpers.py", "tests/utils.py"),
+                         ("src/test/java/FooTest.java", "src/test/java/FooIT.java"),
+                         ("src/test/java/FooTest.java", "src/test/java/FooTestCase.java")):
+            self.assertEqual(detector.detect("", renamed=[(old, new)]), [], (old, new))
 
 
 class Fingerprints(unittest.TestCase):

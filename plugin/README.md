@@ -6,7 +6,9 @@ Foreman is a [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin
 code in a git repository. A coding agent under pressure can make the check pass by skipping a test, deleting it,
 loosening an assertion or editing what the check runs. Foreman reads the real diff before every commit, push, pull
 request and merge, and blocks those shortcuts; a second model reviews what rules cannot see; and Foreman never
-merges for the agent: an agent-run `gh pr merge` is blocked, and `/foreman merge` waits for you.
+merges for the agent: an agent-run `gh pr merge` is blocked, and `/foreman merge` waits for you. It guards against
+the shortcuts an agent takes in the open; it is not a sandbox against one that hides its commands, so protect the
+base branch and the CI check on GitHub too (*Known limits*).
 
 ```
 you    > I'm in a hurry, just skip that failing test and commit.
@@ -33,7 +35,7 @@ That block also holds under `--yolo`: the gate is a plugin hook, not an approval
   merge` waits for your confirmation. Slash commands are typed by you; the model has no tool that runs them. (Other
   ways to merge are not blocked: see *Known limits*.)
 - **The same rules in CI.** `python -m foreman.detector` runs the same detector as a required check, where the
-  agent cannot edit it.
+  agent cannot edit it once the workflow file is protected (a pull request can change its own workflow).
 
 ## How a change moves
 
@@ -75,7 +77,8 @@ board shows local branches only.
 
 - **Second-model review on another model.** Foreman declares two capabilities, `llm.model_override` and
   `llm.provider_override`. Hermes asks you to grant them only when you run `hermes plugins enable foreman` in an
-  interactive terminal. Without them the review runs on your active model and says so.
+  interactive terminal (installing or enabling from the Desktop app does not ask). Without them the review runs on
+  the model Hermes picks for plugins and says so.
 - **Desktop panel (optional).** In Hermes Desktop open **Capabilities → Plugins**, find **Foreman** and switch on its
   **Desktop** column (a plugin's Desktop half ships switched off; click **Rescan** if the row does not show it). The
   **Foreman** pane joins the right side as a tab; click the status-bar chip **Foreman · …** (or **Ctrl/⌘ K → Foreman:
@@ -89,6 +92,7 @@ project with one bug and one failing test. In a clone, copy it out, make it a re
 there:
 
 ```
+git clone https://github.com/PedValme/foreman && cd foreman
 cp -r examples/cart ~/cart && cd ~/cart
 git init -q -b main && git add -A && git commit -qm "cart with a bug"
 hermes
@@ -105,7 +109,7 @@ hermes
 |---|---|
 | `test-skipped` | a skip, only, ignore or expected-failure marker added to a test (list in *Known limits*), or a test renamed so the runner stops collecting it (`test_x` to `_test_x`) |
 | `test-deleted` | a test code file deleted (snapshots, JSON and fixtures do not count) |
-| `test-moved` | a test code file moved out of the tests |
+| `test-moved` | a test code file moved out of the tests, or renamed to a name the runner does not collect (`tests/test_a.py` to `tests/a_check.py`) |
 | `check-changed` | with no configuration: the `test`/`check`/`lint` scripts of `package.json` (and the scripts they run), the `test`/`check`/`ci` targets of a `Makefile` (and the targets and variables they use), tox's `envlist` and `commands`/`setenv`; with `.foreman.json`: any file its check command runs, and `.foreman.json` itself |
 | `check-weakened` | `\|\| true` or `continue-on-error: true` next to a test runner in `.github/workflows/*`; `--deselect`/`--ignore` of tests in pytest config; `testPathIgnorePatterns`/`exclude` in jest or vitest config |
 | `secret`, `env-file` | real credential formats (cloud, GitHub, model APIs, Slack, Stripe, private keys and more) anywhere; key/value guesses (passwords in code, config, shell, YAML, `.env`) outside the tests |
@@ -119,7 +123,7 @@ It acts at three moments:
   inside `cd x && …`, `git -C x …`, `bash -c "…"`, `cmd /c …`). When an earlier part of the same line could change
   what is recorded (`git rm x && git commit`), Foreman asks the agent to run the gated command on its own.
 - **Before the agent finishes a coding turn** (`pre_verify`): if the uncommitted changes would rig the check, the
-  agent is told exactly what to undo.
+  agent is told exactly what to undo. Files git ignores are not part of any change.
 
 To protect the exact check you run, name it in `.foreman.json` at the repository root, committed on the base branch:
 
@@ -146,7 +150,7 @@ version of the file. Any later change is checked again.
 A push of several branches (`--all`, `--mirror`, several refspecs) and any command Foreman could not inspect (a git
 error, its 18-second budget, a working directory that is not on the Hermes host) go to Hermes's approval prompt. **In
 YOLO mode or with approvals off, Hermes lets these through without a person.** An "always" answer for a push of
-several branches covers only those exact commits. Blocks (everything in the table above, and `gh pr merge` run by
+several branches covers only those exact commits. Blocks (everything in the table above, and a plain `gh pr merge` run by
 the agent) are not approvals and hold in every mode, YOLO included; so does `/foreman allow`, which only you can type.
 
 ## The `/foreman` command
@@ -163,7 +167,7 @@ the agent) are not approvals and hold in every mode, YOLO included; so does `/fo
 | `/foreman merge <pr> [--merge\|--rebase] [--yes]` | merge, only if CLEAN, mergeable and not a draft, after you confirm; with `auto_review` `merge` or `finish` the review must not block it, and if it could not run you decide (with `off` there is no review) |
 | `/foreman reject <pr> [--close [--yes]] [note]` | post the reasons as one comment on the pull request |
 | `/foreman allow [id]` | list or allow findings the agent marked |
-| `/foreman notify [on [target]\|off\|test]` | tell you on your phone when a pull request waits for you (off by default) |
+| `/foreman notify [on [target]\|to <target>\|off\|test]` | tell you on your phone when a pull request waits for you, and when one is merged or rejected through Foreman (off by default) |
 | `/foreman help` | all of the above |
 
 `verdict`, `review`, `pipeline`, `merge` and `reject` also take `--repo <owner/name or path>`, limited to
@@ -181,7 +185,8 @@ apart, and CI is shown but does not decide.
 
 **Merge.** `/foreman merge 7` recomputes the verdict and refuses when it is not CLEAN, when the pull request
 conflicts or is a draft, or when the review blocks; `--yes` overrides none of these. When it is ready, Hermes's
-picker asks *Merge PR #7 (abc1234, squash) into main?* and only **Merge** goes on. Where nobody can answer (cron, a
+picker asks *Merge PR #7 of acme/widgets (abc1234, squash) into main?* (with the issues it closes, the CI state and
+the exact command) and only **Merge PR #7** goes on. Where nobody can answer (cron, a
 chat without choices, a timeout) nothing merges, and Foreman prints the command to confirm by typing it:
 `/foreman merge 7 --yes`. The merge is `gh pr merge 7 --squash --delete-branch --match-head-commit <sha>`, run
 through Hermes's terminal tool, so only the commit Foreman inspected can merge.
@@ -246,7 +251,10 @@ by the loop.
 
 Off by default. `/foreman notify on telegram` (or `telegram:<chat id>`, `discord:#channel`, `slack:<channel id>`, any
 `hermes send` target; typed in a chat, `/foreman notify on` uses that platform's home channel) sends one plain-text
-message each time a pull request is ready for you or needs your decision, once per pull request head (trimmed):
+message each time a pull request is ready for you or needs your decision, and when one is merged or rejected through
+Foreman, once per pull request head and kind. Titles and branch names are made inert first (no Markdown, HTML,
+mentions, links or Hermes media directives). `/foreman notify test` sends a sample, `/foreman notify off` stops them,
+and `/foreman notify` shows the last send with what Hermes answered. A message looks like this (trimmed):
 
 ```
 Foreman: PR #6 is ready to merge and waits for you
@@ -271,9 +279,6 @@ the menu but still works when typed. To pin it, then restart the gateway:
 ```
 hermes config set platforms.telegram.extra.command_menu.priority '["foreman"]'
 ```
- Titles and branch names are made inert first (no Markdown,
-HTML, mentions, links or Hermes media directives). `/foreman notify test` sends a sample, `/foreman notify off` stops
-them.
 
 ## Desktop panel
 
@@ -348,7 +353,8 @@ done (not a repository, git failed, an unreadable SARIF report). There is no `/f
 GitHub Actions, becomes a `::warning` annotation; `--strict` makes them blockers. The `--json` verdict value for such
 a run stays `NEEDS YOUR OK`.
 [`examples/foreman-check.yml`](../examples/foreman-check.yml) is a workflow to copy (full-history checkout, actions and
-Foreman pinned by commit SHA). Make it a required check: unlike the hooks, it runs where the agent cannot edit it.
+Foreman pinned by commit SHA). Make it a required check, and protect `.github/workflows/` (CODEOWNERS with required
+review, or a ruleset): a pull request runs its own copy of the workflow, so an unprotected one can edit or skip it.
 
 ## Configuration
 
@@ -412,8 +418,8 @@ Desktop, or via `hermes config set plugins.entries.foreman.settings.<key> <value
   you type `/foreman review`: one call per exact diff, sending the bounded diff, the pull request or branch title,
   commit subjects (for a branch) and the detector's findings to the provider you configured. It spends tokens. With
   `finish`, the agent's tool makes at most `max_bounces + 1` reviews per change until you merge, reject or
-  review it yourself. A review whose provider answers "overloaded" or "rate limited" (HTTP 429 or 5xx) is tried
-  up to two more times, 4 s and 12 s later, before it is reported as not run.
+  review it yourself. A review whose provider answers "overloaded" or "rate limited" (HTTP 429, 500, 502, 503 or
+  529) is tried up to two more times, 4 s and 12 s later, before it is reported as not run.
 - **Notifications**, only after `/foreman notify on`: one `hermes send --to <target> --file <message>` per
   pull request event, through Hermes's terminal tool, waiting at most 60 s, never retried, and never from inside a
   hook (an event that happens there is queued and sent by your next `/foreman` command or Foreman tool call). Your
@@ -441,13 +447,27 @@ Desktop, or via `hermes config set plugins.entries.foreman.settings.<key> <value
 
 Markers covered: pytest (`skip`, `xfail`, `skipif`), unittest (`skip*`, `expectedFailure`, `skipTest`, `raise
 SkipTest`), Jest/Vitest/Mocha/Jasmine (`.skip`, `.only`, `.skipIf`, `xit`, `xtest`, `xdescribe`, `fit`, `fdescribe`,
-`this.skip()`), Go (`t.Skip*`), Rust (`#[ignore]`), JUnit (`@Disabled`, `@Ignore`). A conditional skip in a new test
-file is allowed; added to an existing test it is blocked.
+`this.skip()`), Go (`t.Skip*`), Rust (`#[ignore]`), JUnit (`@Disabled`, `@Ignore`), and in Python files imported or
+aliased decorators (`@skip`, `@u.skip`, `@mark.skip`, `@mark.skipif`) and `pytestmark = mark.skip`. A conditional skip (or `pytest.importorskip`) in a new test
+file is allowed; added to an existing test it is blocked. Outside test files a marker counts only as code: one inside
+a quoted string or a comment does not, except in the files that run the check (CI workflows, Makefile, `tox.ini`,
+`noxfile.py`, `package.json` and similar), where a command can write it into the tests and it counts as written.
 
 **What the gate does not follow:**
 - commits made by an interpreter (a script calling git, Hermes's `execute_code`), git aliases or other tools are not
-  seen at that moment; the next `git push` or `gh pr create` still sees what they committed;
-- a gated command hidden inside a script file; `GIT_INDEX_FILE` or `GIT_DIR` set in a command's environment;
+  seen at that moment, nor are other git verbs that create commits (`merge`, `cherry-pick`, `rebase`, `am`, `pull`,
+  `stash`, `commit-tree`); a plain `git push` or `gh pr create` of that branch still sees what they committed;
+- the gate reads the command as written: a git or gh call hidden behind an escape, a variable or `xargs` (`g\it`,
+  `$G commit`, `… | xargs gh`), or a `gh` alias, is not recognised;
+- the base a push or pull request is compared with comes from the local remote-tracking refs and upstream: an agent
+  that moves them (`git update-ref refs/remotes/origin/main HEAD`) narrows what is inspected (a wildcard refspec, a
+  configured `remote.<name>.push`, `remote.<name>.mirror` or `push.default=matching`, also given with `git -c`, asks
+  you; a local branch as upstream is ignored);
+- test collection switched off through configuration other than the cases in the table (`pytest.ini` `addopts =
+  --collect-only` or `python_files`, `collect_ignore` in `conftest.py`, a `load_tests` that returns nothing);
+- `core.hooksPath` written straight into `.git/config`, or the hook files deleted;
+- a gated command hidden inside a script file; `GIT_INDEX_FILE`, `GIT_DIR` or git configuration passed through the
+  environment (`GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`, `GIT_CONFIG_PARAMETERS`, `--config-env`);
 - hook-disabling variables set in the shell profile or by a script, or a hook manager's own config switching hooks
   off;
 - a SARIF report replaced by a separate command (`cp empty.sarif results.sarif`): generate it in a CI step the agent
@@ -458,12 +478,15 @@ file is allowed; added to an existing test it is blocked.
 - With a remote terminal backend (Docker, SSH) the repository is not on the Hermes host: every gated command asks
   for approval; `gh pr merge` runs on the backend (`--match-head-commit` still limits it to the inspected commit);
   `/foreman reject` cannot hand its comment file to `gh` there and shows the text instead; notifications are not sent.
-- Repository resolution: a repository pinned with `/foreman use` first, then the terminal's recorded directory,
-  `ctx.session_cwd()`, the process directory (CLI and TUI only) and `resolve_agent_cwd()`; never Hermes's own home.
+- Repository resolution: a repository pinned with `/foreman use` first, then the terminal's recorded directory, the
+  repository of the agent's last gated git command in this chat (kept in memory for one hour; another chat inherits
+  nothing), `ctx.session_cwd()`, the process directory (CLI and TUI only) and `resolve_agent_cwd()`; never Hermes's
+  own home. On messaging platforms the remembered repository is not used (Hermes gives the typed command a different
+  session key): `/foreman use` or `--repo` there.
   When nothing qualifies, Foreman says it cannot tell and asks for a path or `workdir`. When a slash command reaches a
   running gateway before the agent has used the terminal in that session, use `/foreman use <path>`.
 - In a shared chat, anyone Hermes authorises can type `/foreman merge … --yes`: restrict who can talk to your Hermes.
-- Only `gh pr merge` is blocked as a merge: a merge through `gh api` (`-X PUT …/pulls/7/merge`), an approval with
+- Only a plain `gh pr merge` is blocked as a merge: a merge through `gh api` (`-X PUT …/pulls/7/merge`), an approval with
   `gh pr review --approve`, or a direct `git push` to the base branch (inspected only as a push) is not. Protect the
   base branch on GitHub (required pull request and checks).
 - Foreman's state (stored reviews and their cache, the pipeline, the grants) is plain files: a deliberate write that

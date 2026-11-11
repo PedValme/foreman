@@ -23,7 +23,7 @@ not skip, delete or weaken the tests, change what the check runs, or commit a se
 7. **Merge and reject with reasons.** A merge runs through Hermes's terminal tool after the person confirms (rule
    14; Hermes itself shows no approval prompt for it, checked in v0.23.0); a rejection leaves its reasons as a
    comment on the pull request. Never an automatic merge.
-8. **The guardia is a second model.** An optional model review of the diff through `ctx.llm` (host-owned
+8. **The reviewer is a second model.** An optional model review of the diff through `ctx.llm` (host-owned
    credentials), on a model different from the main one: by default the user's configured fallback model. If only
    the main model is available, the verdict says the reviewer is the same model. It never runs inside a hook.
 9. **Other sources.** A SARIF 2.1.0 file (hermes-security exports one) can add blockers by severity.

@@ -139,6 +139,15 @@ class WithoutGitHub(BoardCase):
         out = self.run_cmd("")
         self.assertIn("GitHub: gh (the GitHub CLI) is not installed; showing local branches only.", out)
 
+    def test_a_merge_without_gh_leaves_no_card(self):
+        # Found in review: with a GitHub remote but no working gh, `/foreman merge 1` added a card for a pull request
+        # Foreman could not even read.
+        self.git("remote", "add", "origin", "https://github.com/acme/widgets.git")
+        board.GH_RUNNER = FakeGh(missing=True)
+        out = self.run_cmd("merge 1 --yes")
+        self.assertIn("Foreman will not merge PR #1", out)
+        self.assertEqual([i for i in pipeline.snapshot().get("items", []) if i["id"].endswith("#pr:1")], [])
+
     def test_gh_not_logged_in(self):
         self.git("remote", "add", "origin", "https://github.com/acme/widgets.git")
         self.gh.responses = [((), (4, "", "To get started with GitHub CLI, please run:  gh auth login"))]

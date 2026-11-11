@@ -182,6 +182,7 @@ class Action:
     bypass_flag: str = ""
     located: bool = False      # the command itself says where it runs (workdir, cd, git -C)
     preceded_by: str = ""      # an earlier part of the same command line that may change what this one records
+    inline_config: list = field(default_factory=list)  # `git -c key=value` settings that change what a push sends
 
 
 def parse_actions(command: str, cwd: str, located: bool = False, _depth: int = 0, _state: Optional[dict] = None) -> list:
@@ -343,8 +344,13 @@ def _requote(word: str) -> str:
     return word if word and not re.search(r"\s", word) else '"%s"' % word
 
 
+# Settings that change which refs a push sends or where (found in review: `git -c remote.origin.push=rig:main push`).
+_PUSH_CONFIG = re.compile(r"(?i)((remote\.[^=]+\.(push|mirror)|remote\.pushdefault|branch\.[^=]+\.(remote|pushremote|"
+                          r"merge))=|push\.default=matching$)")
+
+
 def _parse_git(words: list, cwd: str, git_add_seen: bool, located: bool):
-    hooks_bypassed, bypass, i = False, "", 0
+    hooks_bypassed, bypass, i, inline = False, "", 0, []
     while i < len(words):
         w = words[i]
         if w == "-C" and i + 1 < len(words):
@@ -353,6 +359,8 @@ def _parse_git(words: list, cwd: str, git_add_seen: bool, located: bool):
         elif w == "-c" and i + 1 < len(words):
             if words[i + 1].lower().startswith("core.hookspath"):
                 hooks_bypassed, bypass = True, "-c " + words[i + 1]
+            elif _PUSH_CONFIG.match(words[i + 1]):
+                inline.append(words[i + 1])
             i += 2
         elif w.startswith("--work-tree="):
             cwd, located = _resolve(cwd, w.split("=", 1)[1]), True
@@ -373,7 +381,8 @@ def _parse_git(words: list, cwd: str, git_add_seen: bool, located: bool):
         return Action("commit", cwd, rest, hooks_bypassed or bool(flag), git_add_seen, bypass or flag, located), sub
     if sub == "push":
         flag = "--no-verify" if "--no-verify" in rest else ""
-        return Action("push", cwd, rest, hooks_bypassed or bool(flag), git_add_seen, bypass or flag, located), sub
+        return Action("push", cwd, rest, hooks_bypassed or bool(flag), git_add_seen, bypass or flag, located,
+                      inline_config=inline), sub
     if sub == "config" and _sets_hooks_path(rest):
         return Action("hooks-config", cwd, rest, True, False, "git config core.hooksPath", located), sub
     return None, sub
@@ -809,6 +818,29 @@ def _push_report(repo: Repo, act: Action, out: Outcome):
         out.state.append(repo.try_git("for-each-ref", "--format=%(refname) %(objectname)", refs) or "")
         out.state += ["%s %s" % (r, repo.try_git("rev-parse", "--verify", "-q", r.lstrip("+").split(":", 1)[0]
                                                  + "^{commit}") or "?") for r in positional[1:]]
+    # What Foreman cannot resolve to one branch it cannot inspect: a wildcard or unresolvable refspec, or a bare push
+    # that a configured remote.<name>.push or push.default=matching widens (found in the final review: each one
+    # published a rigged branch while Foreman inspected the clean current one). A person approves those.
+    deleting = any(a in ("--delete", "-d") for a in act.args)  # `git push origin --delete gone`: nothing published
+    unresolved = [] if deleting else [r for r in positional[1:] if "*" in r or (r.lstrip("+").split(":", 1)[0] and not
+                                      repo.try_git("rev-parse", "--verify", "-q",
+                                                   r.lstrip("+").split(":", 1)[0] + "^{commit}"))]
+    configured = list(act.inline_config)
+    if len(positional) <= 1 and not configured:
+        remote = positional[0] if positional else (repo.try_git("config", "--get", "branch.%s.remote" % (
+            repo.branch() or "")) or "origin")
+        configured = [x for x in ((repo.try_git("config", "--get-all", "remote.%s.push" % remote) or "").splitlines()
+                                  + (["push.default=matching"] if (repo.try_git("config", "--get", "push.default")
+                                                                   or "").strip() == "matching" else [])
+                                  + (["remote.%s.mirror=true" % remote] if (repo.try_git(
+                                      "config", "--get", "remote.%s.mirror" % remote) or "").strip() == "true"
+                                     else [])) if x]
+    if unresolved or configured:
+        out.notes.append("`git push %s` publishes %s; Foreman inspects only the current branch. Push one named branch, "
+                         "or approve if you have checked what it publishes." % (
+                             " ".join(act.args), "refs Foreman cannot resolve (%s)" % ", ".join(unresolved)
+                             if unresolved else "what the configuration adds (%s)" % ", ".join(configured)))
+        out.state.append(repo.try_git("for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/") or "")
     head = "HEAD"
     if len(positional) >= 2:
         src = positional[1].lstrip("+").split(":", 1)[0]
@@ -817,6 +849,11 @@ def _push_report(repo: Repo, act: Action, out: Outcome):
     if not repo.try_git("rev-parse", "--verify", "-q", head + "^{commit}"):
         return None  # nothing to push
     upstream = repo.try_git("rev-parse", "--verify", "-q", head + "@{upstream}^{commit}")
+    # Only a remote-tracking upstream is a base: a local branch set as upstream (`git branch -u rig2`) at HEAD would
+    # make the range empty (found in the final review).
+    if upstream and not (repo.try_git("rev-parse", "--symbolic-full-name", head + "@{upstream}") or ""
+                         ).startswith("refs/remotes/"):
+        upstream = None
     if upstream:
         return detector.scan_range(repo, upstream, head, scope="push", base_label=head + "@{upstream}")
     base, label = repo.base_ref(head)
@@ -1107,17 +1144,17 @@ def _one(text: str, limit: int = 160) -> str:
 
 # ─── Writes to test files ────────────────────────────────────────────────────
 
-def _new_marker_lines(old_text: str, new_text: str, new_file: bool = False) -> list:
+def _new_marker_lines(old_text: str, new_text: str, new_file: bool = False, path: Optional[str] = None) -> list:
     """(line, next non-empty line) for each line of ``new_text`` with a skip marker that ``old_text`` did not already
     have. In a new file a conditional skip is legitimate."""
     def counts(kind):
         return kind == "skip" or (kind == "conditional" and not new_file)
 
-    before = Counter(" ".join(l.split()) for l in (old_text or "").splitlines() if detector.has_skip_marker(l))
+    before = Counter(" ".join(l.split()) for l in (old_text or "").splitlines() if detector.skip_marker_at(l, path))
     lines = (new_text or "").splitlines()
     added = []
     for i, l in enumerate(lines):
-        if counts(detector.has_skip_marker(l)):
+        if counts(detector.skip_marker_at(l, path)):
             key = " ".join(l.split())
             if before[key] > 0:
                 before[key] -= 1
@@ -1266,7 +1303,7 @@ def gate_write(tool_name: str, args: dict, task_id: str = "") -> Optional[dict]:
         return guard
     if tool_name == "write_file":
         path, content = args.get("path"), args.get("content")
-        if isinstance(path, str) and isinstance(content, str) and detector.has_skip_marker(content):
+        if isinstance(path, str) and isinstance(content, str) and detector.any_skip_marker(content, path):
             edits.append((path, None, content, None))
     else:
         patch = args.get("patch")
@@ -1274,9 +1311,9 @@ def gate_write(tool_name: str, args: dict, task_id: str = "") -> Optional[dict]:
             if _names_store(patch):
                 return _store_guard()
             edits += [(p, old, new, is_new) for p, old, new, is_new in _v4a_files(patch)
-                      if detector.has_skip_marker(new)]
+                      if detector.any_skip_marker(new, p)]
         new = args.get("new_string")
-        if isinstance(args.get("path"), str) and isinstance(new, str) and detector.has_skip_marker(new):
+        if isinstance(args.get("path"), str) and isinstance(new, str) and detector.any_skip_marker(new, args["path"]):
             edits.append((args["path"], ("replace", args.get("old_string") or "", bool(args.get("replace_all"))),
                           new, False))
     if not edits:
@@ -1299,7 +1336,7 @@ def gate_write(tool_name: str, args: dict, task_id: str = "") -> Optional[dict]:
                 old = old_string
         elif old is None:
             old = _read(full)
-        for line, following in _new_marker_lines(old, new, new_file=is_new):
+        for line, following in _new_marker_lines(old, new, new_file=is_new, path=rel):
             findings.append(detector.finding("test-skipped", rel, 0, allowed=MARKER in line, content=line,
                                              following=following))
     blocking, waiting = split_marked(findings, root or "")

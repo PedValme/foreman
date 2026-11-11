@@ -1356,6 +1356,8 @@ def _pipeline_pr(root: str, v: dict):
         from . import pipeline
         if not isinstance(v.get("number"), int):
             return None
+        if v.get("error") and not (v.get("title") or v.get("head_oid")):
+            return None  # a pull request Foreman could not even read (no gh, no login) gets no card
         ref = pipeline.pr_ref(root, v)
         status, detail = pipeline.gate_from_verdict(v)
         pipeline.record_gate(ref, status, detail, "Gate on PR #%d: %s" % (v["number"], detail))
@@ -1620,7 +1622,7 @@ SUBCOMMANDS: dict = {
     "issues": (cmd_issues, "open issues and the PR that closes each"),
     "verdict": (cmd_verdict, "[pr|branch] [--repo r]  the verdict, with reasons"),
     "merge": (cmd_merge, "<pr> [--merge|--rebase] [--yes] [--repo r]  if CLEAN and ready, after you confirm; "
-                         "with auto_review on, the review must not block it"),
+                         "with auto_review merge or finish, the review must not block it"),
     "reject": (cmd_reject, "<pr> [--close [--yes]] [--repo r] [note]  post the reasons on the PR"),
     "status": (cmd_status, "[path]  this repository's verdict (CLEAN, BLOCKED, INCOMPLETE, NEEDS YOUR OK)"),
 }
