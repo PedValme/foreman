@@ -687,7 +687,8 @@ def branch_verdict(root: str, branch: str, keys: tuple = ()) -> dict:
     if branch.startswith("-"):
         v["error"] = "`%s` is not a branch name" % branch
         return v
-    rev = next((r for r in ("refs/heads/" + branch, "refs/remotes/" + branch, branch)
+    # A branch fetched but never checked out exists only as origin/<name>, as `/foreman review <branch>` accepts.
+    rev = next((r for r in ("refs/heads/" + branch, "refs/remotes/origin/" + branch, "refs/remotes/" + branch, branch)
                 if repo.try_git("rev-parse", "--verify", "-q", r + "^{commit}")), None)
     if not rev:
         v["error"] = "no branch or commit named `%s` in %s" % (branch, root)
@@ -1256,11 +1257,12 @@ def cmd_merge(args: str = "", keys: tuple = (), platform: Optional[str] = None) 
             return "\n".join(pre + ["Foreman: cancelled; PR #%d was not merged." % number])
         if answer != "merge":
             _pipeline_call(pipeline.record_event, ref, "Merge question not answered; nothing merged")
-            if unreviewed:
-                return "\n".join(pre + [_no_answer(
-                    "PR #%d was not merged: the second-model review could not run (%s), and a person must decide "
-                    "that. Run `/foreman review %d --fresh`, or answer the question where Hermes can ask"
-                    % (number, trim(unreviewed, 120), number), rerun)])
+            if unreviewed:  # --yes does not cover this, so never offer it as the way through
+                return "\n".join(pre + [wrap(
+                    "Foreman: PR #%d was not merged: the second-model review could not run (%s). `--yes` does not "
+                    "cover that: a person decides it in a chat where Hermes can ask (the CLI, or a messaging app "
+                    "with buttons). Or run `/foreman review %d --fresh` once the reviewer model is reachable."
+                    % (number, trim(unreviewed, 120), number))])
             return "\n".join(pre + [_no_answer("PR #%d was not merged" % number, rerun)])
     state, detail = _terminal(command, root)
     where = " in %s" % v["name"] if v.get("name") else ""

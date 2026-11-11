@@ -154,6 +154,18 @@ class WithoutGitHub(BoardCase):
         self.assertIn("[test-skipped] tests/test_x.py:2", out)
         self.assertIn("GitHub: this repository has no remote.", out)
 
+    def test_verdict_for_a_branch_that_exists_only_on_origin(self):
+        # Found in a real session: `/foreman verdict t/merge` on a branch fetched but never checked out.
+        self.git("checkout", "-q", "-b", "feature")
+        self.write("tests/test_x.py", "import pytest\n" + SKIP + "\ndef test_x(): assert True\n")
+        self.commit("switch it off")
+        self.git("update-ref", "refs/remotes/origin/feature", "HEAD")
+        self.git("checkout", "-q", "main")
+        self.git("branch", "-q", "-D", "feature")
+        out = self.run_cmd("verdict feature")
+        self.assertIn("Foreman verdict for branch feature: BLOCKED", out)
+        self.assertIn("[test-skipped] tests/test_x.py:2", out)
+
     def test_merge_and_reject_explain_what_they_need(self):
         for verb in ("merge 3", "reject 3 nope"):
             out = self.run_cmd(verb)

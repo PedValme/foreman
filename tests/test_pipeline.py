@@ -490,6 +490,9 @@ class MergeWithReview(PipelineCase):
         ctx, out = self.merge(FakeLlm(exc=TimeoutError("timed out")), "merge 7 --yes", can_ask=False)
         self.assertEqual(ctx.dispatched, [])
         self.assertIn("PR #7 was not merged: the second-model review could not run", " ".join(out.split()))
+        # Found in a real session: it told the person to type the very `--yes` command it had just refused.
+        self.assertNotIn("To confirm, type", out)
+        self.assertIn("`--yes` does not cover that", " ".join(out.split()))
 
     def test_clean_review_with_yes_merges_without_asking(self):
         ctx, out = self.merge(FakeLlm(parsed=answer()), "merge 7 --yes", can_ask=False)

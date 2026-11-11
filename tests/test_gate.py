@@ -593,6 +593,28 @@ class PreVerify(GitRepoCase):
         self.write("tests/test_app.py", "def test_x():\n    assert 2 > 1\n")
         self.assertIsNone(gate.on_pre_verify(coding=True, attempt=0, changed_paths=[self.test_file]))
 
+    def test_an_ignored_changed_file_does_not_pull_its_repository_in(self):
+        # Found in a real session: another plugin wrote scratch files under an ignored folder of a Hermes home that
+        # is itself a git repository, and Foreman asked the agent to undo findings it never made there.
+        self.write(".gitignore", "plugin-data/\n")
+        self.commit("ignore plugin data")
+        self.write("tests/test_app.py", SKIP + "\n")  # someone else's uncommitted change in that repository
+        scratch = self.write("plugin-data/scan/work.py", "x = 1\n")
+        self.assertIsNone(gate.on_pre_verify(coding=True, attempt=0, changed_paths=[scratch]))
+        d = gate.on_pre_verify(coding=True, attempt=0, changed_paths=[scratch, self.test_file])
+        self.assertEqual(d["action"], "continue")  # a real change in the same repository is still scanned
+        self.assertIn("tests/test_app.py:1", d["message"])
+
+    def test_a_tracked_test_inside_an_ignored_folder_is_still_scanned(self):
+        self.write(".gitignore", "plugin-data/\n")
+        forced = self.write("plugin-data/tests/test_x.py", "def test_x():\n    assert True\n")
+        self.git("add", "-f", forced)
+        self.commit("force-add a test under an ignored folder")
+        self.write("plugin-data/tests/test_x.py", SKIP + "\ndef test_x():\n    assert True\n")
+        d = gate.on_pre_verify(coding=True, attempt=0, changed_paths=[forced])
+        self.assertEqual(d["action"], "continue")
+        self.assertIn("plugin-data/tests/test_x.py:1", d["message"])
+
     def test_deleted_test_files_are_reported(self):
         os.remove(self.test_file)
         d = gate.on_pre_verify(coding=True, attempt=0, changed_paths=[self.test_file])

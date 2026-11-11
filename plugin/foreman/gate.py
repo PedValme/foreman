@@ -1355,10 +1355,17 @@ def _scan_changed(changed_paths: list, deadline: float, session_id: str = "") ->
     for p in list(changed_paths)[:50]:
         if not isinstance(p, str):
             continue
+        path = _resolve(cwd, p)
         try:
-            root = detector.find_repo(os.path.dirname(_resolve(cwd, p)), deadline=deadline)
+            root = detector.find_repo(os.path.dirname(path), deadline=deadline)
         except GitError:
             break
+        # A file git ignores is not part of any change (another plugin's scratch data inside a Hermes home that is
+        # itself a repository, found in a real session): it must not pull that repository's whole worktree in.
+        # (`check-ignore` never reports a tracked file, so a tracked test inside an ignored folder is still scanned.)
+        if root and root not in roots and \
+                Repo(root, deadline=deadline).try_git("check-ignore", "-q", "--", path) is not None:
+            continue
         if root and root not in roots:
             roots.append(root)
         if len(roots) >= 3:
