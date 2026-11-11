@@ -92,18 +92,15 @@ Environments
   `detector.py` were reported as a skipped test.
 - A change bounced by the review whose agent ends the turn without changing it stays "bounced 1/3": no notice to
   the owner until the limit, which a refusing agent never reaches.
-- My mistake, 2026-11-10: in the "no gh" test, `/foreman merge 5 --yes` really merged `foreman-demo` PR #5 (the
-  video's clean fix) and closed issue #1. To restore: revert ac12e04 on main, push the old head as
-  `fix/discount-percentage`, reopen #1, open a new pull request (the agent's direct push was refused: waits for the
-  owner's yes).
 - The Desktop pane can disappear from the layout and not return until the app is reloaded and the switch toggled;
   the cause was not proven (#22 hardened the plugin; see that pull request's analysis).
 - With a running gateway, a slash command typed as the first thing in a CLI session cannot tell the repository and
   asks for it (`/foreman use <path>`).
 
 ## Test places (all throwaway)
-- `PedValme/foreman-demo` (public): issue #1 open, PR #5 clean fix, PR #3 skipped test, PR #4 loosened assertions.
-  PR #2 was merged in the morning test and reverted on `main`.
+- `PedValme/foreman-demo` (public): issue #1 open, PR #15 clean fix, PR #3 skipped test, PR #4 loosened assertions.
+  PR #2 (morning test) and PR #5 (by mistake, in the evening "no gh" test) were merged and reverted on `main`.
+  PRs #6, #7, #12-#14 and branch `t/base` (with the CI workflow) are the evening's throwaway cases.
 - A private repository with the owner's voice plugins: PR #6 (skip) and PR #7 (loosened assertions) open.
 - On the owner's Hermes machine: profile `foremandev` (English persona and interface set for the video, old persona
   saved beside it; `auto_review: merge`; the two `llm.*` capabilities granted), `~/cart`, `~/foreman-demo`,
