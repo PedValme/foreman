@@ -12,10 +12,10 @@
   after a plugin question, plugin model calls through the auxiliary client) and two small items in the list.
   Foreman on the owner's real profile was reinstalled from the Desktop app (his settings restored: notify on to
   telegram, auto_review merge); `foremandev` runs d5e6f6f. `foreman-demo`: the video's clean fix is PR #15.
-- Next action: merge the gated-repo pull request and reinstall at its commit (real profile and `foremandev`); add
-  the three Hermes items to `trabajo/hermes-issue-seams.md`; then rewrite the video script around one change moving
-  through the whole line (`trabajo/demo-video.md` no longer holds), record, pin the commit, the catalog pull
-  request and the issue with the owner's account, the X post, the form.
+- Next action: rewrite the video script around one change moving through the whole line (`trabajo/demo-video.md`
+  no longer holds), rehearse, record; then pin the commit, the catalog pull request and the issue with the owner's
+  account, the X post, the form. #31 is merged and installed at 2bed849 in the real profile and `foremandev`; the
+  Hermes findings are in `trabajo/hermes-issue-seams.md` (section 5).
 - Waits for the owner: say yes to opening `trabajo/catalog-pr.md`, `trabajo/catalog/foreman.yaml` and `trabajo/hermes-issue-seams.md` with his account, after everything is verified (he read the summaries and approved the four changes to the entry) · Verified by: the pull request and the issue open in NousResearch/hermes-agent
 - Waits for the owner: record the video once the plugin is fully verified, then publish it on X tagging @NousResearch and submit the form
 
@@ -27,7 +27,7 @@
 - End-to-end verification in real sessions, the owner's sitting included (`trabajo/pruebas-punta-a-punta.md`).
 
 ## In progress
-- The remembered-repository fix (`claude/gated-repo`), then the video.
+- The video.
 
 ## Next steps
 1. The video script rewritten (one change through the whole line: gate, second model, bounce, notification,

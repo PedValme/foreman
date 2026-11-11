@@ -124,4 +124,15 @@ as the button text.
 
 **Consumer.** `plugin/foreman/board.py` `_confirm`: `{"value": "merge", "label": "Merge PR #2", "button": "Merge"}`.
 
+## 5. Two things seen on a real setup (Hermes 0.23.0)
+
+- **A plugin's model call with no override does not use the main model.** `ctx.llm.complete_structured()` without
+  `model`/`provider` goes through `agent.auxiliary_client.call_llm`. On a profile whose main provider is
+  `openai-codex`, the auxiliary client logged "openai-codex requested but no Codex OAuth token found" (the agent
+  itself used Codex fine) and fell back to the first `fallback_providers` entry. The result's attribution then
+  mixes the two: `provider=openai-codex model=deepseek-v4.1-flash`. A plugin cannot tell which model answered, nor
+  ask for "the model the agent uses".
+- **Desktop keeps the spinner after a plugin's question.** After a slash command that called `ctx.ask_choice` and
+  returned its reply, the chat keeps the busy spinner until the user sends another message.
+
 Happy to test any of these against Foreman, or to send a PR for the first one if you agree on its shape.
