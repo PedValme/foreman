@@ -1304,8 +1304,9 @@ def _review_for_merge(root: str, number: int, v: dict, keys: tuple, platform: Op
         return out
     review.record_in_pipeline(rec, then="awaiting_owner")
     m = rec.get("model") or {}
-    who = review._label(m.get("provider") or None, m.get("model")) if m and m.get("model") else \
-        "the host's default model"
+    who = (review._label(m.get("provider") or None, m.get("model")) if m and m.get("model") else
+           "%s, routed by Hermes" % m["ran"] if m.get("ran") and m.get("same_as_author") is None else
+           "the host's default model")
     if rec.get("cached"):
         out["pre"].append(wrap("Second-model review of %s: %s (stored review of this exact diff, %s; the model was "
                                "not called again)." % (v["head_oid"][:7], verdict, rec.get("time") or "earlier")))
@@ -1314,6 +1315,8 @@ def _review_for_merge(root: str, number: int, v: dict, keys: tuple, platform: Op
                                % (number, v["head_oid"][:7], who, verdict)))
     if m and m.get("same_as_author") is True and not rec.get("error"):
         out["notes"].append("  " + review.SAME_MODEL)
+    elif m and m.get("same_as_author") is None and m.get("ran") and not rec.get("error"):
+        out["notes"].append("  " + review.ROUTED_MODEL)
     if verdict == "COULD NOT RUN":
         out["unreviewed"] = rec.get("error") or "unknown reason"
         return out

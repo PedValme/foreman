@@ -236,6 +236,9 @@ def _key(event: dict) -> str:
                             event.get("head"))
 
 
+_LAST = {"detail": ""}  # what `hermes send` said on the last delivery (kept in the log entry)
+
+
 def _deliver(text: str, target: str) -> tuple:
     """(sent, why_not) for one message through `hermes send`, run by Hermes's terminal tool."""
     folder = os.path.join(grants.store_dir(), "notify")
@@ -247,8 +250,12 @@ def _deliver(text: str, target: str) -> tuple:
         quoted = board._quote_path(path)
         if quoted is None:
             return False, "Foreman's data directory has a character a shell would expand: %s" % folder
-        command = 'hermes send --to "%s" --file %s --quiet' % (target, quoted)
+        # Not --quiet: its confirmation ("Sent to telegram home channel (chat_id: …)") is kept in the log, so a
+        # notice that does not arrive shows where Hermes sent it (in a real session one logged as sent never arrived,
+        # and nothing told where it went). Exit 0 is Hermes's own "delivered"; Foreman does not second-guess it.
+        command = 'hermes send --to "%s" --file %s' % (target, quoted)
         state, detail = board._terminal(command, folder, timeout=SEND_TIMEOUT)
+        _LAST["detail"] = " ".join((detail or "").split())[-200:] if state == "done" else ""
     finally:
         try:
             os.unlink(path)
@@ -304,7 +311,8 @@ def send(event: dict) -> dict:
         _remember_root(event, event.get("repo") if isinstance(event.get("repo"), str) else None)
         sent, why = _deliver(text, target)
         _append_log({"key": key, "kind": event.get("kind"), "id": str(event.get("id") or "")[:200],
-                     "at": int(time.time()), "sent": sent, "where": target, "why_not": why})
+                     "at": int(time.time()), "sent": sent, "where": target, "why_not": why,
+                     "hermes_said": _LAST["detail"] if sent else ""})
         return {"sent": sent, "where": target, "why_not": why}
     except Exception as e:
         logger.warning("foreman: notification failed", exc_info=True)
@@ -347,8 +355,9 @@ def cmd_notify(args: str = "", keys: tuple = (), platform: Optional[str] = None)
                             "with the commands to merge or reject it. " + _HOW)]
         if last:
             e = last[0]
-            lines.append("Last: %s %s, %s" % (e.get("kind"), e.get("id"), "sent" if e.get("sent")
-                                              else "not sent (%s)" % e.get("why_not")))
+            lines.append("Last: %s %s, %s" % (e.get("kind"), e.get("id"), (
+                "sent" + (" — Hermes said: %s" % clean(e["hermes_said"], 160) if e.get("hermes_said") else ""))
+                if e.get("sent") else "not sent (%s)" % e.get("why_not")))
         lines.append("Usage: /foreman notify on [telegram|discord:#ops|...] · to <target> · off · test")
         return "\n".join(lines)
     if sub == "off":
@@ -374,7 +383,7 @@ def cmd_notify(args: str = "", keys: tuple = (), platform: Optional[str] = None)
         text = "(Test message: the pull request below is an example.)\n" + render(SAMPLE, target.split(":", 1)[0])
         sent, why = _deliver(text, target)
         _append_log({"key": "test", "kind": "test", "id": "", "at": int(time.time()), "sent": sent,
-                     "where": target, "why_not": why})
+                     "where": target, "why_not": why, "hermes_said": _LAST["detail"] if sent else ""})
         if sent:
             return "Foreman: sent this to %s:\n%s\n%s\n%s" % (target, "-" * 40, text, "-" * 40)
         return "Foreman: the test was NOT sent to %s: %s" % (target, why)

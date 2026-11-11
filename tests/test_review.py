@@ -355,12 +355,14 @@ class PinnedRepository(ReviewCase):
         self.assertEqual(board.saved_review("Acme/Widgets", 6, "d" * 40), [])  # a review of another commit is stale
 
     def test_host_default_model_is_not_named(self):
+        # Answered by the main model (Hermes's attribution may only echo its config): not named, attribution kept.
+        # A different model in the response is real and is named: test_the_model_that_answered_is_named_...
         self.loosen_test()
-        r = self.review(FakeCtx(FakeLlm(parsed=answer(), model="some-model", provider="some-provider")))
+        r = self.review(FakeCtx(FakeLlm(parsed=answer(), model="main-model", provider="some-provider")))
         text = review.format_review(r)
         self.assertIn("Reviewer: the host's default model\n", text)
-        self.assertNotIn("some-model", text)
-        self.assertEqual(r["model"]["attributed_to"], "some-provider / some-model")
+        self.assertNotIn("some-provider", text)
+        self.assertEqual(r["model"]["attributed_to"], "some-provider / main-model")
 
 
 class ModelChoice(ReviewCase):
@@ -385,6 +387,67 @@ class ModelChoice(ReviewCase):
         self.assertEqual((llm.calls[0]["provider"], llm.calls[0]["model"]), ("otherprov", "other-model"))
         self.assertEqual(r["model"]["source"], "fallback")
         self.assertIn("other-model (your Hermes fallback model)", review.format_review(r))
+
+    def test_a_busy_provider_is_tried_again_then_said_plainly(self):
+        # Found in a real session: HTTP 429 "The inference service is overloaded" gave COULD NOT RUN at once.
+        class Busy(FakeLlm):
+            def __init__(self, fails, **kw):
+                super().__init__(**kw)
+                self.fails = fails
+
+            def complete_structured(self, **kw):
+                if len(self.calls) < self.fails:
+                    self.calls.append(kw)
+                    raise RuntimeError("RateLimitError: Error code: 429 - The inference service is overloaded.")
+                return super().complete_structured(**kw)
+
+        waits = []
+        with mock.patch.object(review, "_sleep", waits.append):
+            llm = Busy(2, parsed=answer())
+            r = self.review(FakeCtx(llm))
+            self.assertEqual(r["verdict"], "PASS")
+            self.assertEqual((len(llm.calls), waits), (3, list(review.TRANSIENT_WAITS)))
+            waits.clear()
+            llm = Busy(9, parsed=answer())
+            r = self.review(FakeCtx(llm), fresh=True)
+            self.assertEqual((r["verdict"], len(llm.calls)), ("COULD NOT RUN", 3))
+            self.assertIn("overloaded or rate-limited (tried 3 times)", r["error"])
+            self.assertIn("run `/foreman review --fresh` in a minute", r["error"])
+            waits.clear()
+            llm = FakeLlm(exc=TimeoutError("timed out after 180s"))  # not busy: it used its time, no retry
+            self.review(FakeCtx(llm), fresh=True)
+            self.assertEqual((len(llm.calls), waits), (1, []))
+
+    def test_the_model_that_answered_is_named_when_hermes_routed_elsewhere(self):
+        # Found in a real session: with no override Hermes routed the call to its fallback model, and Foreman said
+        # "the host's default model" and "the same model that wrote the code".
+        r = self.review(FakeCtx(FakeLlm(parsed=answer(), model="fallback-flash")))
+        self.assertIsNone(r["model"]["same_as_author"])  # named, but never claimed independent
+        text = review.format_review(r)
+        self.assertIn("Reviewer: fallback-flash (the model Hermes routed the review to)", text)
+        self.assertIn(review.ROUTED_MODEL, text)
+        self.assertNotIn(review.SAME_MODEL, text)
+        r = self.review(FakeCtx(FakeLlm(parsed=answer())), fresh=True)  # answered by the main model: as before
+        self.assertIs(r["model"]["same_as_author"], True)
+        self.assertIn(review.SAME_MODEL, review.format_review(r))
+
+    def test_ids_that_differ_only_in_spelling_are_the_same_model(self):
+        for a, b in (("claude-sonnet-4.5", "claude-sonnet-4-5"), ("llama3:latest", "llama3"),
+                     ("vendor/main-model-2026-10-01", "main-model"), ("anthropic.claude-sonnet-4-5-v1:0",
+                                                                      "claude-sonnet-4-5"),
+                     ("claude-sonnet-4-5-20250929", "claude-sonnet-4-5"), ("gpt-6.1-sol", "GPT-6.1-SOL")):
+            self.assertTrue(review.same_model_id(a, b), (a, b))
+        # A prefix counts as the same (gpt-6.1-sol-mini for gpt-6.1-sol): the safe side, it keeps the warning.
+        for a, b in (("deepseek-v4.1-flash", "gpt-6.1-sol"), ("gpt-6.1", "o4")):
+            self.assertFalse(review.same_model_id(a, b), (a, b))
+
+    def test_the_saved_path_is_text_only_where_it_stays_text(self):
+        # Found in a real session: Telegram sent the review's JSON file because the reply named its path.
+        r = self.review(FakeCtx(FakeLlm(parsed=answer())))
+        self.assertIn("Saved: ", review.format_review(r))
+        self.assertIn("Saved: ", review.format_review(r, "cli"))
+        self.assertNotIn("Saved:", review.format_review(r, "telegram"))
+        self.assertNotIn(r["saved"], review.format_review(r, "telegram"))
 
     def test_capability_not_granted_falls_back_to_host_model(self):
         llm = FakeLlm(parsed=answer())

@@ -13,6 +13,8 @@ class NotifyCtx(FakeCtx):
     """A fake plugin context with settings; keeps the text of each message file while it exists."""
 
     def __init__(self, settings=None, raises=False, **kw):
+        kw.setdefault("result", {"output": "Sent to telegram home channel (chat_id: 1)", "exit_code": 0,
+                                 "error": None})
         super().__init__(**kw)
         self.settings = dict(settings or {})
         self.sent_texts, self.raises = [], raises
@@ -159,7 +161,7 @@ class Sending(GitRepoCase):
         self.assertEqual(r, {"sent": True, "where": "telegram", "why_not": None})
         name, args = ctx.dispatched[0]
         self.assertEqual(name, "terminal")
-        self.assertRegex(args["command"], r'^hermes send --to "telegram" --file "[^"]+/notify/msg-[^"]+\.txt" --quiet$')
+        self.assertRegex(args["command"], r'^hermes send --to "telegram" --file "[^"]+/notify/msg-[^"]+\.txt"$')
         self.assertEqual(args["timeout"], notify.SEND_TIMEOUT)
         self.assertEqual(ctx.sent_texts, [notify.render(event(), "telegram")])
         self.assertFalse(os.path.exists(ctx.paths[0]))  # the message file is removed
@@ -183,6 +185,17 @@ class Sending(GitRepoCase):
             self.assertEqual(gate.on_pre_tool_call("terminal", {"command": command})["action"], "block", command)
         self.assertEqual(gate.on_pre_tool_call("write_file", {"path": store + "/foreman-notify.json",
                                                               "content": "[]"})["action"], "block")
+
+    def test_where_hermes_sent_it_is_kept_and_shown(self):
+        # Found in a real session: a notice logged as sent (exit 0 under --quiet) never reached the chat, and
+        # nothing said where Hermes had sent it.
+        self.ctx(settings={"notify": "on", "notify_to": "telegram"})
+        self.assertTrue(notify.send(event())["sent"])
+        self.assertIn("chat_id: 1", notify._load_log()[-1]["hermes_said"])
+        self.assertIn("Hermes said: Sent to telegram home channel (chat_id: 1)", commands.handle_slash("notify"))
+        self.ctx(settings={"notify": "on", "notify_to": "telegram"},  # exit 0 is Hermes's "delivered", whatever
+                 result={"output": "sent", "exit_code": 0, "error": None})  # it prints (e.g. a bare "sent")
+        self.assertTrue(notify.send(event(number=9, id=None))["sent"])
 
     def test_failures_are_reported_never_raised(self):
         ctx = self.ctx(settings={"notify": "on", "notify_to": "discord:#ops"},
