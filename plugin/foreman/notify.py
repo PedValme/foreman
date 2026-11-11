@@ -351,8 +351,8 @@ def cmd_notify(args: str = "", keys: tuple = (), platform: Optional[str] = None)
         last = [e for e in _load_log() if e.get("key") != "test"][-1:]
         lines = ["Foreman notifications: %s" % ("ON" if enabled() else "OFF (nothing is sent anywhere)"),
                  "Destination: %s" % _describe(target),
-                 board.wrap("What is sent: one message when a pull request is ready for you or needs your decision, "
-                            "with the commands to merge or reject it. " + _HOW)]
+                 board.wrap("What is sent: one message when a pull request is ready for you, needs your decision, or was merged or "
+                            "rejected, with the commands to merge or reject it when it waits. " + _HOW)]
         if last:
             e = last[0]
             lines.append("Last: %s %s, %s" % (e.get("kind"), e.get("id"), (
@@ -391,5 +391,5 @@ def cmd_notify(args: str = "", keys: tuple = (), platform: Optional[str] = None)
 
 
 SUBCOMMANDS: dict = {
-    "notify": (cmd_notify, "[on [target]|off|test]  tell you on your phone when a PR waits for you"),
+    "notify": (cmd_notify, "[on [target]|to <target>|off|test]  message your phone when a PR waits for you or is merged/rejected"),
 }

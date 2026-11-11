@@ -20,8 +20,8 @@ Read the index below, then ESTADO.md, its "Next session" first (where the last s
   - One slash command, `/foreman`; never a name Hermes already uses — Hermes silently rejects a colliding name
     (DECISIONES.md, 2026-11-09).
   - Every catalog admission rule is a requirement — a broken rule is a declined entry (DECISIONES.md, 2026-11-09).
-  - Nothing of the owner's private stack (fábrica, guardia's prompts, names, hosts) enters this public repository —
-    fábrica is private and unlicensed.
+  - Nothing of the owner's private stack (his private tooling and its prompts, names, hosts, accounts) enters this
+    public repository — it is private and unlicensed.
 - Operation: see "This repository".
 - Known pitfalls: the Hermes on the Windows development PC has no model provider, so a real session can only run
   on the owner's Hermes machine; `hermes plugins install --ref` needs the full 40-character commit; with a gateway running, a slash

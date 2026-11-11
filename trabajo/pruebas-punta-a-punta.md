@@ -67,6 +67,14 @@ commands in one session capture the session id from the first call and use `--re
     and moved Gate → Review → ready without a reload; `auto_review` changed in Settings → Plugins took effect and
     was set back; Foreman removed and installed again from the app: one row, the pane back without a reload.
 
+- Final review, 2026-11-11 night, on the current code (2bed849 in `foremandev` and the real profile):
+  - Both gate batteries re-run after #29/#31: all 18 cases as expected.
+  - `python -m foreman.detector` by hand: default, `--json`, `--check`, `--strict`, `--sarif` with
+    `--sarif-threshold`, a missing report (exit 2), `--repo`: exit codes 0/1/2 as documented.
+  - A real `/foreman merge 16 --yes` (with the review) merged; `/foreman reject 17 --close --yes` closed; the
+    `merged` and `rejected` notices were sent with Hermes's answer kept ("Sent to telegram home channel").
+  - The "dashboard" part is the hidden backend route the Desktop panel reads: verified with the panel.
+
 ## Not yet verified in a real session
 Notifications
 - [ ] the message when the bounce limit is reached as delivered on a phone (queued and logged in a real session);

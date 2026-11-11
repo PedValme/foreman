@@ -2,7 +2,7 @@ name: foreman
 version: "0.1.0"
 manifest_version: 2
 api_version: 1
-description: "A green check the agent did not rig: a deterministic gate (no model) that blocks git commit, git push, gh pr create and gh pr merge when the change skips, isolates, deletes or moves tests, edits what the check runs, bypasses hooks or carries a secret, and asks the agent to undo it before it finishes a coding turn. On demand, /foreman review asks a second model to review the diff."
+description: "A green check the agent did not rig: a deterministic gate (no model) that blocks git commit, git push and gh pr create when the change skips, isolates, deletes or moves tests, edits what the check runs, bypasses hooks or carries a secret, always blocks an agent-run gh pr merge (merging is yours), and asks the agent to undo it before it finishes a coding turn. On demand, /foreman review asks a second model to review the diff."
 author: "PedValme"
 license: MIT
 homepage: https://github.com/PedValme/foreman
@@ -44,7 +44,7 @@ config_schema:
     choices: ["off", "on"]
     default: "off"
     label: "Notifications"
-    description: "Off: nothing is sent anywhere. On: a message to notify_to when a pull request waits for you, sent with `hermes send` through Hermes's terminal tool and your own bot. Same as /foreman notify on|off."
+    description: "Off: nothing is sent anywhere. On: a message to notify_to when a pull request waits for you, and when one is merged or rejected through Foreman, sent with `hermes send` through Hermes's terminal tool and your own bot. Same as /foreman notify on|off."
   notify_to:
     type: str
     default: ""

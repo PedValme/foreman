@@ -2,7 +2,8 @@
 # then make the "foreman" job a required status check in the branch protection (or ruleset) of your default branch.
 #
 # Why in CI: inside Hermes the gate runs on the agent's own machine. A required check runs where the agent cannot
-# edit it, so a green result here does not depend on the agent.
+# edit it, so a green result here does not depend on the agent, as long as this file is protected: a pull request
+# runs its own copy of the workflow, so protect .github/workflows/ (CODEOWNERS with required review, or a ruleset).
 #
 # Exit codes of the detector: 0 = clean, 1 = at least one blocker, 2 = the run could not be done (not a repository,
 # git failed, or a SARIF report that cannot be read, whether given with --sarif or named in .foreman.json: CI must

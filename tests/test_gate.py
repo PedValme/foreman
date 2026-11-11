@@ -215,6 +215,42 @@ class TerminalGate(GitRepoCase):
         self.assertEqual(d["action"], "approve")
         self.assertIn("more than one branch", d["message"])
 
+    def test_a_push_foreman_cannot_resolve_asks_a_person(self):
+        # Found in the final review: each of these published a rigged branch while the clean current one was read.
+        for command in ("git push origin 'refs/heads/*:refs/heads/*'", "git push origin 'refs/heads/rig*:refs/heads/main*'"):
+            d = terminal(command, self.root)
+            self.assertEqual(d["action"], "approve", command)
+            self.assertIn("cannot resolve", d["message"])
+        self.git("config", "remote.origin.push", "refs/heads/rig:refs/heads/rig")
+        d = terminal("git push origin", self.root)
+        self.assertEqual(d["action"], "approve")
+        self.assertIn("what the configuration adds", d["message"])
+        self.git("config", "--unset", "remote.origin.push")
+        self.git("config", "push.default", "matching")
+        self.assertEqual(terminal("git push", self.root)["action"], "approve")
+        self.git("config", "--unset", "push.default")
+        self.git("config", "remote.origin.mirror", "true")
+        self.assertEqual(terminal("git push origin", self.root)["action"], "approve")
+        self.git("config", "--unset", "remote.origin.mirror")
+        # Found in the review of that change: the same settings given inline with `git -c`.
+        for command in ("git -c remote.origin.push=refs/heads/rig:refs/heads/main push origin",
+                        "git -c push.default=matching push origin"):
+            self.assertEqual(terminal(command, self.root)["action"], "approve", command)
+        # Deleting a remote branch publishes nothing, even when the local one is gone.
+        self.assertIsNone(terminal("git push origin --delete gone", self.root))
+
+    def test_a_local_branch_as_upstream_is_not_the_base(self):
+        # Found in the final review: `git branch -u rig2` at HEAD made the pushed range empty.
+        self.git("checkout", "-q", "-b", "rig")
+        self.write("tests/test_app.py", SKIP + "\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "rig", "--no-verify")
+        self.git("branch", "rig2")
+        self.git("branch", "-u", "rig2")
+        d = terminal("git push origin HEAD", self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertIn("test-skipped", d["message"])
+
     def test_cmd_c_is_followed(self):
         self.write("tests/test_app.py", SKIP + "\n")
         self.git("add", "-A")
@@ -553,6 +589,12 @@ class WriteGate(GitRepoCase):
         d = self.write_file(self.test_file, SKIP + "\ndef test_x():\n    assert True\n")
         self.assertEqual(d["action"], "block")
         self.assertIn("tests/test_app.py", d["message"])
+
+    def test_an_imported_skip_is_blocked_at_the_write(self):
+        # Found in the final review: `from unittest import skip` + `@skip('x')` through write_file passed.
+        d = self.write_file(self.test_file, "from unittest import skip\n\n\n@" + "skip('x')\ndef test_x():\n    assert True\n")
+        self.assertEqual(d["action"], "block")
+        self.assertIn("test-skipped", d["message"])
 
     def test_existing_markers_and_non_test_files_pass(self):
         self.write("tests/test_app.py", SKIP + "\ndef test_x():\n    assert True\n")

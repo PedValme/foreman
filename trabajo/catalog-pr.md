@@ -4,7 +4,12 @@ Before opening: replace `<SHA>` below and `REPLACE_WITH_40_CHAR_COMMIT_SHA_OF_PE
 `trabajo/catalog/foreman.yaml` (the `sha` and every `screenshots` URL)
 with the full 40-character commit of PedValme/foreman being listed; run `hermes plugins validate plugin
 --install-deps` on a checkout at that commit and `python scripts/validate_plugin_catalog.py plugin-catalog/foreman.yaml`
-in the Hermes checkout; the PR adds one file, `plugin-catalog/foreman.yaml`.
+in the Hermes checkout; the PR adds one file, `plugin-catalog/foreman.yaml`. Commit it in the Hermes fork with the
+owner's GitHub noreply address (`git -c user.email=82127492+PedValme@users.noreply.github.com commit …`): Hermes's
+Contributor Attribution check fails on an email it cannot map, and the noreply address keeps the personal one out.
+Open the Hermes issue (`trabajo/hermes-issue-seams.md`) first and put its link where this text asks for it: it is
+the answer to the one validator warning (catalog rule 9). Then remove the "DRAFT" header and the placeholder comments
+from the entry.
 
 **Title:** `plugin-catalog: add foreman (test-integrity gate for coding agents)`
 
@@ -16,8 +21,10 @@ A green check the agent did not rig. Foreman reads the real diff before `git com
 `gh pr merge` and blocks a coding agent that skips, deletes or moves tests, edits or weakens what the check runs,
 bypasses git hooks or commits a secret. A second model (by default the user's Hermes fallback model) reviews what
 rules cannot see, such as a loosened assertion. Only a person allows an exception, and Foreman never merges for the
-agent: an agent-run `gh pr merge` is blocked (a merge through `gh api` or a direct push to the base branch is not;
-the README says to protect the base branch on GitHub).
+agent: a plain agent-run `gh pr merge` is blocked (a merge through `gh api` or a direct push to the base branch is
+not; the README says to protect the base branch and the CI workflow on GitHub). It guards against the shortcuts an
+agent takes in the open, not against one that hides its commands; the README's *Known limits* list what it does not
+follow.
 
 - Repository: https://github.com/PedValme/foreman (public, MIT), plugin in `plugin/` (`subdir: plugin`)
 - Pinned commit: `<SHA>`, version `0.1.0`, `requires_hermes: ">=0.22.6"` (also in `plugin.yaml`)
@@ -76,7 +83,7 @@ the README says to protect the base branch on GitHub).
 ### The one `hermes plugins validate` warning
 
 ```
-⚠ private core imports (catalog rule 9 …): foreman/gate.py:623 tools.terminal_tool.get_session_cwd.
+⚠ private core imports (catalog rule 9 …): foreman/gate.py:652 tools.terminal_tool.get_session_cwd.
 ```
 
 The `pre_tool_call` hook must know which repository a `git commit` without `workdir` runs in, which is the terminal's

@@ -64,8 +64,8 @@ the owner confirms it. An option the owner turned down is a decision too and sta
 - 2026-11-09 · On the owner's Hermes machine, in the dedicated profile: test sessions through the night, more
   test issues and pull requests in the private test repository, and the agent answers the consent screen that
   lets Foreman use another model as reviewer · Pedro chose all three, and: «hay dos cuentas que puedes usar sin
-  drama en glorieto, openai chatgpt por suscripcion puedes usarla en lo que necesites terra y sol 6.1 y opencode
-  go que es mi gailover/secundsria usa puro deepseek 4.1 flash en high de esa sub».
+  drama en […], […] puedes usarla en lo que necesites […] y […] que es mi gailover/secundsria […]» (the machine and
+  the accounts redacted on 2026-11-11 under the rule that nothing of the owner's private setup is public).
 - 2026-11-09 · The Desktop panel is checked on the Hermes Desktop of the development PC or on the web version ·
   Pedro: «hay hermes desktop en este pc pero puedes usar la version web tambien».
 - 2026-11-09 · The catalog pull request and the feature request to Hermes go out under the owner's account only
@@ -94,3 +94,9 @@ the owner confirms it. An option the owner turned down is a decision too and sta
   código fuera (Recomendado)». Ajustes del agente (from the review, after his choice): in the files that run the
   check (CI workflows, Makefile, tox, nox, package.json…) a quoted marker still counts, because a command there
   can write a skip into the tests; in Python files `//` is not a comment.
+- 2026-11-11 · Overnight final review with subagents; the agent fixes what it finds · Pedro: «fluye» and
+  «haz una revisión final muldimensional con subagentes para asegurar que todo está probado y listo para
+  grabar y publicar mañana durante la mañana […] mañana con un nuevo guión (uno bien hehco y de realmente demuestre
+  lo que queremos del plugin) grabamos y colocamos el PR en el repo de HErmes», and «usa mi hermes desktop de este
+  win durante la noche si lo necesitas, si encuentras issues o cosas a corregir, las corriges, fluye mientras voy a
+  descansar».
