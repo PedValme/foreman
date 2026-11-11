@@ -1,14 +1,18 @@
-# Draft issue for NousResearch/hermes-agent (not opened)
+# Issue for NousResearch/hermes-agent
 
-**Title:** Plugin API: four seams a test-integrity plugin needed (terminal cwd, approval for dispatched commands,
-owner notifications with choices, button captions)
+Opened 2026-11-11: https://github.com/NousResearch/hermes-agent/issues/153841
+
+**Title:** [Feature]: Plugin API: seams a test-integrity plugin needed (terminal cwd, approval for dispatched commands,
+owner notifications with choices, button captions, auxiliary model picker)
 
 Hi, and thanks for the plugin surface: hooks, `ctx.dispatch_tool`, `ctx.ask_choice` and `ctx.llm` covered almost
 everything [Foreman](https://github.com/PedValme/foreman) needed. It is a plugin that blocks a coding agent from
 rigging its own check (skipped or deleted tests, a changed check, secrets) and leaves merges to the user. Following
 the catalog guide ("open an issue describing it: we would rather add the seam than list a patch"), here are the four
-places where we found no public seam, each with the workaround we ship today. Line numbers are Foreman's `main` and
-Hermes v0.23.0.
+places where we found no public seam, each with the workaround we ship today, then four things we saw on a real setup
+and one more seam for plugin settings. Foreman line numbers are at commit
+[`c15453c`](https://github.com/PedValme/foreman/tree/c15453cb2fc07fa674d6f7b548a553b3ce9e6f5d) (the one submitted to the
+catalog); Hermes line numbers are v0.23.0.
 
 ## 1. Read the terminal's current working directory for a session
 
@@ -21,7 +25,7 @@ terminal cwd (`hermes_cli/plugin_session.py:33-40`); in the CLI it is the launch
 (`hermes_cli/plugin_session.py:48-50`). After `cd ~/src/other-repo` in an earlier terminal call, only
 `tools.terminal_tool.get_session_cwd(task_id)` knows where the next command runs.
 
-**Consumer.** `plugin/foreman/gate.py:623` imports `tools.terminal_tool.get_session_cwd` inside `try/except` and
+**Consumer.** `plugin/foreman/gate.py:661` imports `tools.terminal_tool.get_session_cwd` inside `try/except` and
 falls back to `ctx.session_cwd()` and `agent.runtime_cwd.resolve_agent_cwd()`. It is the one warning `hermes plugins
 validate` reports for Foreman (catalog rule 9). The same directory is what `/foreman` (a slash command) needs to find
 the user's repository; when a CLI hands a slash command to a running gateway before the terminal has been used, there
@@ -43,13 +47,13 @@ detection, `pre_tool_call` hooks, the user's approval mode) as a model's tool ca
 
 **Why.** `ctx.dispatch_tool` goes straight to `registry.dispatch` (`hermes_cli/plugins.py:676-685`): in v0.23.0 no
 approval prompt appears for a command dispatched by a plugin. Foreman runs `gh pr merge` this way after the user
-confirms with `ctx.ask_choice` (`plugin/foreman/board.py:1169-1177` for the question, `board.py:1082-1089` for the
-dispatch, `board.py:1234` for the command). That works, but it is Foreman's own confirmation, not Hermes's: it does
+confirms with `ctx.ask_choice` (`plugin/foreman/board.py:1169-1180` for the question, `board.py:1083-1090` for the
+dispatch, `board.py:1237` for the command). That works, but it is Foreman's own confirmation, not Hermes's: it does
 not follow the user's approval settings, is not logged as an approval, and every plugin that runs an irreversible
 command re-invents it. `ask_choice` also only works from a sync slash-command handler, so a tool or hook cannot ask.
 
 **Consumer.** `/foreman merge` (`gh pr merge --match-head-commit`), `/foreman reject --close` (`gh pr close`,
-`board.py:1541`), and `hermes send` for notifications (`plugin/foreman/notify.py:250`).
+`board.py:1557`), and `hermes send` for notifications (`plugin/foreman/notify.py:256`).
 
 **Sketch.**
 
@@ -88,7 +92,7 @@ under the same authorisation as a typed command.
 So a plugin that wants to tell its owner "this is ready, decide" can only shell out to `hermes send` through the
 terminal tool (plain text, no buttons) and ask the owner to type the command back.
 
-**Consumer.** `plugin/foreman/notify.py:240-266`: when a pull request is CLEAN and mergeable, Foreman sends the owner
+**Consumer.** `plugin/foreman/notify.py:242-266`: when a pull request is CLEAN and mergeable, Foreman sends the owner
 a message with `/foreman merge 6 --repo acme/widgets` to copy. With this seam the owner would tap **Merge**, which runs
 `/foreman merge 6`: a fresh verdict, then Hermes's own confirmation. The button is the person's decision, never an
 automatic merge.
@@ -122,7 +126,8 @@ as the button text.
 `hermes_cli/plugin_choices.py:58-70`). A plugin can only keep its labels short; it cannot make the buttons say
 "Merge" and "Cancel".
 
-**Consumer.** `plugin/foreman/board.py` `_confirm`: `{"value": "merge", "label": "Merge PR #2", "button": "Merge"}`.
+**Consumer.** `plugin/foreman/board.py:1169` `_confirm` would pass
+`{"value": "merge", "label": "Merge PR #2", "button": "Merge"}`; today it can only keep the label short.
 
 ## 5. Two things seen on a real setup (Hermes 0.23.0)
 
