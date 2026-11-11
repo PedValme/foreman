@@ -82,6 +82,9 @@ board shows local branches only.
   needs no extra permission. The optional `reviewer_model` setting overrides it; that one needs the
   `llm.model_override` capability (and `llm.provider_override` for another provider), which Hermes asks for only when
   you run `hermes plugins enable foreman` in an interactive terminal.
+- **Turning it off** (Capabilities → Plugins, or `hermes plugins disable foreman`) takes effect at once: Foreman
+  reads the switch on every command it watches and then blocks nothing and runs no review. A running Hermes gateway
+  keeps a turned-off plugin's `/foreman` command listed until it restarts; meanwhile it answers that Foreman is off.
 - **Desktop panel (optional).** In Hermes Desktop open **Capabilities → Plugins**, find **Foreman** and switch on its
   **Desktop** column (a plugin's Desktop half ships switched off; click **Rescan** if the row does not show it). The
   **Foreman** pane joins the right side as a tab; click the status-bar chip **Foreman · …** (or **Ctrl/⌘ K → Foreman:

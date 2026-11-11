@@ -969,10 +969,30 @@ def directive(what: str, outcome: Outcome) -> Optional[dict]:
 
 # ─── pre_tool_call ───────────────────────────────────────────────────────────
 
+PLUGIN_NAME = "foreman"
+TURNED_OFF = ("Foreman is turned off (Capabilities → Plugins, or `hermes plugins enable foreman`): it blocks nothing "
+              "and runs no review. Hermes keeps a turned-off plugin's command until its gateway restarts.")
+
+
+def turned_off() -> bool:
+    """Foreman is disabled in Hermes's config. A running gateway keeps a disabled plugin's hooks, commands and tools
+    until it restarts (enabling takes effect at once; disabling does not: found in a real session), so Foreman reads
+    the switch itself and stands down at once. Hermes's cached config reader: about 0.3 ms."""
+    try:
+        from hermes_cli.config import load_config_readonly
+        plugins = (load_config_readonly() or {}).get("plugins")
+        disabled = plugins.get("disabled") if isinstance(plugins, dict) else None
+        return isinstance(disabled, list) and PLUGIN_NAME in disabled
+    except Exception:
+        return False
+
+
 def on_pre_tool_call(tool_name: str = "", args=None, task_id: str = "", **kwargs) -> Optional[dict]:
     """The hook Hermes calls. Inside it nothing is sent anywhere (``pipeline.hook_context``)."""
     if tool_name not in TERMINAL_TOOLS and tool_name not in WRITE_TOOLS:
         return None  # the common case, before anything else
+    if turned_off():
+        return None
     from . import pipeline
     sid = kwargs.get("session_id")
     token = _HOOK_SESSION.set(sid if isinstance(sid, str) else "")
@@ -1365,7 +1385,7 @@ def on_pre_verify(coding: bool = False, attempt: int = 0, changed_paths=None, se
     the review loop (``finish.step``), which only reads stored reviews: the model runs in the tool, never here.
     Inside it nothing is sent anywhere: a notification is queued and sent from the next /foreman command or tool."""
     try:
-        if not coding:
+        if not coding or turned_off():
             return None
         from . import pipeline
         with pipeline.hook_context():

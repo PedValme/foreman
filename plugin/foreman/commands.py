@@ -12,7 +12,7 @@ import os
 import time
 from typing import Callable, Optional
 
-from . import detector, grants, review
+from . import detector, gate, grants, review
 from .detector import MARKER, GitError, Repo
 from .gate import HOW, NO_REPOSITORY_HERE, RECORDED, cwd_candidates, locate
 from .verdicts import CLEAN, INCOMPLETE, NEEDS_OK, verdict_of
@@ -238,6 +238,8 @@ SUBCOMMANDS.update(_notify.SUBCOMMANDS)
 
 
 def handle_slash(raw_args: str = "", session_id: str = "", session_key: str = "", **kwargs) -> str:
+    if gate.turned_off():
+        return "Foreman: " + gate.TURNED_OFF
     if (raw_args or "").split()[:2] != ["notify", "off"]:  # turning them off must not send the queue first
         _flush()  # outside any hook: send what hooks queued
     try:
@@ -288,6 +290,8 @@ def _flush() -> None:
 
 
 def foreman_check_tool(args: dict = None, task_id: str = "", **kwargs) -> str:
+    if gate.turned_off():
+        return json.dumps({"verdict": "OFF", "message": gate.TURNED_OFF})
     _flush()  # outside any hook: send what hooks queued
     try:
         path = (args or {}).get("path")

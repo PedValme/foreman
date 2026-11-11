@@ -576,6 +576,41 @@ class SessionDirectory(GitRepoCase):
         self.assertNotIn("(from", out)
 
 
+class TurnedOff(GitRepoCase):
+    """Found in a real session: Foreman disabled in Desktop kept blocking until the gateway restarted (Hermes keeps a
+    disabled plugin's hooks loaded). Foreman reads the switch itself and stands down at once."""
+
+    def setUp(self):
+        super().setUp()
+        self.write("tests/test_app.py", "def test_x():\n    assert True\n")
+        self.commit("base")
+        self.write("tests/test_app.py", SKIP + "\ndef test_x():\n    assert True\n")
+        self.git("add", "-A")
+
+    def config(self, disabled):
+        module = types.ModuleType("hermes_cli.config")
+        module.load_config_readonly = lambda: {"plugins": {"disabled": disabled}}
+        return mock.patch.dict(sys.modules, {"hermes_cli": types.ModuleType("hermes_cli"), "hermes_cli.config": module})
+
+    def test_turned_off_it_blocks_nothing_and_says_so(self):
+        with self.config(["foreman"]):
+            self.assertTrue(gate.turned_off())
+            self.assertIsNone(terminal("git commit -m x", self.root))
+            self.assertIsNone(gate.on_pre_tool_call(tool_name="write_file", args={
+                "path": os.path.join(self.root, "tests", "test_b.py"), "content": SKIP + "\ndef test_b():\n    pass\n"}))
+            self.assertIsNone(gate.on_pre_verify(coding=True, attempt=0, changed_paths=[
+                os.path.join(self.root, "tests", "test_app.py")]))
+            self.assertIn("Foreman is turned off", commands.handle_slash("status " + self.root))
+            self.assertEqual(json.loads(commands.foreman_check_tool({"path": self.root}))["verdict"], "OFF")
+
+    def test_turned_on_or_unreadable_it_blocks_as_always(self):
+        with self.config(["some-other-plugin"]):
+            self.assertFalse(gate.turned_off())
+            self.assertEqual(terminal("git commit -m x", self.root)["action"], "block")
+        self.assertFalse(gate.turned_off())  # no Hermes config reader: never off by accident
+        self.assertEqual(terminal("git commit -m x", self.root)["action"], "block")
+
+
 class WriteGate(GitRepoCase):
     def setUp(self):
         super().setUp()
