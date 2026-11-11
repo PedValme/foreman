@@ -12,10 +12,9 @@
   bounce limit, SARIF with a real hermes-security export, the CI workflow, no GitHub remote); four defects found
   and fixed in #26 (merged; reinstalled in `foremandev` at 3cba39b, the remote-branch verdict re-checked live). The
   video script (`trabajo/demo-video.md`) no longer holds; the owner wants the video to show the whole line.
-- Next action: restore `foreman-demo` with the owner's yes; then the owner's sitting below (and, if he decides it,
-  the skip-markers change). Only then: rewrite the video script around one change moving through the whole line,
+- Next action: the owner's sitting below (and, if he decides it, the skip-markers change). `foreman-demo` was
+  restored after a test merged its clean PR: the video's clean fix is now PR #15, issue #1 is open again. Only then: rewrite the video script around one change moving through the whole line,
   record, pin the commit, open the catalog pull request and the issue with his account, the form.
-- Waits for the owner: say yes to restoring `foreman-demo` after my mistake (PR #5 was merged by a test: revert ac12e04 on main, restore the branch, reopen #1, a new pull request) · Recommended: yes, before recording · Verified by: `gh issue view 1 -R PedValme/foreman-demo` shows OPEN
 - Waits for the owner: the cases only he can do (Telegram automatic notification and confirmation card, the panel's Merge and Reject buttons, the panel live, installing from the app, a setting changed in the Settings form) · Recommended: in that order, in one sitting
 - Waits for the owner: decide whether skip markers count only in test files (Foreman flagged its own detector and a shell script as skipped tests) · Recommended: only in test files and the check's own files, with a test that a skip helper defined elsewhere is still caught at its use
 - Waits for the owner: say yes to opening `trabajo/catalog-pr.md`, `trabajo/catalog/foreman.yaml` and `trabajo/hermes-issue-seams.md` with his account, after everything is verified (he read the summaries and approved the four changes to the entry) · Verified by: the pull request and the issue open in NousResearch/hermes-agent
