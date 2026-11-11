@@ -310,12 +310,13 @@ def has_skip_marker(text: str) -> Optional[str]:
 
 # Outside test files a skip marker counts only as code: one inside a quoted string (a regex, a fixture written by a
 # script) or a comment does not switch a test off (DECISIONES.md, 2026-11-10). A skip helper defined as code outside
-# the tests (`skip_slow = pytest.mark.skip(...)`) still counts.
+# the tests (a module-level pytest skip mark bound to a name) still counts. These comments name no marker literally:
+# this repository's CI runs the base's detector on each pull request.
 _QUOTED = re.compile(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'')
-_COMMENT = re.compile(r"(?:^|\s)(?:#(?!\[)|//).*$")  # not Rust's #[ignore], whose tests live in src/
+_COMMENT = re.compile(r"(?:^|\s)(?:#(?!\[)|//).*$")  # not Rust's ignore attribute: its tests live in src/
 _HASH_COMMENT = re.compile(r"(?:^|\s)#(?!\[).*$")  # Python: `//` is floor division
 # Files that run the check: a quoted marker there is a command that writes a skip into the tests while CI runs
-# (`sed -i 's/…/@pytest.mark.skip/' tests/…`), so it counts as written.
+# (a sed that inserts a pytest skip mark into tests/), so it counts as written.
 CHECK_SURFACE = re.compile(r"(?i)(^|/)(\.github/|\.gitlab-ci\.ya?ml$|\.circleci/|azure-pipelines\.ya?ml$|Jenkinsfile$|"
                            r"(GNU)?makefile$|[^/]*\.mk$|tox\.ini$|noxfile\.py$|package\.json$|justfile$|Taskfile\.ya?ml$)")
 
