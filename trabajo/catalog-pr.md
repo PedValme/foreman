@@ -1,6 +1,6 @@
 # Draft catalog pull request for NousResearch/hermes-agent (not opened)
 
-Before opening: replace `d6fb66b55bd478715cdc2e66a77f6e4ef2882b4b` below and `REPLACE_WITH_40_CHAR_COMMIT_SHA_OF_PEDVALME_FOREMAN` in
+Before opening: replace `c15453cb2fc07fa674d6f7b548a553b3ce9e6f5d` below and `REPLACE_WITH_40_CHAR_COMMIT_SHA_OF_PEDVALME_FOREMAN` in
 `trabajo/catalog/foreman.yaml` (the `sha` and every `screenshots` URL)
 with the full 40-character commit of PedValme/foreman being listed; run `hermes plugins validate plugin
 --install-deps` on a checkout at that commit and `python scripts/validate_plugin_catalog.py plugin-catalog/foreman.yaml`
@@ -27,7 +27,7 @@ agent takes in the open, not against one that hides its commands; the README's *
 follow.
 
 - Repository: https://github.com/PedValme/foreman (public, MIT), plugin in `plugin/` (`subdir: plugin`)
-- Pinned commit: `d6fb66b55bd478715cdc2e66a77f6e4ef2882b4b`, version `0.1.0`, `requires_hermes: ">=0.22.6"` (also in `plugin.yaml`)
+- Pinned commit: `c15453cb2fc07fa674d6f7b548a553b3ce9e6f5d`, version `0.1.0`, `requires_hermes: ">=0.22.6"` (also in `plugin.yaml`)
 - README (renders on the plugin page): `plugin/README.md` at the pinned commit
 - Submitted by the repository owner (rule 5). **Plugin Hackathon entry.**
 
@@ -62,7 +62,9 @@ follow.
   directories to find git repositories.
 - **Config writes.** Only `/foreman notify on|to|off`, typed by the user, saves the plugin's own `notify` and
   `notify_to` settings with `ctx.set_config` (Hermes writes them under `plugins.entries.foreman.settings` in
-  `config.yaml`). Nothing else changes the user's config.
+  `config.yaml`). Nothing else changes the user's config. It registers one auxiliary task, **Foreman review**
+  (`ctx.register_auxiliary_task`, default: the user's first fallback model), so the reviewer is picked in Hermes's own
+  model pickers; and it reads `plugins.disabled` so that turning it off takes effect at once in a running gateway.
 - **Network.** No calls of its own and no telemetry. Three paths, all user-initiated or user-enabled: the user's own
   `gh` (above); the review's model call through `ctx.llm` (the bounded diff, title, commit subjects and detector
   findings go to the user's configured provider; it spends tokens, once per exact diff, on `/foreman review`, before
@@ -83,7 +85,7 @@ follow.
 ### The one `hermes plugins validate` warning
 
 ```
-⚠ private core imports (catalog rule 9 …): foreman/gate.py:652 tools.terminal_tool.get_session_cwd.
+⚠ private core imports (catalog rule 9 …): foreman/gate.py:661 tools.terminal_tool.get_session_cwd.
 ```
 
 The `pre_tool_call` hook must know which repository a `git commit` without `workdir` runs in, which is the terminal's
@@ -96,7 +98,7 @@ so a missing seam never lets a commit through unchecked. The issue asking for th
 
 ## Validation
 
-- `hermes plugins validate plugin --install-deps` at `d6fb66b55bd478715cdc2e66a77f6e4ef2882b4b`: passed; security scan safe; the one warning above.
+- `hermes plugins validate plugin --install-deps` at `c15453cb2fc07fa674d6f7b548a553b3ce9e6f5d`: passed; security scan safe; the one warning above.
 - `scripts/validate_plugin_catalog.py plugin-catalog/foreman.yaml`: OK.
 - The plugin's own CI: unit tests on Linux, macOS and Windows (Python 3.11 and 3.13), and Foreman on its own pull
   requests.
