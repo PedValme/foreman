@@ -8,6 +8,7 @@ edited code, and asks it to undo what would rig the check.
 """
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import logging
 import os
@@ -537,8 +538,36 @@ def _option_values(args: list, short: str, long: str) -> list:
 # Messaging platforms and the Desktop app start from wherever the service or the app was launched.
 LOCAL_PLATFORMS = {"", "cli", "tui", "local"}
 RECORDED, SESSION, PROCESS, CONFIGURED = "recorded", "session", "process", "configured"
+GATED = "gated"
 HOW = {RECORDED: "the terminal's directory for this session", SESSION: "this session's working directory",
-       PROCESS: "the current directory", CONFIGURED: "Hermes's working directory", "given": "the given path"}
+       PROCESS: "the current directory", CONFIGURED: "Hermes's working directory", "given": "the given path",
+       GATED: "the repository of the agent's last git command in this session"}
+
+# The repository each session's last gated git command ran in, by Hermes session id: the agent committed in
+# foreman-demo from the Desktop chat and `/foreman review t/live` typed next could not tell the repository (found in
+# a real session: the terminal records its directory under the agent's task id, not the chat's session id). Only
+# what Foreman's own gate saw, in this process, for a few hours.
+_HOOK_SESSION = contextvars.ContextVar("foreman_hook_session", default="")
+_GATED_REPOS: dict = {}
+_GATED_TTL = 3600
+_GATED_MAX = 200
+
+
+def _remember_gated_repo(root: str) -> None:
+    """Under the hook's session id and the chat's session key (stable when compression gives the agent a new id)."""
+    if not root:
+        return
+    for sid in dict.fromkeys((_HOOK_SESSION.get(), _session_env("HERMES_SESSION_KEY"))):
+        if sid:
+            _GATED_REPOS.pop(sid, None)
+            _GATED_REPOS[sid] = (root, time.time())
+    while len(_GATED_REPOS) > _GATED_MAX:
+        _GATED_REPOS.pop(next(iter(_GATED_REPOS)))
+
+
+def gated_repo(key: str) -> Optional[str]:
+    hit = _GATED_REPOS.get(key) if isinstance(key, str) and key else None
+    return hit[0] if hit and time.time() - hit[1] < _GATED_TTL else None
 NO_REPOSITORY_HERE = ("Foreman could not tell which repository you mean from here. Pick one with `/foreman use` (or "
                       "`/foreman use <path>`), run `/foreman status <path>`, or run it after the agent has used the "
                       "terminal in this session.")
@@ -625,6 +654,10 @@ def cwd_candidates(*keys: str, platform: Optional[str] = None) -> list:
             out.append((get_session_cwd(key), RECORDED))
     except Exception:
         pass
+    # Hermes calls a plugin's slash command with its arguments only: the session comes from its session environment.
+    # HERMES_SESSION_ID is the agent's live id (it changes when the context is compressed), the key is the chat's.
+    for key in dict.fromkeys(keys_in_order + [_session_env("HERMES_SESSION_ID")]):
+        out.append((gated_repo(key), GATED))
     session = getattr(_CTX, "session_cwd", None)  # public plugin API; "" when the session has none
     if callable(session):
         try:
@@ -744,6 +777,7 @@ def evaluate(act: Action, deadline: Optional[float] = None) -> Outcome:
                                "...`." % act.cwd)
         return out  # the command names a place that is not a repository: git or gh fails on its own
     out.repos.append(root)
+    _remember_gated_repo(root)
     repo = Repo(root, deadline=deadline)
     try:
         if act.kind == "commit":
@@ -903,8 +937,13 @@ def on_pre_tool_call(tool_name: str = "", args=None, task_id: str = "", **kwargs
     if tool_name not in TERMINAL_TOOLS and tool_name not in WRITE_TOOLS:
         return None  # the common case, before anything else
     from . import pipeline
-    with pipeline.hook_context():
-        return _pre_tool_call(tool_name, args, task_id)
+    sid = kwargs.get("session_id")
+    token = _HOOK_SESSION.set(sid if isinstance(sid, str) else "")
+    try:
+        with pipeline.hook_context():
+            return _pre_tool_call(tool_name, args, task_id)
+    finally:
+        _HOOK_SESSION.reset(token)
 
 
 def _pre_tool_call(tool_name: str = "", args=None, task_id: str = "") -> Optional[dict]:

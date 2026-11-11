@@ -1244,10 +1244,11 @@ def cmd_merge(args: str = "", keys: tuple = (), platform: Optional[str] = None) 
                  % trim(unreviewed, 160)) if unreviewed else ""
         noted = ("Review notes:\n%s\n" % "\n".join("- " + n.strip() for n in notes)) if notes else ""
         label = "Merge PR #%d" % number
-        question = ("%s%s%sMerge PR #%d (%s, %s) into %s?\n%s\nCloses: %s · %s\n"
+        # The repository is named: Foreman may have located it for you (the agent's last git command, the pinned one).
+        question = ("%s%s%sMerge PR #%d of %s (%s, %s) into %s?\n%s\nCloses: %s · %s\n"
                     "Will run: gh pr merge %d --%s --delete-branch (pinned to %s)\n"
                     "Choose %s to merge, or Cancel.") % (
-            first, noted, warn, number, v["head_oid"][:7], method, v.get("base") or "its base",
+            first, noted, warn, number, v.get("name") or root, v["head_oid"][:7], method, v.get("base") or "its base",
             trim(v.get("title"), WIDTH), ", ".join(v.get("closes") or []) or "no issue", ci,
             number, method, v["head_oid"][:7], label)
         _pipeline_call(pipeline.record_waiting, ref, "merge question asked")

@@ -59,19 +59,19 @@ commands in one session capture the session id from the first call and use `--re
     owner's admin account); the pinned actions warn that Node 20 is deprecated.
   - No GitHub remote: board, verdict of a branch, `prs`, `issues`, `merge`, `reject` all say so clearly.
 
+- The owner's sitting, 2026-11-10/11 night (Telegram and Hermes Desktop on his real profile), all by him:
+  - Telegram: the automatic "ready" notice arrived (PR #13, after #30); the confirmation card for `merge 15` with
+    Cancel (nothing merged); `reject 13 --close` asking, "Post only" posted without closing.
+  - Desktop: Open ↗; Merge #15 sent the command and Cancel left it open; Reject… put the command in the chat box
+    unsent; with no chat on screen the clipboard toast; a new card `t/live` appeared live after the agent's commit
+    and moved Gate → Review → ready without a reload; `auto_review` changed in Settings → Plugins took effect and
+    was set back; Foreman removed and installed again from the app: one row, the pane back without a reload.
+
 ## Not yet verified in a real session
-Commands
-- [ ] the confirmation card on Telegram (short choices, #21), and `reject --close` asking there.
 Notifications
-- [ ] the automatic message when a pull request becomes ready (only `notify test` was seen).
-- [ ] the message when the bounce limit is reached; the queue when the event happens inside a hook.
+- [ ] the message when the bounce limit is reached as delivered on a phone (queued and logged in a real session);
+      the queue when the event happens inside a hook.
 - [ ] `/foreman notify off`, `/foreman notify to <target>`.
-Desktop
-- [ ] the Merge and Reject… buttons, the Open link, and a command sent with no chat on screen (clipboard toast).
-- [ ] the pane updating live while an agent turn moves a change through the line (never seen).
-- [ ] installing from the app ("Install from Git") so the app copies the Desktop half itself: one row, pane placed
-      without reloading. The half was copied by hand so far.
-- [ ] changing a setting from the Settings form and seeing it take effect.
 Environments
 - [ ] no `gh` at all: not testable from the CLI on the owner's machine, because slash commands run in the gateway
       process, whose PATH has `gh` (unit tests cover the message).
@@ -98,12 +98,21 @@ Environments
   run"; the model that answered is named when Hermes routed the review elsewhere, and never claimed independent;
   the saved review's path is no longer printed in messaging (Telegram attached the JSON file); `hermes send` runs
   without `--quiet` and its answer (the chat id) is kept and shown by `/foreman notify`.
-- Still to do in the sitting: the ready notice again, the confirmation card (`merge 15` → Cancel), `reject 13
-  --close` → Post only, then the Desktop panel.
+- Fixed in the pull request `claude/gated-repo`: in Desktop the agent committed in `foreman-demo`, then
+  `/foreman review t/live` typed in the same chat could not tell the repository; Foreman now remembers the
+  repository of the agent's last gated git command per session (the chat's key and the agent's id, one hour), and
+  the merge question names the repository.
 
 ## Defects found while testing, still open
-- Unresolved: on the owner's real profile, the automatic "ready" notice for PR #15 was logged as sent and did
-  not arrive (the test notice and hand-run sends did); the next one keeps Hermes's answer to tell where it went.
+- Unresolved: on the owner's real profile, the first automatic "ready" notice (PR #15, before #30) was logged as
+  sent and did not arrive; the next one (#13) arrived. Cause not found; Hermes's answer is now kept.
+- Hermes, not Foreman (for the request to Hermes): Telegram choice buttons show only numbers
+  (`plugins/platforms/telegram/adapter.py`, clarify rows); in Desktop, after a plugin command that asked with
+  choices, the spinner keeps turning until the next message; a plugin's model call with no override goes through
+  the auxiliary client, which on the owner's machine cannot use Codex and falls back to another provider, and its
+  attribution mixes the main provider with the fallback model.
+- The messaging gateway gains nothing from the remembered repository (its slash-command key never equals the
+  agent's session id): on Telegram a typed command still needs `/foreman use` or `--repo`.
 - A change bounced by the review whose agent ends the turn without changing it stays "bounced 1/3": no notice to
   the owner until the limit, which a refusing agent never reaches.
 - The Desktop pane can disappear from the layout and not return until the app is reloaded and the switch toggled;
