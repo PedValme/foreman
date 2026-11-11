@@ -37,24 +37,31 @@ commands in one session capture the session id from the first call and use `--re
   in one line; `git push` of a branch whose commit deleted a test. Case 12: an honest commit passed untouched.
   Case 13: a commit with no repository in sight was blocked with the `workdir` hint. All 13 as expected.
 
+- Batteries of 2026-11-10 evening (`trabajo/pruebas/gate-battery-2.sh`, `commands-battery.sh`, `review-battery.sh`,
+  `bounce-battery.sh`, `bounce-limit-battery.sh`), all as expected unless noted:
+  - Gate: `secret-history` (added then removed in the pushed range) and `.env` blocked; `gh pr create` blocked on a
+    rigged branch and passed on a clean one; `pre_verify` at level `merge` made the agent undo a changed check
+    script.
+  - Commands: `help`, `prs`, `issues`, `verdict #8` and `verdict 8.`, `review` of a branch and of a pull request,
+    the stored review reused, `review --fresh`; `merge` refused for conflicts, for a draft and while GitHub was still
+    computing; `--merge` and `--rebase` merged; `reject --close` with no way to ask says how to confirm, and with
+    `--yes` posts and closes.
+  - Review: `reviewer_model`/`reviewer_provider` by hand named as the source; without the consent the same-model
+    notice; an unreachable model gives COULD NOT RUN and `merge --yes` does not merge; `auto_review: off` merges with
+    no model call.
+  - Finish loop: a failing review bounces the change; with `max_bounces: 1` the limit is reached at 1/1, the
+    `needs_owner` notice is queued, one model call in all. A competent model fixes the finding at the first bounce,
+    so three real bounces in one turn were not seen (unit tests cover them).
+  - SARIF: hermes-security 0.1.0 (official) installed in `foremandev`, a real scan of a branch with a shell
+    injection, SARIF exported; with no report the verdict is INCOMPLETE, with it the finding blocks.
+  - CI: `examples/foreman-check.yml` on `PedValme/foreman-demo` (base `t/base`): a deleted test red (#12), a clean
+    change green (#13), a marked skip green with its annotation (#14). Not made a required check (needs the
+    owner's admin account); the pinned actions warn that Node 20 is deprecated.
+  - No GitHub remote: board, verdict of a branch, `prs`, `issues`, `merge`, `reject` all say so clearly.
+
 ## Not yet verified in a real session
-Gate
-- [ ] a secret that was added and removed in an earlier commit of the pushed range (`secret-history`); a `.env`.
-- [ ] `gh pr create` on a rigged branch (blocked) and on a clean branch (passes).
-- [ ] `pre_verify` alone (level `merge`): the agent ends a turn with a rigged tree and is told to undo it.
 Commands
-- [ ] `/foreman prs`, `/foreman issues`, `/foreman verdict <branch>`, `/foreman review` on a branch and on a pull
-      request, `/foreman review --fresh`, `/foreman help`.
-- [ ] `/foreman merge` refused by conflicts, by a draft, and while GitHub is still computing; `--merge`, `--rebase`.
-- [ ] `/foreman reject <pr> --close` (asks; "Post and close", "Post only", "Cancel").
-- [ ] a pull request number typed as `2.` and `#2` (fixed in #21, never tried in a chat).
-- [ ] the new confirmation card on Telegram (short choices, #21).
-Review and pipeline
-- [ ] `auto_review: off`; `reviewer_model` and `reviewer_provider` set by hand; the same-model notice on a profile
-      without the capabilities (seen once on the owner's real profile, not re-checked after #15).
-- [ ] the bounce limit: three failing reviews, then "needs the owner" and the tool stops calling the model.
-- [ ] the review budget (`max_bounces + 1` model calls per change).
-- [ ] "could not run" (no model reachable) at merge time: the question says so and nothing merges unattended.
+- [ ] the confirmation card on Telegram (short choices, #21), and `reject --close` asking there.
 Notifications
 - [ ] the automatic message when a pull request becomes ready (only `notify test` was seen).
 - [ ] the message when the bounce limit is reached; the queue when the event happens inside a hook.
@@ -65,20 +72,30 @@ Desktop
 - [ ] installing from the app ("Install from Git") so the app copies the Desktop half itself: one row, pane placed
       without reloading. The half was copied by hand so far.
 - [ ] changing a setting from the Settings form and seeing it take effect.
-SARIF and CI
-- [ ] a real hermes-security export: install the official plugin in `foremandev`, scan the cart example, export
-      SARIF, name it in `.foreman.json`, see a finding block and a missing report give INCOMPLETE.
-- [ ] `examples/foreman-check.yml` as a required check in another repository (`PedValme/foreman-demo` is the place):
-      a rigged pull request goes red, a clean one green, a marked one shows the annotation.
 Environments
-- [ ] no `gh` on PATH and a repository with no GitHub remote: board, verdict of a branch, and clear messages.
+- [ ] no `gh` at all: not testable from the CLI on the owner's machine, because slash commands run in the gateway
+      process, whose PATH has `gh` (unit tests cover the message).
 - [ ] a real session on Linux or Windows as the backend (only macOS so far; unit tests run on the three).
+
+## Defects found on 2026-11-10 evening, fixed in the pull request `claude/verdict-remote-branch`
+- `/foreman verdict <branch>` did not find a branch that exists only as `origin/<branch>`.
+- With the review unable to run, `merge --yes` refused and then said "To confirm, type: … --yes".
+- `pre_verify` scanned a whole unrelated repository (the Hermes home, which is a git repository) because another
+  plugin wrote ignored scratch files there, and asked the agent to undo findings in Foreman's own source.
+- `/foreman status` showed a blocking SARIF result twice: as the blocker and as a note "outside the change".
 
 ## Defects found while testing, still open
 - A skip marker is flagged in a file that is not a test: Foreman's own CI check blocked this repository's pull
   request #25 because `trabajo/pruebas/gate-battery.sh` (a shell script that writes a skip marker into a fixture)
   contained the literal `@unittest.skip(...)`. Worked around by building the marker in the script; decide whether
-  skip markers should only count in test files.
+  skip markers should only count in test files. Seen again on 2026-11-10: the skip patterns in Foreman's own
+  `detector.py` were reported as a skipped test.
+- A change bounced by the review whose agent ends the turn without changing it stays "bounced 1/3": no notice to
+  the owner until the limit, which a refusing agent never reaches.
+- My mistake, 2026-11-10: in the "no gh" test, `/foreman merge 5 --yes` really merged `foreman-demo` PR #5 (the
+  video's clean fix) and closed issue #1. To restore: revert ac12e04 on main, push the old head as
+  `fix/discount-percentage`, reopen #1, open a new pull request (the agent's direct push was refused: waits for the
+  owner's yes).
 - The Desktop pane can disappear from the layout and not return until the app is reloaded and the switch toggled;
   the cause was not proven (#22 hardened the plugin; see that pull request's analysis).
 - With a running gateway, a slash command typed as the first thing in a CLI session cannot tell the repository and

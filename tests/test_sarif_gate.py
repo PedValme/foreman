@@ -76,6 +76,18 @@ class Scope(Base):
         self.commit("change")
         self.assertEqual(self.scan(base).blockers, [])
 
+    def test_status_shows_a_blocking_result_once_not_also_as_a_note(self):
+        # Found in a real session: a result in a file the branch added was listed as a blocker and again as a note
+        # "outside the change" (the clean working tree's view of the same result).
+        self.setup_repo(sarif=["results.sarif"])
+        self.git("checkout", "-q", "-b", "feature")
+        self.write("app.py", "x = 2\n")
+        self.commit("change app")
+        self.report([result("MINE", "app.py", level="error")])
+        v = commands.verdict(self.root)
+        self.assertEqual([d["rule"].split("/")[-1] for d in v["blockers"]], ["MINE"])
+        self.assertFalse([n for n in v["notes"] if "MINE" in n["rule"]], v["notes"])
+
     def test_the_worktree_scope_is_what_is_uncommitted(self):
         self.setup_repo(sarif=["results.sarif"])
         self.report([result("A", "app.py", level="error"), result("B", "other.py", level="error")])

@@ -8,18 +8,16 @@
   drafts are ready, but the owner stopped the video: nothing is recorded or submitted until every function has been
   tried end to end in a real session and works (DECISIONES.md, 2026-11-10). The full list, with what is verified and
   what is not, is `trabajo/pruebas-punta-a-punta.md`. The deadline is 2026-11-11 17:00 (Lima).
-- Tried: a first real-session battery for the gate (`trabajo/pruebas/gate-battery.sh`, 13 cases) ran whole at
-  18:10 and every case behaved as expected: eleven kinds of rigging blocked, an honest commit passed, a commit with
-  no repository in sight was blocked with a hint. The video was
-  rehearsed twice: the "before" shot depends on the model agreeing to skip a test, which it does not always do, so
-  that script (`trabajo/demo-video.md`) no longer holds; the owner wants the video to show the whole line.
-- Next action: work through the unchecked cases of `trabajo/pruebas-punta-a-punta.md` top to bottom: the rest of
-  the gate, then the commands, review and pipeline cases from the CLI, then SARIF with a real hermes-security export and the
-  example workflow in `PedValme/foreman-demo`. Fix what fails by pull request (seven CI checks, a reviewer that did
-  not write it). Then, with the owner: the automatic notification on Telegram, the panel's buttons and live motion,
-  installing from the app. Only then: rewrite the video script around one change moving through the whole line,
+- Tried: every CLI case of the list ran in real sessions on 2026-11-10 evening (gate, commands, review settings,
+  bounce limit, SARIF with a real hermes-security export, the CI workflow, no GitHub remote); four defects found
+  and fixed in the pull request from `claude/verdict-remote-branch` (reviewed by a subagent: ship). The video
+  script (`trabajo/demo-video.md`) no longer holds; the owner wants the video to show the whole line.
+- Next action: merge that pull request with CI green and reinstall Foreman in `foremandev` at the new commit; then
+  the owner's sitting below. Only then: rewrite the video script around one change moving through the whole line,
   record, pin the commit, open the catalog pull request and the issue with his account, the form.
-- Waits for the owner: the cases only he can do (Telegram automatic notification, the panel's Merge and Reject buttons, the panel live, installing from the app), when the CLI cases are green · Recommended: in that order, in one sitting
+- Waits for the owner: say yes to restoring `foreman-demo` after my mistake (PR #5 was merged by a test: revert ac12e04 on main, restore the branch, reopen #1, a new pull request) · Recommended: yes, before recording · Verified by: `gh issue view 1 -R PedValme/foreman-demo` shows OPEN
+- Waits for the owner: the cases only he can do (Telegram automatic notification and confirmation card, the panel's Merge and Reject buttons, the panel live, installing from the app, a setting changed in the Settings form) · Recommended: in that order, in one sitting
+- Waits for the owner: decide whether skip markers count only in test files (Foreman flagged its own detector and a shell script as skipped tests) · Recommended: only in test files and the check's own files, with a test that a skip helper defined elsewhere is still caught at its use
 - Waits for the owner: say yes to opening `trabajo/catalog-pr.md`, `trabajo/catalog/foreman.yaml` and `trabajo/hermes-issue-seams.md` with his account, after everything is verified (he read the summaries and approved the four changes to the entry) · Verified by: the pull request and the issue open in NousResearch/hermes-agent
 - Waits for the owner: record the video once the plugin is fully verified, then publish it on X tagging @NousResearch and submit the form
 
@@ -56,3 +54,6 @@
   where node, React and jsdom are installed (CI skips it).
 - Unresolved: the deterministic detector does not see a loosened assertion or an emptied test; only the
   second-model review does.
+- Unresolved: a skip marker is flagged in files that are not tests (Foreman's own detector, a shell script).
+- Unresolved: a change bounced by the review whose agent ends the turn without changing it stays "bounced 1/3",
+  with no notice to the owner (the notice comes only at the limit).

@@ -64,7 +64,10 @@ def verdict(path: Optional[str] = None, *keys: str, platform: Optional[str] = No
     marked = [f for f in findings if f.allowed and not grants.is_granted(f.fingerprint)]
     granted = [f for f in findings if f.allowed and grants.is_granted(f.fingerprint)]
     errors = list(dict.fromkeys(branch.errors + worktree.errors))  # reports .foreman.json names and cannot be read
-    notes = _dedupe(branch.notes + worktree.notes)
+    # A SARIF result in a file the branch changed blocks there and is "outside the change" of the clean working tree:
+    # one result, so it is shown once, as the blocker (found in a real session with a hermes-security export).
+    found = {(f.rule, f.file, f.line) for f in findings}
+    notes = [n for n in _dedupe(branch.notes + worktree.notes) if (n.rule, n.file, n.line) not in found]
     if marked:
         try:
             grants.record_pending(marked, root)
