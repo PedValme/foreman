@@ -68,7 +68,7 @@ commands in one session capture the session id from the first call and use `--re
     was set back; Foreman removed and installed again from the app: one row, the pane back without a reload.
 
 - Final review, 2026-11-11 night, on the current code (2bed849 in `foremandev` and the real profile):
-  - Both gate batteries re-run after #29/#31: all 18 cases as expected.
+  - Both gate batteries re-run after #29/#31 (2bed849) and again after #33 (d6fb66b): all 18 cases as expected.
   - `python -m foreman.detector` by hand: default, `--json`, `--check`, `--strict`, `--sarif` with
     `--sarif-threshold`, a missing report (exit 2), `--repo`: exit codes 0/1/2 as documented.
   - A real `/foreman merge 16 --yes` (with the review) merged; `/foreman reject 17 --close --yes` closed; the
