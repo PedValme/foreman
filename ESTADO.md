@@ -13,6 +13,10 @@
   merged/rejected notices. The new video script is `trabajo/demo-video.md` (one change through the whole line,
   every step asked in plain words so each take behaves the same), with `trabajo/pruebas/prepare-recording.sh` (dry
   run by default) to reset `foreman-demo` and the panel before each take.
+- In parallel (2026-11-11, branch `claude/reviewer-aux-task`, not merged): the reviewer picked in Hermes's
+  auxiliary-model pickers ("Foreman review"); unit tests and registration verified; the end-to-end check needs a
+  restart of the Hermes gateway on the owner's machine (after the recording, with his yes), then review, merge and
+  re-pin the catalog entry.
 - Next action (morning, with the owner): he grants the two capabilities with `hermes plugins enable foreman` in a
   terminal on the Hermes machine; `prepare-recording.sh --go`; rehearse the script once (section (e)); record; then
   open the Hermes issue, the catalog pull request (noreply email, steps at the top of `trabajo/catalog-pr.md`), the
