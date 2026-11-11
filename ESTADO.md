@@ -10,10 +10,10 @@
   what is not, is `trabajo/pruebas-punta-a-punta.md`. The deadline is 2026-11-11 17:00 (Lima).
 - Tried: every CLI case of the list ran in real sessions on 2026-11-10 evening (gate, commands, review settings,
   bounce limit, SARIF with a real hermes-security export, the CI workflow, no GitHub remote); four defects found
-  and fixed in the pull request from `claude/verdict-remote-branch` (reviewed by a subagent: ship). The video
-  script (`trabajo/demo-video.md`) no longer holds; the owner wants the video to show the whole line.
-- Next action: merge that pull request with CI green and reinstall Foreman in `foremandev` at the new commit; then
-  the owner's sitting below. Only then: rewrite the video script around one change moving through the whole line,
+  and fixed in #26 (merged; reinstalled in `foremandev` at 3cba39b, the remote-branch verdict re-checked live). The
+  video script (`trabajo/demo-video.md`) no longer holds; the owner wants the video to show the whole line.
+- Next action: restore `foreman-demo` with the owner's yes; then the owner's sitting below (and, if he decides it,
+  the skip-markers change). Only then: rewrite the video script around one change moving through the whole line,
   record, pin the commit, open the catalog pull request and the issue with his account, the form.
 - Waits for the owner: say yes to restoring `foreman-demo` after my mistake (PR #5 was merged by a test: revert ac12e04 on main, restore the branch, reopen #1, a new pull request) · Recommended: yes, before recording · Verified by: `gh issue view 1 -R PedValme/foreman-demo` shows OPEN
 - Waits for the owner: the cases only he can do (Telegram automatic notification and confirmation card, the panel's Merge and Reject buttons, the panel live, installing from the app, a setting changed in the Settings form) · Recommended: in that order, in one sitting
