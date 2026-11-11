@@ -308,6 +308,33 @@ def has_skip_marker(text: str) -> Optional[str]:
     return None
 
 
+# Outside test files a skip marker counts only as code: one inside a quoted string (a regex, a fixture written by a
+# script) or a comment does not switch a test off (DECISIONES.md, 2026-11-10). A skip helper defined as code outside
+# the tests (a module-level pytest skip mark bound to a name) still counts. These comments name no marker literally:
+# this repository's CI runs the base's detector on each pull request.
+_QUOTED = re.compile(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'')
+_COMMENT = re.compile(r"(?:^|\s)(?:#(?!\[)|//).*$")  # not Rust's ignore attribute: its tests live in src/
+_HASH_COMMENT = re.compile(r"(?:^|\s)#(?!\[).*$")  # Python: `//` is floor division
+# Files that run the check: a quoted marker there is a command that writes a skip into the tests while CI runs
+# (a sed that inserts a pytest skip mark into tests/), so it counts as written.
+CHECK_SURFACE = re.compile(r"(?i)(^|/)(\.github/|\.gitlab-ci\.ya?ml$|\.circleci/|azure-pipelines\.ya?ml$|Jenkinsfile$|"
+                           r"(GNU)?makefile$|[^/]*\.mk$|tox\.ini$|noxfile\.py$|package\.json$|justfile$|Taskfile\.ya?ml$)")
+
+
+def code_only(text: str, path: str = "") -> str:
+    """``text`` without its quoted strings and its trailing comment."""
+    comment = _HASH_COMMENT if path.lower().endswith((".py", ".pyw")) else _COMMENT
+    return comment.sub("", _QUOTED.sub('""', text))
+
+
+def skip_marker_at(text: str, path: Optional[str]) -> Optional[str]:
+    """``has_skip_marker`` for a line of ``path``: as written in a test file or a file that runs the check, as code
+    anywhere else."""
+    if path and not is_test_path(path) and not CHECK_SURFACE.search(path):
+        text = code_only(text, path)
+    return has_skip_marker(text)
+
+
 def weakens_check(text: str, path: Optional[str], before: Iterable[str] = (), after: Iterable[str] = ()) -> bool:
     """``text`` neutralises a check. ``before``/``after`` are the new-side lines around it in the same hunk (nearest
     first), used to tell a test step from any other step and a test block from a coverage block."""
@@ -641,7 +668,7 @@ def _line_finding(path, line, text, history: bool = False, new_files=frozenset()
         return finding(rule, path, line, allowed=allowed, content=content)
     if history:
         return None
-    kind = None if path and DOCS.search(path) else has_skip_marker(text)
+    kind = None if path and DOCS.search(path) else skip_marker_at(text[1:], path)
     if kind == "skip" or (kind == "conditional" and path not in new_files):
         return finding("test-skipped", path, line, allowed=allowed, content=content, following=next_nonempty(after))
     if weakens_check(text, path, before, after):

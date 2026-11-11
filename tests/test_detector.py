@@ -198,6 +198,25 @@ class SkipMarkers(unittest.TestCase):
         self.assertEqual(one("Use " + "this." + "skip() or @" + "Disabled sparingly.", "README.md"), [])
         self.assertTrue(one("this." + "skip()", "tests/a.test.js"))
 
+    def test_outside_test_files_only_a_marker_written_as_code_counts(self):
+        # DECISIONES.md, 2026-11-10: Foreman's own detector (a regex) and a shell script (a fixture it writes) were
+        # reported as skipped tests. Quoted or commented, a marker switches nothing off outside a test file.
+        regex = 'r"@unittest\\.(?:' + 'skip|expectedFailure)\\b",'
+        self.assertEqual(one(regex, "plugin/foreman/detector.py"), [])
+        self.assertEqual(one("printf '@unittest." + "skip(\"x\")\\n' > tests/test_a.py", "scripts/battery.sh"), [])
+        self.assertEqual(one("x = 1  # never use @unittest." + "skip here", "app/c.py"), [])
+        self.assertEqual(one("// avoid it." + "skip('x', f) in CI", "src/util.js"), [])
+        # As code it still counts: a skip helper defined outside the tests, inline Rust tests, a marker in a test.
+        self.assertTrue(one("skip_slow = pytest.mark." + "skip(reason='slow')", "app/helpers.py"))
+        self.assertTrue(one("    #[" + "ignore]", "src/lib.rs"))
+        self.assertTrue(one("it." + "skip('x', () => {})", "src/util.js"))
+        self.assertTrue(one("'@unittest." + "skip'", "tests/test_x.py"))  # in a test file, as before
+        self.assertTrue(one("n = total // 2; pytestmark = pytest.mark." + "skip", "app/helpers.py"))  # not a comment
+        # Where the check runs, a quoted marker is a command that writes a skip into the tests (found in review).
+        sed = "run: sed -i 's/def test_x/@pytest.mark." + "skip\\ndef test_x/' tests/test_a.py"
+        self.assertTrue(one(sed, ".github/workflows/ci.yml"))
+        self.assertTrue(one("\tsed -i 's/def test_x/@pytest.mark." + "skip/' tests/test_a.py", "Makefile"))
+
     def test_conditional_skip_is_fine_in_a_new_test_file_only(self):
         diff = "+++ b/tests/test_posix.py\n@@ -0,0 +1 @@\n+" + self.CONDITIONAL[0] + "\n"
         self.assertEqual(detector.detect(diff, new_files=["tests/test_posix.py"]), [])
