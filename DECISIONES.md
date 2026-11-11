@@ -87,3 +87,10 @@ the owner confirms it. An option the owner turned down is a decision too and sta
   el plugin y TODAS, entendido?? TODAS! Sus funcionalidades??????? […] primero resolvamos lo que falta y luego
   cuanto tengamos todo como reloj suizo RECIEN grabamos», and earlier: «solo estamos mostrando una función mínima
   del plugin y no todo lo que rediseñamos ayer en la tarde».
+- 2026-11-10 · A skip marker counts in test files as before; outside them it counts only when written as code, not
+  inside a quoted string or a comment (Foreman flagged its own detector and a shell script that only quoted one),
+  so a skip helper defined outside the tests is still caught · Pedro: «sí, solo en archivos de test como
+  recomiendas»; then, told that this lets a skip helper defined in a non-test file through, he chose «Tests +
+  código fuera (Recomendado)». Ajustes del agente (from the review, after his choice): in the files that run the
+  check (CI workflows, Makefile, tox, nox, package.json…) a quoted marker still counts, because a command there
+  can write a skip into the tests; in Python files `//` is not a comment.

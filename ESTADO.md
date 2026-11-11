@@ -12,11 +12,11 @@
   bounce limit, SARIF with a real hermes-security export, the CI workflow, no GitHub remote); four defects found
   and fixed in #26 (merged; reinstalled in `foremandev` at 3cba39b, the remote-branch verdict re-checked live). The
   video script (`trabajo/demo-video.md`) no longer holds; the owner wants the video to show the whole line.
-- Next action: the owner's sitting below (and, if he decides it, the skip-markers change). `foreman-demo` was
+- Next action: the owner's sitting below (started 2026-11-10 night: Telegram first, then the Desktop panel); the
+  skip-markers change he decided is merged. `foreman-demo` was
   restored after a test merged its clean PR: the video's clean fix is now PR #15, issue #1 is open again. Only then: rewrite the video script around one change moving through the whole line,
   record, pin the commit, open the catalog pull request and the issue with his account, the form.
 - Waits for the owner: the cases only he can do (Telegram automatic notification and confirmation card, the panel's Merge and Reject buttons, the panel live, installing from the app, a setting changed in the Settings form) · Recommended: in that order, in one sitting
-- Waits for the owner: decide whether skip markers count only in test files (Foreman flagged its own detector and a shell script as skipped tests) · Recommended: only in test files and the check's own files, with a test that a skip helper defined elsewhere is still caught at its use
 - Waits for the owner: say yes to opening `trabajo/catalog-pr.md`, `trabajo/catalog/foreman.yaml` and `trabajo/hermes-issue-seams.md` with his account, after everything is verified (he read the summaries and approved the four changes to the entry) · Verified by: the pull request and the issue open in NousResearch/hermes-agent
 - Waits for the owner: record the video once the plugin is fully verified, then publish it on X tagging @NousResearch and submit the form
 
@@ -53,6 +53,5 @@
   where node, React and jsdom are installed (CI skips it).
 - Unresolved: the deterministic detector does not see a loosened assertion or an emptied test; only the
   second-model review does.
-- Unresolved: a skip marker is flagged in files that are not tests (Foreman's own detector, a shell script).
 - Unresolved: a change bounced by the review whose agent ends the turn without changing it stays "bounced 1/3",
   with no notice to the owner (the notice comes only at the limit).

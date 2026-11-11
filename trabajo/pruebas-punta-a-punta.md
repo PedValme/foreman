@@ -84,12 +84,11 @@ Environments
   plugin wrote ignored scratch files there, and asked the agent to undo findings in Foreman's own source.
 - `/foreman status` showed a blocking SARIF result twice: as the blocker and as a note "outside the change".
 
+- A skip marker quoted or commented in a file that is not a test (Foreman's own `detector.py`, a battery script)
+  was reported as a skipped test: fixed by the owner's decision of 2026-11-10 (pull request
+  `claude/skip-markers-tests-only`).
+
 ## Defects found while testing, still open
-- A skip marker is flagged in a file that is not a test: Foreman's own CI check blocked this repository's pull
-  request #25 because `trabajo/pruebas/gate-battery.sh` (a shell script that writes a skip marker into a fixture)
-  contained the literal `@unittest.skip(...)`. Worked around by building the marker in the script; decide whether
-  skip markers should only count in test files. Seen again on 2026-11-10: the skip patterns in Foreman's own
-  `detector.py` were reported as a skipped test.
 - A change bounced by the review whose agent ends the turn without changing it stays "bounced 1/3": no notice to
   the owner until the limit, which a refusing agent never reaches.
 - The Desktop pane can disappear from the layout and not return until the app is reloaded and the switch toggled;
