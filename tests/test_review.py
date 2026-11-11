@@ -441,6 +441,64 @@ class ModelChoice(ReviewCase):
         for a, b in (("deepseek-v4.1-flash", "gpt-6.1-sol"), ("gpt-6.1", "o4")):
             self.assertFalse(review.same_model_id(a, b), (a, b))
 
+    def test_the_review_goes_through_foremans_auxiliary_task(self):
+        # The owner asked for a dropdown of the configured models (DECISIONES.md, 2026-11-11): the review is Hermes's
+        # auxiliary task "Foreman review", picked in Hermes's own model pickers, with no override capability.
+        with mock.patch.object(review, "_TASK_REGISTERED", True):
+            llm = FakeLlm(parsed=answer(), provider="otherprov", model="other-model")
+            r = self.review(FakeCtx(llm), cfg=WITH_FALLBACK)
+            self.assertEqual(llm.calls[0]["task"], review.TASK)
+            self.assertNotIn("model", llm.calls[0])
+            self.assertNotIn("provider", llm.calls[0])
+            self.assertEqual(r["model"]["source"], "task")
+            self.assertIs(r["model"]["same_as_author"], False)
+            text = review.format_review(r)
+            self.assertIn("Reviewer: otherprov / other-model (Foreman review in Hermes's auxiliary models)", text)
+            self.assertNotIn(review.SAME_MODEL, text)
+            self.assertNotIn("not granted", text)
+            # The task answered by the main model itself: said so, with where to pick another.
+            r = self.review(FakeCtx(FakeLlm(parsed=answer())), cfg=WITH_FALLBACK, fresh=True)
+            self.assertIs(r["model"]["same_as_author"], True)
+            self.assertIn(review.TASK_SAME_MODEL, review.format_review(r))
+            # A reviewer_model set by hand still wins (with its capability).
+            llm = FakeLlm(parsed=answer())
+            self.review(FakeCtx(llm, caps={"llm.model_override"}, settings={"reviewer_model": "judge-model"}),
+                        fresh=True)
+            self.assertEqual(llm.calls[0]["model"], "judge-model")
+            self.assertNotIn("task", llm.calls[0])
+
+    def test_a_hermes_that_refuses_the_task_falls_back_to_the_host_model(self):
+        class NoTask(FakeLlm):
+            def complete_structured(self, **kw):
+                if kw.get("task"):
+                    self.calls.append(kw)
+                    raise PermissionError("Plugin 'foreman' cannot route through auxiliary task 'foreman_review'")
+                return super().complete_structured(**kw)
+
+        with mock.patch.object(review, "_TASK_REGISTERED", True):
+            llm = NoTask(parsed=answer())
+            r = self.review(FakeCtx(llm))
+            self.assertEqual(r["verdict"], "PASS")
+            self.assertNotIn("task", llm.calls[-1])
+            self.assertIn("refused Foreman's auxiliary task", review.format_review(r))
+
+    def test_the_task_is_registered_with_the_first_fallback_as_default(self):
+        registered = []
+        ctx = types.SimpleNamespace(register_auxiliary_task=lambda key, **kw: registered.append((key, kw)))
+        with mock.patch.object(review, "hermes_config", return_value=WITH_FALLBACK), \
+                mock.patch.object(review, "_TASK_REGISTERED", False):
+            self.assertTrue(review.register_task(ctx))
+            self.assertEqual(registered[0][0], "foreman_review")
+            self.assertEqual(registered[0][1]["display_name"], "Foreman review")
+            self.assertEqual(registered[0][1]["defaults"], {"provider": "otherprov", "model": "other-model"})
+        registered.clear()
+        with mock.patch.object(review, "hermes_config", return_value=MAIN), \
+                mock.patch.object(review, "_TASK_REGISTERED", False):
+            review.register_task(ctx)
+            self.assertIsNone(registered[0][1]["defaults"])  # no fallback: Hermes's own default for the task
+        with mock.patch.object(review, "_TASK_REGISTERED", False):
+            self.assertFalse(review.register_task(types.SimpleNamespace()))  # an older Hermes: as before
+
     def test_the_saved_path_is_text_only_where_it_stays_text(self):
         # Found in a real session: Telegram sent the review's JSON file because the reply named its path.
         r = self.review(FakeCtx(FakeLlm(parsed=answer())))

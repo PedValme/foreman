@@ -21,13 +21,13 @@ config_schema:
   reviewer_model:
     type: str
     default: ""
-    label: "Reviewer model"
-    description: "Model for /foreman review, as your provider names it. Empty: your first Hermes fallback model, else the active model. Needs the llm.model_override capability."
+    label: "Reviewer model (optional)"
+    description: "Leave empty and pick the reviewer from your configured models in Hermes's auxiliary models: Desktop → Settings → Models → Auxiliary → Foreman review (CLI: hermes model → Configure auxiliary models). By default it is your first Hermes fallback model, and it needs no extra permission. A model typed here overrides that pick and needs the llm.model_override capability."
   reviewer_provider:
     type: str
     default: ""
-    label: "Reviewer provider"
-    description: "Hermes provider id for reviewer_model when it is not your active provider (e.g. openrouter). Needs the llm.provider_override capability."
+    label: "Reviewer provider (optional)"
+    description: "Only with a Reviewer model typed above: its Hermes provider id when it is not your active provider (e.g. openrouter). Needs the llm.provider_override capability."
   auto_review:
     type: str
     choices: [merge, finish, "off"]

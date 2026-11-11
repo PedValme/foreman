@@ -26,7 +26,8 @@ what Foreman does with the request, not whether a model misbehaves.
 3. The two capabilities, so the reviewer is a second model: in a terminal on the Hermes machine run
    `hermes plugins enable foreman` and answer yes to `llm.model_override` and `llm.provider_override` (the Desktop
    app does not ask for them). Then Desktop → Settings → Plugins → Foreman:
-   - Reviewer model `deepseek-v4.1-flash`, Reviewer provider `opencode-go`;
+   - Reviewer model and Reviewer provider empty: Foreman then uses the first Hermes fallback model
+     (`opencode-go / deepseek-v4.1-flash` on the owner's machine);
    - Automatic review `merge`; Notifications `on`, Notify where `telegram`.
    Then **disable** Foreman (the plugin's switch), so the first shots show it loaded but off.
 4. A new Desktop chat. Right side open (Ctrl+J). The Foreman tab will appear when the plugin is enabled.
@@ -50,7 +51,7 @@ exactly; "Reply in English." keeps the agent's answers in English for the captio
 | 4 | 2 | Terminal of the PC is not used; the agent undoes its commit | `Undo that last commit with git reset --hard HEAD~1. Reply in English.` | `HEAD is now at …` | (no caption; cut tight) | 4x |
 | 5 | 9 | Same chat | the prompt of shot 2 again | `Foreman blocked this patch: it switches off a test.` and the fix line; the agent says it will not add it | Same request: blocked at the write | 4x, hold 2 s on the block |
 | 6 | 14 | Chat + panel | `Then fix the real bug instead, on a new branch fix/discount: commit, push and open a pull request that closes #1. Reply in English.` | commit, push and `gh pr create` pass; the PR URL; a new card appears in the panel with Gate green | The honest fix goes through, onto the line | 4x |
-| 7 | 8 | Chat + panel | `/foreman review <n>` (the new PR's number) | `Foreman review: PASS` with `Reviewer: opencode-go / deepseek-v4.1-flash (the reviewer_model setting)`; the card moves Review → waiting for you | A second model, another provider, reviews | model wait 8x |
+| 7 | 8 | Chat + panel | `/foreman review <n>` (the new PR's number) | `Foreman review: PASS` with `Reviewer: opencode-go / deepseek-v4.1-flash (your Hermes fallback model)`; the card moves Review → waiting for you | A second model, another provider, reviews | model wait 8x |
 | 8 | 6 | Phone (PiP) | — | the Telegram message `Foreman: PR #<n> is ready to merge and waits for you` | The call comes to your phone | — |
 | 9 | 10 | Phone (PiP) | tap the `/foreman merge <n> --repo PedValme/foreman-demo` line to copy it, send it; on the question tap **1** (Merge PR #<n>) | `Foreman: merged PR #<n> (squash)` | You approve. Only then it merges | 2x |
 | 10 | 5 | Desktop panel + browser | the card shows Merged; click Open ↗; on GitHub, issue #1 closed | the closed issue | Merged, issue closed | — |

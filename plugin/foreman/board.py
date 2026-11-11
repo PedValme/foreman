@@ -1315,7 +1315,7 @@ def _review_for_merge(root: str, number: int, v: dict, keys: tuple, platform: Op
         out["pre"].append(wrap("Foreman reviewed PR #%d at %s with the second model first (%s): %s."
                                % (number, v["head_oid"][:7], who, verdict)))
     if m and m.get("same_as_author") is True and not rec.get("error"):
-        out["notes"].append("  " + review.SAME_MODEL)
+        out["notes"].append("  " + (review.TASK_SAME_MODEL if m.get("source") == "task" else review.SAME_MODEL))
     elif m and m.get("same_as_author") is None and m.get("ran") and not rec.get("error"):
         out["notes"].append("  " + review.ROUTED_MODEL)
     if verdict == "COULD NOT RUN":
