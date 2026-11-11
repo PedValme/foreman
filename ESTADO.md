@@ -4,21 +4,21 @@
 
 <!-- pic-method: next-session -->
 ## Next session
-- Was doing: the submission. The demo video is edited (85 s, `foreman-demo-final.mp4` in the owner's Videos folder
-  on the Windows PC) and the owner approved it. Opened with his account: the Hermes issue
-  https://github.com/NousResearch/hermes-agent/issues/153841 (`trabajo/hermes-issue-seams.md`, line numbers
-  re-checked at c15453c) and the catalog pull request https://github.com/NousResearch/hermes-agent/pull/153851 (fork
-  `PedValme/hermes-agent`, branch `add-foreman-plugin`, one file, noreply author, pinned to c15453c). The deadline
-  is 2026-11-11 17:00 (Lima).
-- Tried: Hermes's catalog validator could not run on this PC this time (auto mode refused running downloaded code);
-  it passed on the same entry before, and the only change is the removed DRAFT comment header. The pull request's CI
-  had not started when opened (first-time contributor workflows wait for a maintainer).
-- Next action: the owner posts the video on X tagging @NousResearch; add the post's link to the pull request body
-  (its "Demo video" line); submit the hackathon form; watch the pull request's checks and answer review comments.
-- Waits for the owner: post the video on X tagging @NousResearch (text in `trabajo/demo-video.md`) and pass the link
-- Waits for the owner: submit the hackathon form before 17:00 (Lima) with the pull request, the issue and the X post
+- Was doing: the hackathon submission, now complete (2026-11-11, before the deadline): the demo video (85 s) posted
+  on X (https://x.com/PedValme/status/2120610382024970591), the Hermes issue
+  https://github.com/NousResearch/hermes-agent/issues/153841, the catalog pull request
+  https://github.com/NousResearch/hermes-agent/pull/153851 (fork `PedValme/hermes-agent`, branch
+  `add-foreman-plugin`, pinned to c15453c, the video linked in its body), and the hackathon form (received). Nous
+  posts the winners on X after the close.
+- Tried: Hermes's catalog validator could not run on the Windows PC this time (auto mode refused running downloaded
+  code); it passed on the same entry before, and the only change is the removed DRAFT comment header. The pull
+  request's CI had not started (first-time contributor workflows wait for a maintainer).
+- Next action: watch the catalog pull request (its CI, once a maintainer approves it, and review comments) and the
+  issue; answer them. A change to the plugin needs a new pin (a SHA-bump pull request, rule 4). Then the clean-up and
+  the post-hackathon items in "Next steps".
 - Waits for the owner: his personal email is the author of commits in the public history of `PedValme/foreman` and `foreman-demo` (rewriting shared history is not allowed here) · Recommended: accept it for the existing commits and set the GitHub noreply address for future ones (and "Block command line pushes that expose my email" on GitHub)
 - Waits for the owner: DECISIONES.md quotes his words with the names of his private tooling (the factory, its guardian) · Recommended: keep them (they are words, not hosts or secrets; the hostname and accounts were already redacted)
+- Waits for the owner: keep or remove Foreman in his real Hermes profile on his Hermes machine · Recommended: keep it until the catalog review ends, then decide
 
 ## Delivered
 - The plugin, version 0.1.0, in `plugin/`: 376 tests, CI on Linux, macOS and Windows, `hermes plugins validate
@@ -28,14 +28,13 @@
 - End-to-end verification in real sessions, the owner's sitting included (`trabajo/pruebas-punta-a-punta.md`).
 
 ## In progress
-- The submission: catalog pull request #153851 and issue #153841 open in NousResearch/hermes-agent; X post and form
-  pending.
+- The catalog review: pull request #153851 and issue #153841 open in NousResearch/hermes-agent.
 
 ## Next steps
-1. The X post with the video, its link in the catalog pull request; the form.
-2. Follow the catalog pull request's checks and review until it merges.
+1. Follow the catalog pull request's checks and review until it merges.
+2. The native model picker in Foreman's settings (`trabajo/model-picker.md`), after the hackathon.
 3. Clean up: the `foremandev` profile, `~/cart`, `~/foreman-demo` and `/tmp/fm-battery*` on the owner's machine;
-   Foreman in the owner's real profile (ask him: keep or remove); the throwaway PRs #6-#14 and branches `t/*` in `foreman-demo`.
+   the throwaway PRs #6-#14 and branches `t/*` in `foreman-demo`.
 4. After the submission: whether the private voice-plugins test repository becomes a project; whether only the
    owner merges here from then on; register `foreman-demo` in the owner's environment as outside the factory.
 
