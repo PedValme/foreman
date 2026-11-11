@@ -487,6 +487,30 @@ class SessionDirectory(GitRepoCase):
             self.assertEqual(d["action"], "block")
             self.assertIn("workdir", d["message"])
 
+    def test_a_typed_command_finds_the_repository_the_agent_committed_in_this_session(self):
+        # Found in a real session (Desktop): the agent committed in a repository, then `/foreman review t/live`
+        # typed in the same chat could not tell the repository.
+        # Hermes calls the slash command with its arguments only; the session is in its session environment
+        # (HERMES_SESSION_KEY: the chat; HERMES_SESSION_ID: the agent's live id, new after context compression).
+        gate._GATED_REPOS.clear()
+        env = {}
+        with self.fake_hermes(self.home), mock.patch.object(gate.os, "getcwd", return_value=self.home), \
+                mock.patch.object(gate, "_session_env", lambda name: env.get(name, "")):
+            env.update(HERMES_SESSION_KEY="chat-1", HERMES_SESSION_ID="agent-1")
+            self.assertEqual(commands.handle_slash("status", platform="desktop"), gate.NO_REPOSITORY_HERE)
+            self.write("NOTES.md", "x\n")
+            self.git("add", "NOTES.md")
+            gate.on_pre_tool_call(tool_name="terminal", args={"command": "git commit -m notes", "workdir": self.root},
+                                  task_id="task-9", session_id="agent-1")
+            out = commands.handle_slash("status", platform="desktop")
+            self.assertIn("Repository: %s" % self.real(self.root), out)
+            self.assertIn("the repository of the agent's last git command in this session", out)
+            env["HERMES_SESSION_ID"] = "agent-2"  # compressed: a new agent id, the same chat
+            self.assertIn("Repository: %s" % self.real(self.root), commands.handle_slash("status", platform="desktop"))
+            env.update(HERMES_SESSION_KEY="chat-2", HERMES_SESSION_ID="agent-3")  # another chat inherits nothing
+            self.assertEqual(commands.handle_slash("status", platform="desktop"), gate.NO_REPOSITORY_HERE)
+        gate._GATED_REPOS.clear()
+
     def test_on_a_messaging_platform_the_process_directory_is_ignored(self):
         with self.fake_hermes(self.home), mock.patch.object(gate.os, "getcwd", return_value=self.root):
             self.assertEqual([p for p, _ in gate.cwd_candidates(platform="telegram")], [self.norm(self.home)])

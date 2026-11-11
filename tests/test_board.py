@@ -327,7 +327,7 @@ class PullRequestVerdicts(BoardCase):
         out = self.run_cmd("merge 7")
         self.assertIn("cancelled; PR #7 was not merged", out)
         question, choices = board._CTX.asked[0]
-        self.assertIn("Merge PR #7 (fffffff, squash) into main?", question)
+        self.assertIn("Merge PR #7 of acme/widgets (fffffff, squash) into main?", question)  # the repository named
         self.assertIn("Closes: #3 · no CI checks", question)
         self.assertTrue(question.startswith("WARNING: no CI checks."), question)
         self.assertIn("Change things", question)

@@ -1,42 +1,41 @@
-# Foreman state — 2026-11-10
+# Foreman state — 2026-11-11
 
 > Rewritten in full, never appended; kept short.
 
 <!-- pic-method: next-session -->
 ## Next session
-- Was doing: the plugin is complete on `main` (a51184d and later documents) and the catalog entry, README and
-  drafts are ready, but the owner stopped the video: nothing is recorded or submitted until every function has been
-  tried end to end in a real session and works (DECISIONES.md, 2026-11-10). The full list, with what is verified and
-  what is not, is `trabajo/pruebas-punta-a-punta.md`. The deadline is 2026-11-11 17:00 (Lima).
-- Tried: every CLI case of the list ran in real sessions on 2026-11-10 evening (gate, commands, review settings,
-  bounce limit, SARIF with a real hermes-security export, the CI workflow, no GitHub remote); four defects found
-  and fixed in #26 (merged; reinstalled in `foremandev` at 3cba39b, the remote-branch verdict re-checked live). The
-  video script (`trabajo/demo-video.md`) no longer holds; the owner wants the video to show the whole line.
-- Next action: the owner's sitting below (started 2026-11-10 night: Telegram first, then the Desktop panel); the
-  skip-markers change he decided is merged. `foreman-demo` was
-  restored after a test merged its clean PR: the video's clean fix is now PR #15, issue #1 is open again. Only then: rewrite the video script around one change moving through the whole line,
-  record, pin the commit, open the catalog pull request and the issue with his account, the form.
-- Waits for the owner: the cases only he can do (Telegram automatic notification and confirmation card, the panel's Merge and Reject buttons, the panel live, installing from the app, a setting changed in the Settings form) · Recommended: in that order, in one sitting
+- Was doing: end-to-end verification before the video (DECISIONES.md, 2026-11-10). Done: every CLI case and the
+  owner's sitting on Telegram and Desktop (2026-11-10/11 night) all work; the list is `trabajo/pruebas-punta-a-punta.md`.
+  The deadline is 2026-11-11 17:00 (Lima).
+- Tried: the real sessions found ten defects, all fixed and merged (#26, #29, #30, and the remembered-repository
+  pull request `claude/gated-repo`); what remains open is Hermes's (numbered Telegram buttons, the Desktop spinner
+  after a plugin question, plugin model calls through the auxiliary client) and two small items in the list.
+  Foreman on the owner's real profile was reinstalled from the Desktop app (his settings restored: notify on to
+  telegram, auto_review merge); `foremandev` runs d5e6f6f. `foreman-demo`: the video's clean fix is PR #15.
+- Next action: merge the gated-repo pull request and reinstall at its commit (real profile and `foremandev`); add
+  the three Hermes items to `trabajo/hermes-issue-seams.md`; then rewrite the video script around one change moving
+  through the whole line (`trabajo/demo-video.md` no longer holds), record, pin the commit, the catalog pull
+  request and the issue with the owner's account, the X post, the form.
 - Waits for the owner: say yes to opening `trabajo/catalog-pr.md`, `trabajo/catalog/foreman.yaml` and `trabajo/hermes-issue-seams.md` with his account, after everything is verified (he read the summaries and approved the four changes to the entry) · Verified by: the pull request and the issue open in NousResearch/hermes-agent
 - Waits for the owner: record the video once the plugin is fully verified, then publish it on X tagging @NousResearch and submit the form
 
 ## Delivered
-- The plugin, version 0.1.0, in `plugin/`: 359 tests, CI on Linux, macOS and Windows, `hermes plugins validate
+- The plugin, version 0.1.0, in `plugin/`: 370 tests, CI on Linux, macOS and Windows, `hermes plugins validate
   plugin` passing with one guarded private-import warning; the catalog entry draft passing Hermes's validator
   (short description, category `automation`, a real-app capture first).
 - `PedValme/foreman-demo` (public) as the demo repository; the README as one page with the real capture.
+- End-to-end verification in real sessions, the owner's sitting included (`trabajo/pruebas-punta-a-punta.md`).
 
 ## In progress
-- End-to-end verification (`trabajo/pruebas-punta-a-punta.md`).
+- The remembered-repository fix (`claude/gated-repo`), then the video.
 
 ## Next steps
-1. The verification list, then the fixes it asks for.
-2. The video script rewritten (one change through the whole line: gate, second model, bounce, notification,
+1. The video script rewritten (one change through the whole line: gate, second model, bounce, notification,
    approval, merge, with the panel alongside), rehearsed, then recorded and edited.
-3. Pin the commit, validate, open the catalog pull request and the issue; the X post; the form.
-4. Clean up: the `foremandev` profile, `~/cart`, `~/foreman-demo` and `/tmp/fm-battery*` on the owner's machine;
-   Foreman in the owner's real profile (ask him: keep or remove); the hand-copied Desktop half on the development PC.
-5. After the submission: whether the private voice-plugins test repository becomes a project; whether only the
+2. Pin the commit, validate, open the catalog pull request and the issue; the X post; the form.
+3. Clean up: the `foremandev` profile, `~/cart`, `~/foreman-demo` and `/tmp/fm-battery*` on the owner's machine;
+   Foreman in the owner's real profile (ask him: keep or remove); the throwaway PRs #6-#14 and branches `t/*` in `foreman-demo`.
+4. After the submission: whether the private voice-plugins test repository becomes a project; whether only the
    owner merges here from then on; register `foreman-demo` in the owner's environment as outside the factory.
 
 ## Known issues
