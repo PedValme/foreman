@@ -1,4 +1,7 @@
-# Draft catalog pull request for NousResearch/hermes-agent (not opened)
+# Catalog pull request for NousResearch/hermes-agent
+
+Opened 2026-11-11 as https://github.com/NousResearch/hermes-agent/pull/153851 (fork PedValme/hermes-agent,
+branch add-foreman-plugin). The text below is what was submitted; the steps are kept for a re-pin.
 
 Before opening: replace `c15453cb2fc07fa674d6f7b548a553b3ce9e6f5d` below and `REPLACE_WITH_40_CHAR_COMMIT_SHA_OF_PEDVALME_FOREMAN` in
 `trabajo/catalog/foreman.yaml` (the `sha` and every `screenshots` URL)
@@ -94,7 +97,7 @@ session's recorded workspace or launch directory. The import is inside `try/exce
 never rebinds anything), and if it fails or moves Foreman falls back to `ctx.session_cwd()` and
 `agent.runtime_cwd.resolve_agent_cwd()`; when none names a repository the gate blocks with a hint to pass `workdir`,
 so a missing seam never lets a commit through unchecked. The issue asking for the seam (with two others):
-`<link to the issue, from trabajo/hermes-issue-seams.md>`.
+https://github.com/NousResearch/hermes-agent/issues/153841.
 
 ## Validation
 

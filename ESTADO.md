@@ -4,25 +4,19 @@
 
 <!-- pic-method: next-session -->
 ## Next session
-- Was doing: the overnight final review (DECISIONES.md, 2026-11-11): five reviewers (catalog rules, an adversarial
-  attack on the gate, docs against code, verification coverage, fresh install and privacy), each finding verified and
-  fixed in #33 (merged), its gate and detector changes reviewed twice by another agent. Foreman d6fb66b is installed
-  in the real profile (settings kept) and `foremandev`; the catalog entry is pinned to d6fb66b (#34; Hermes's
-  catalog validator OK, the screenshots 200). The deadline is 2026-11-11 17:00 (Lima).
-- Tried: both gate batteries re-run on d6fb66b (18/18), the detector CLI by hand, a real merge and reject with the
-  merged/rejected notices. The new video script is `trabajo/demo-video.md` (one change through the whole line,
-  every step asked in plain words so each take behaves the same), with `trabajo/pruebas/prepare-recording.sh` (dry
-  run by default) to reset `foreman-demo` and the panel before each take.
-- In parallel (2026-11-11, branch `claude/reviewer-aux-task`, not merged): the reviewer picked in Hermes's
-  auxiliary-model pickers ("Foreman review"); unit tests and registration verified; the end-to-end check needs a
-  restart of the Hermes gateway on the owner's machine (after the recording, with his yes), then review, merge and
-  re-pin the catalog entry.
-- Next action (morning, with the owner): he grants the two capabilities with `hermes plugins enable foreman` in a
-  terminal on the Hermes machine; `prepare-recording.sh --go`; rehearse the script once (section (e)); record; then
-  open the Hermes issue, the catalog pull request (noreply email, steps at the top of `trabajo/catalog-pr.md`), the
-  X post, the form. If anything in the plugin changes before submitting, pin the entry again.
-- Waits for the owner: say yes to opening `trabajo/catalog-pr.md`, `trabajo/catalog/foreman.yaml` and `trabajo/hermes-issue-seams.md` with his account, after everything is verified (he read the summaries and approved the four changes to the entry) · Verified by: the pull request and the issue open in NousResearch/hermes-agent
-- Waits for the owner: record the video once the plugin is fully verified, then publish it on X tagging @NousResearch and submit the form
+- Was doing: the submission. The demo video is edited (85 s, `foreman-demo-final.mp4` in the owner's Videos folder
+  on the Windows PC) and the owner approved it. Opened with his account: the Hermes issue
+  https://github.com/NousResearch/hermes-agent/issues/153841 (`trabajo/hermes-issue-seams.md`, line numbers
+  re-checked at c15453c) and the catalog pull request https://github.com/NousResearch/hermes-agent/pull/153851 (fork
+  `PedValme/hermes-agent`, branch `add-foreman-plugin`, one file, noreply author, pinned to c15453c). The deadline
+  is 2026-11-11 17:00 (Lima).
+- Tried: Hermes's catalog validator could not run on this PC this time (auto mode refused running downloaded code);
+  it passed on the same entry before, and the only change is the removed DRAFT comment header. The pull request's CI
+  had not started when opened (first-time contributor workflows wait for a maintainer).
+- Next action: the owner posts the video on X tagging @NousResearch; add the post's link to the pull request body
+  (its "Demo video" line); submit the hackathon form; watch the pull request's checks and answer review comments.
+- Waits for the owner: post the video on X tagging @NousResearch (text in `trabajo/demo-video.md`) and pass the link
+- Waits for the owner: submit the hackathon form before 17:00 (Lima) with the pull request, the issue and the X post
 - Waits for the owner: his personal email is the author of commits in the public history of `PedValme/foreman` and `foreman-demo` (rewriting shared history is not allowed here) · Recommended: accept it for the existing commits and set the GitHub noreply address for future ones (and "Block command line pushes that expose my email" on GitHub)
 - Waits for the owner: DECISIONES.md quotes his words with the names of his private tooling (the factory, its guardian) · Recommended: keep them (they are words, not hosts or secrets; the hostname and accounts were already redacted)
 
@@ -34,12 +28,12 @@
 - End-to-end verification in real sessions, the owner's sitting included (`trabajo/pruebas-punta-a-punta.md`).
 
 ## In progress
-- The video (script ready), then the catalog submission.
+- The submission: catalog pull request #153851 and issue #153841 open in NousResearch/hermes-agent; X post and form
+  pending.
 
 ## Next steps
-1. The video script rewritten (one change through the whole line: gate, second model, bounce, notification,
-   approval, merge, with the panel alongside), rehearsed, then recorded and edited.
-2. Pin the commit, validate, open the catalog pull request and the issue; the X post; the form.
+1. The X post with the video, its link in the catalog pull request; the form.
+2. Follow the catalog pull request's checks and review until it merges.
 3. Clean up: the `foremandev` profile, `~/cart`, `~/foreman-demo` and `/tmp/fm-battery*` on the owner's machine;
    Foreman in the owner's real profile (ask him: keep or remove); the throwaway PRs #6-#14 and branches `t/*` in `foreman-demo`.
 4. After the submission: whether the private voice-plugins test repository becomes a project; whether only the
@@ -52,7 +46,7 @@
   asks for it; `/foreman use <path>` is the way around.
 - Unresolved: one guarded private import (`tools.terminal_tool.get_session_cwd`) makes `hermes plugins validate`
   warn; a pushed notification cannot carry buttons, Hermes shows no approval prompt for a plugin's command, and
-  Telegram's choice buttons show only numbers. All four are in the draft request to Hermes.
+  Telegram's choice buttons show only numbers. All four are in Hermes issue #153841.
 - Unresolved (debt from the reviews): state files are plain files behind a best-effort guard; a SARIF report
   replaced by a separate command is not noticed; `include`d makefiles and a new `GNUmakefile` are not covered; a
   merge through `gh api` or a direct push to the base branch is not blocked; the real-panel behaviour test runs only

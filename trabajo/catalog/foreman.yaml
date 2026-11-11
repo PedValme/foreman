@@ -1,4 +1,5 @@
-# DRAFT catalog entry for NousResearch/hermes-agent plugin-catalog/foreman.yaml. Not submitted.
+# Catalog entry for NousResearch/hermes-agent plugin-catalog/foreman.yaml, submitted 2026-11-11 in
+# https://github.com/NousResearch/hermes-agent/pull/153851 without these first comment lines.
 # Before submitting: replace the sha placeholder with the full 40-character commit of PedValme/foreman being listed
 # (the commit the reviewer reads), and keep version equal to plugin/plugin.yaml's version at that commit.
 # Owner-submitted: PedValme owns and maintains the repository. Exact-SHA pin. No self-updating code: the desktop
