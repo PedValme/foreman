@@ -666,8 +666,7 @@ class ChildEnvironment(GitRepoCase):
             detector.Repo(self.root).git("status", "--porcelain")
         finally:
             del os.environ[self.KEY]
-        if not os.path.exists(out):
-            self.skipTest("this git did not run core.fsmonitor")
+        self.assertTrue(os.path.exists(out), "git did not run the core.fsmonitor program")
         with open(out, encoding="utf-8", errors="replace") as fh:
             seen = fh.read()
         self.assertIn("GIT_OPTIONAL_LOCKS=0", seen)
