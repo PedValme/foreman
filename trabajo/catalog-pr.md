@@ -3,7 +3,7 @@
 Opened 2026-11-11 as https://github.com/NousResearch/hermes-agent/pull/153851 (fork PedValme/hermes-agent,
 branch add-foreman-plugin). The text below is what was submitted; the steps are kept for a re-pin.
 
-Before opening: replace `c15453cb2fc07fa674d6f7b548a553b3ce9e6f5d` below and `REPLACE_WITH_40_CHAR_COMMIT_SHA_OF_PEDVALME_FOREMAN` in
+Before opening: replace `ce9b01a2904edb2aadefcb4ae7111d5dc97622c8` below and `REPLACE_WITH_40_CHAR_COMMIT_SHA_OF_PEDVALME_FOREMAN` in
 `trabajo/catalog/foreman.yaml` (the `sha` and every `screenshots` URL)
 with the full 40-character commit of PedValme/foreman being listed; run `hermes plugins validate plugin
 --install-deps` on a checkout at that commit and `python scripts/validate_plugin_catalog.py plugin-catalog/foreman.yaml`
@@ -30,7 +30,7 @@ agent takes in the open, not against one that hides its commands; the README's *
 follow.
 
 - Repository: https://github.com/PedValme/foreman (public, MIT), plugin in `plugin/` (`subdir: plugin`)
-- Pinned commit: `c15453cb2fc07fa674d6f7b548a553b3ce9e6f5d`, version `0.1.0`, `requires_hermes: ">=0.22.6"` (also in `plugin.yaml`)
+- Pinned commit: `ce9b01a2904edb2aadefcb4ae7111d5dc97622c8`, version `0.1.0`, `requires_hermes: ">=0.22.6"` (also in `plugin.yaml`)
 - README (renders on the plugin page): `plugin/README.md` at the pinned commit
 - Submitted by the repository owner (rule 5). **Plugin Hackathon entry.**
 
@@ -101,7 +101,7 @@ https://github.com/NousResearch/hermes-agent/issues/153841.
 
 ## Validation
 
-- `hermes plugins validate plugin --install-deps` at `c15453cb2fc07fa674d6f7b548a553b3ce9e6f5d`: passed; security scan safe; the one warning above.
+- `hermes plugins validate plugin --install-deps` at `ce9b01a2904edb2aadefcb4ae7111d5dc97622c8`: passed; security scan safe; the one warning above.
 - `scripts/validate_plugin_catalog.py plugin-catalog/foreman.yaml`: OK.
 - The plugin's own CI: unit tests on Linux, macOS and Windows (Python 3.11 and 3.13), and Foreman on its own pull
   requests.
