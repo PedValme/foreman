@@ -94,6 +94,26 @@ def clean_diff():
             "+y = 2\n")
 
 
+class GhChildEnvironment(unittest.TestCase):
+    """gh runs with an allowlisted environment: its own vars and GitHub tokens, never a model provider key."""
+
+    def test_the_real_runner_passes_no_provider_key(self):
+        from unittest import mock
+        seen = {}
+
+        def fake_run(argv, **kw):
+            seen.update(kw["env"])
+            return mock.Mock(returncode=0, stdout=b"", stderr=b"")
+
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "x1", "GH_HOST": "github.example"}), \
+                mock.patch.object(board.shutil, "which", return_value="gh"), \
+                mock.patch.object(board.subprocess, "run", side_effect=fake_run):
+            board._default_runner(["pr", "list"], ".", 5)
+        self.assertNotIn("OPENAI_API_KEY", seen)
+        self.assertEqual(seen.get("GH_HOST"), "github.example")
+        self.assertEqual(seen.get("GH_PROMPT_DISABLED"), "1")
+
+
 class BoardCase(GitRepoCase):
     def setUp(self):
         super().setUp()

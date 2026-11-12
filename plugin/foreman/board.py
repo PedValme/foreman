@@ -80,8 +80,8 @@ def _default_runner(args: list, cwd: str, timeout: float) -> tuple:
     exe = shutil.which("gh")
     if not exe:
         raise FileNotFoundError("gh")
-    env = dict(os.environ, GH_PROMPT_DISABLED="1", GH_NO_UPDATE_NOTIFIER="1", GH_SPINNER_DISABLED="1",
-               NO_COLOR="1", CLICOLOR="0")
+    env = detector.child_env("gh", {"GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1",
+                                    "GH_SPINNER_DISABLED": "1", "NO_COLOR": "1", "CLICOLOR": "0"})
     kwargs = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)} if os.name == "nt" else {}
     r = subprocess.run([exe, *args], cwd=cwd, capture_output=True, timeout=timeout, env=env,
                        stdin=subprocess.DEVNULL, **kwargs)
