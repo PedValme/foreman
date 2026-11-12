@@ -120,4 +120,4 @@ against a stand-in SDK).
 - `docs/screenshots/panel-waiting-for-owner-light.png`: browser preview; a pull request past the gate and the review,
   waiting for the owner.
 
-Demo video (under 90 s): `<link to the X post>`.
+Demo video (85 s): https://x.com/PedValme/status/2120610382024970591
