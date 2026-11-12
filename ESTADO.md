@@ -7,16 +7,15 @@
 - Was doing: answering the catalog review. The hackathon submission is complete (2026-11-11: video on X
   https://x.com/PedValme/status/2120610382024970591, form received, Hermes issue
   https://github.com/NousResearch/hermes-agent/issues/153841). On the catalog pull request
-  https://github.com/NousResearch/hermes-agent/pull/153851 (fork `PedValme/hermes-agent`, branch
-  `add-foreman-plugin`, pinned to c15453c) the maintainer requested two changes (2026-11-12): (1) git and gh with a
-  minimal environment, done in PedValme/foreman#41 (`detector.child_env`, reviewed by a second agent); (2) the
-  private `get_session_cwd` import: keep it guarded until the seam asked in issue #153841 ships, and say so there.
-- Tried: an amend to drop fake test values the secret hook flagged was refused by auto mode; a fresh branch
-  (`claude/child-env-allowlist`) carries the clean commit; the local `claude/minimal-child-env` is unpushed and can
-  be deleted.
-- Next action: merge #41 with CI green; re-pin the catalog entry (`sha` and the five screenshot URLs, here in
-  `trabajo/catalog/foreman.yaml` and in the fork) to the new main commit, validate, push to the fork; comment on the
-  pull request with both answers so the maintainer reviews the delta from c15453c.
+  https://github.com/NousResearch/hermes-agent/pull/153851 the maintainer requested two changes (2026-11-12), both
+  answered the same day: (1) git and gh with a minimal environment, done in PedValme/foreman#41
+  (`detector.child_env`, reviewed by a second agent); (2) the private `get_session_cwd` import kept guarded until the
+  seam asked in issue #153841 ships. The entry is re-pinned to ce9b01a (fork `PedValme/hermes-agent`, branch
+  `add-foreman-plugin`, validated, screenshots 200) and the answer is the pull request's comment 6825844129.
+- Tried: Foreman's own CI on #41 blocked a `skipTest` added to the new test (its test-skipped rule); it became an
+  assertion. An amend refused by auto mode left an unpushed local branch, `claude/minimal-child-env`, to delete.
+- Next action: wait for the maintainer's review of the delta from c15453c and the catalog CI; answer what comes.
+  When the cwd accessor ships in Hermes, drop the private import in a SHA-bump pull request.
 - Waits for the owner: his personal email is the author of commits in the public history of `PedValme/foreman` and `foreman-demo` (rewriting shared history is not allowed here) · Recommended: accept it for the existing commits and set the GitHub noreply address for future ones (and "Block command line pushes that expose my email" on GitHub)
 - Waits for the owner: DECISIONES.md quotes his words with the names of his private tooling (the factory, its guardian) · Recommended: keep them (they are words, not hosts or secrets; the hostname and accounts were already redacted)
 - Waits for the owner: keep or remove Foreman in his real Hermes profile on his Hermes machine · Recommended: keep it until the catalog review ends, then decide
