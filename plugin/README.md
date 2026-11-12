@@ -385,7 +385,11 @@ Desktop, or via `hermes config set plugins.entries.foreman.settings.<key> <value
 
 - **Runs `git`** as a subprocess, read-only (`diff`, `diff-tree`, `log`, `ls-files`, `rev-parse`, `rev-list`,
   `merge-base`, `cat-file`, `show`, `status`, `remote`, `symbolic-ref`, `for-each-ref`, `hash-object` without `-w`),
-  in the repository the agent works in. It never commits, pushes, merges or changes your repository by itself.
+  in the repository the agent works in. It never commits, pushes, merges or changes your repository by itself. Its
+  `git` and `gh` subprocesses get an allowlisted environment (`PATH`, home, locale, temp, the OS's own variables,
+  `XDG_*` directories, `SSH_AUTH_SOCK` and `GIT_*`; for gh also `GH_*`, the GitHub tokens and proxies), never a
+  copy of Hermes's: a program a repository's config makes git run (`core.fsmonitor`, a hook) does not see your model
+  provider keys.
 - **Reads files** of that repository: untracked files (up to 500, 512 KB each) to look for secrets and markers, the
   file a `write_file` would replace, `package.json`, `Makefile`, `tox.ini` and `.foreman.json` at the base, the SARIF
   reports you name, and a commit message file given with `-F`. It may read a non-ignored `.env` only to warn before it

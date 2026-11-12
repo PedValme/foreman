@@ -981,6 +981,40 @@ class GitTimeout(GitError):
     pass
 
 
+# The environment git and gh run with: an allowlist, never a copy of os.environ. A repository's config can make git
+# run programs of its own (core.fsmonitor, hooks), and Hermes's process holds the user's model provider keys; those
+# programs must not inherit them.
+_ENV_KEEP = frozenset((
+    "PATH", "HOME", "USER", "USERNAME", "LOGNAME", "LANG", "LANGUAGE", "TZ", "TMPDIR", "TEMP", "TMP",
+    # Windows: the system, the user's profile and where gh keeps its config
+    "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
+    "APPDATA", "LOCALAPPDATA", "PROGRAMDATA",
+    "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR",
+    "SSH_AUTH_SOCK",
+))
+# gh only: the GitHub tokens, its login in the Linux keyring, and a proxy or private CA to reach GitHub (Foreman's
+# own git is local and gets none of these: a proxy URL can carry credentials)
+_ENV_KEEP_GH = frozenset(("GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+                          "DBUS_SESSION_BUS_ADDRESS", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY",
+                          "SSL_CERT_FILE", "SSL_CERT_DIR"))
+
+
+def child_env(tool: str, extra: Optional[dict] = None, environ: Optional[dict] = None) -> dict:
+    """The environment for a ``git`` or ``gh`` child: the allowlist above and ``GIT_*``, plus for gh ``GH_*`` and
+    ``_ENV_KEEP_GH`` (gh runs git itself), then ``extra``. Nothing else of Hermes's environment, so no provider key,
+    reaches it."""
+    source = os.environ if environ is None else environ
+    prefix = ("GIT_",) if tool == "git" else ("GIT_", "GH_")
+    env = {}
+    for key, value in source.items():
+        up = key.upper()
+        if (up in _ENV_KEEP or up.startswith("LC_") or up.startswith(prefix)
+                or (tool == "gh" and up in _ENV_KEEP_GH)):
+            env[key] = value
+    env.update(extra or {})
+    return env
+
+
 _DIFF_OPTS = ("--no-color", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/")
 _MAX_UNTRACKED_FILES = 500
 _MAX_UNTRACKED_BYTES = 512 * 1024
@@ -1001,7 +1035,7 @@ class Repo:
             timeout = self.deadline - time.monotonic()
             if timeout <= 0:
                 raise GitTimeout("time budget exhausted before `git %s`" % args[0])
-        env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_OPTIONAL_LOCKS="0", LC_ALL="C")
+        env = child_env("git", {"GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0", "LC_ALL": "C"})
         kwargs = {}
         if os.name == "nt":
             kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)

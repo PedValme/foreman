@@ -623,6 +623,56 @@ class MadeUpValues(unittest.TestCase):
         self.assertEqual(detector.history_secrets(diff), [])
 
 
+class ChildEnvironment(GitRepoCase):
+    """git and gh get an allowlisted environment: a program the repository makes git run (core.fsmonitor, a hook)
+    must never see Hermes's model provider keys."""
+
+    KEY = "FOREMAN_TEST_PROVIDER_API_KEY"
+    SOURCE = {"PATH": "/bin", "Path": "/win", "HOME": "/h", "LC_CTYPE": "C.UTF-8", "OPENAI_API_KEY": "x1",
+              "ANTHROPIC_API_KEY": "x2", "OPENROUTER_API_KEY": "x3", "GIT_SSH_COMMAND": "ssh -i k",
+              "GH_HOST": "github.example", "GITHUB_TOKEN": "x4", "HERMES_HOME": "/hh", "SSH_AUTH_SOCK": "/s",
+              "HTTPS_PROXY": "http://proxy.example:3128"}
+
+    def test_git_keeps_only_the_allowlist_and_git_vars(self):
+        env = detector.child_env("git", {"LC_ALL": "C"}, environ=self.SOURCE)
+        self.assertEqual(env, {"PATH": "/bin", "Path": "/win", "HOME": "/h", "LC_CTYPE": "C.UTF-8",
+                               "GIT_SSH_COMMAND": "ssh -i k", "SSH_AUTH_SOCK": "/s", "LC_ALL": "C"})
+
+    def test_gh_keeps_its_own_vars_tokens_proxy_and_git_vars_not_provider_keys(self):
+        env = detector.child_env("gh", environ=self.SOURCE)
+        self.assertEqual(env, {"PATH": "/bin", "Path": "/win", "HOME": "/h", "LC_CTYPE": "C.UTF-8",
+                               "GIT_SSH_COMMAND": "ssh -i k", "GH_HOST": "github.example", "GITHUB_TOKEN": "x4",
+                               "SSH_AUTH_SOCK": "/s", "HTTPS_PROXY": "http://proxy.example:3128"})
+
+    def test_repo_git_passes_the_allowlisted_env(self):
+        from unittest import mock
+        seen = {}
+
+        def fake_run(argv, **kw):
+            seen.update(kw["env"])
+            return mock.Mock(returncode=0, stdout=b"", stderr=b"")
+
+        with mock.patch.dict(os.environ, {self.KEY: "x"}), \
+                mock.patch.object(detector.subprocess, "run", side_effect=fake_run):
+            detector.Repo(self.root).git("status")
+        self.assertNotIn(self.KEY, seen)
+        self.assertEqual(seen.get("GIT_TERMINAL_PROMPT"), "0")
+
+    def test_a_program_the_repository_runs_does_not_see_a_provider_key(self):
+        out = os.path.join(self.tmp, "seen-env.txt")
+        self.git("config", "core.fsmonitor", 'env > "%s"; exit 1' % out.replace("\\", "/"))
+        os.environ[self.KEY] = "x"
+        try:
+            detector.Repo(self.root).git("status", "--porcelain")
+        finally:
+            del os.environ[self.KEY]
+        self.assertTrue(os.path.exists(out), "git did not run the core.fsmonitor program")
+        with open(out, encoding="utf-8", errors="replace") as fh:
+            seen = fh.read()
+        self.assertIn("GIT_OPTIONAL_LOCKS=0", seen)
+        self.assertNotIn(self.KEY, seen)
+
+
 class RealRanges(GitRepoCase):
     """The detector on real git repositories."""
 

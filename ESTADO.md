@@ -1,21 +1,22 @@
-# Foreman state — 2026-11-11
+# Foreman state — 2026-11-12
 
 > Rewritten in full, never appended; kept short.
 
 <!-- pic-method: next-session -->
 ## Next session
-- Was doing: the hackathon submission, now complete (2026-11-11, before the deadline): the demo video (85 s) posted
-  on X (https://x.com/PedValme/status/2120610382024970591), the Hermes issue
-  https://github.com/NousResearch/hermes-agent/issues/153841, the catalog pull request
+- Was doing: answering the catalog review. The hackathon submission is complete (2026-11-11: video on X
+  https://x.com/PedValme/status/2120610382024970591, form received, Hermes issue
+  https://github.com/NousResearch/hermes-agent/issues/153841). On the catalog pull request
   https://github.com/NousResearch/hermes-agent/pull/153851 (fork `PedValme/hermes-agent`, branch
-  `add-foreman-plugin`, pinned to c15453c, the video linked in its body), and the hackathon form (received). Nous
-  posts the winners on X after the close.
-- Tried: Hermes's catalog validator could not run on the Windows PC this time (auto mode refused running downloaded
-  code); it passed on the same entry before, and the only change is the removed DRAFT comment header. The pull
-  request's CI had not started (first-time contributor workflows wait for a maintainer).
-- Next action: watch the catalog pull request (its CI, once a maintainer approves it, and review comments) and the
-  issue; answer them. A change to the plugin needs a new pin (a SHA-bump pull request, rule 4). Then the clean-up and
-  the post-hackathon items in "Next steps".
+  `add-foreman-plugin`, pinned to c15453c) the maintainer requested two changes (2026-11-12): (1) git and gh with a
+  minimal environment, done in PedValme/foreman#41 (`detector.child_env`, reviewed by a second agent); (2) the
+  private `get_session_cwd` import: keep it guarded until the seam asked in issue #153841 ships, and say so there.
+- Tried: an amend to drop fake test values the secret hook flagged was refused by auto mode; a fresh branch
+  (`claude/child-env-allowlist`) carries the clean commit; the local `claude/minimal-child-env` is unpushed and can
+  be deleted.
+- Next action: merge #41 with CI green; re-pin the catalog entry (`sha` and the five screenshot URLs, here in
+  `trabajo/catalog/foreman.yaml` and in the fork) to the new main commit, validate, push to the fork; comment on the
+  pull request with both answers so the maintainer reviews the delta from c15453c.
 - Waits for the owner: his personal email is the author of commits in the public history of `PedValme/foreman` and `foreman-demo` (rewriting shared history is not allowed here) · Recommended: accept it for the existing commits and set the GitHub noreply address for future ones (and "Block command line pushes that expose my email" on GitHub)
 - Waits for the owner: DECISIONES.md quotes his words with the names of his private tooling (the factory, its guardian) · Recommended: keep them (they are words, not hosts or secrets; the hostname and accounts were already redacted)
 - Waits for the owner: keep or remove Foreman in his real Hermes profile on his Hermes machine · Recommended: keep it until the catalog review ends, then decide
