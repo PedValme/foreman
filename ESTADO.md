@@ -18,7 +18,6 @@
   When the cwd accessor ships in Hermes, drop the private import in a SHA-bump pull request.
 - Waits for the owner: his personal email is the author of commits in the public history of `PedValme/foreman` and `foreman-demo` (rewriting shared history is not allowed here) · Recommended: accept it for the existing commits and set the GitHub noreply address for future ones (and "Block command line pushes that expose my email" on GitHub)
 - Waits for the owner: DECISIONES.md quotes his words with the names of his private tooling (the factory, its guardian) · Recommended: keep them (they are words, not hosts or secrets; the hostname and accounts were already redacted)
-- Waits for the owner: keep or remove Foreman in his real Hermes profile on his Hermes machine · Recommended: keep it until the catalog review ends, then decide
 
 ## Delivered
 - The plugin, version 0.1.0, in `plugin/`: 376 tests, CI on Linux, macOS and Windows, `hermes plugins validate
