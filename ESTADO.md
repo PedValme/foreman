@@ -31,7 +31,10 @@
 
 ## Next steps
 1. Follow the catalog pull request's checks and review until it merges.
-2. The native model picker in Foreman's settings (`trabajo/model-picker.md`), after the hackathon.
+2. The native model picker in Foreman's settings (`trabajo/model-picker.md`), after the hackathon. With the next
+   plugin change: the README says to turn notifications on with `/foreman notify on`, since `hermes config set
+   …notify on` stores a boolean and Hermes then warns "should be str (got bool)" on every load (seen on the owner's
+   machine, 2026-11-12; harmless, `notify.py` reads `True` as on).
 3. Clean up: the `foremandev` profile, `~/cart`, `~/foreman-demo` and `/tmp/fm-battery*` on the owner's machine;
    the throwaway PRs #6-#14 and branches `t/*` in `foreman-demo`.
 4. After the submission: whether the private voice-plugins test repository becomes a project; whether only the
