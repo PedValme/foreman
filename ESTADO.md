@@ -16,8 +16,7 @@
   assertion. An amend refused by auto mode left an unpushed local branch, `claude/minimal-child-env`, to delete.
 - Next action: wait for the maintainer's review of the delta from c15453c and the catalog CI; answer what comes.
   When the cwd accessor ships in Hermes, drop the private import in a SHA-bump pull request.
-- Waits for the owner: his personal email is the author of commits in the public history of `PedValme/foreman` and `foreman-demo` (rewriting shared history is not allowed here) · Recommended: accept it for the existing commits and set the GitHub noreply address for future ones (and "Block command line pushes that expose my email" on GitHub)
-- Waits for the owner: DECISIONES.md quotes his words with the names of his private tooling (the factory, its guardian) · Recommended: keep them (they are words, not hosts or secrets; the hostname and accounts were already redacted)
+- What waits for Pedro lives in OmniBrain (P-29 and P-30): `omnibrain_esperas` with repo `foreman`, or «Te espera» in the panel.
 
 ## Delivered
 - The plugin, version 0.1.0, in `plugin/`: 376 tests, CI on Linux, macOS and Windows, `hermes plugins validate
