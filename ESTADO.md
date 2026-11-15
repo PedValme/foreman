@@ -17,9 +17,8 @@
   bundled catalog predates the listing, so `hermes plugins install foreman` by name works only after a Hermes
   update; then reinstall by name to get catalog updates). Settings and capability grants kept, gateway restarted, a
   direct hook call verified (`gh pr merge` blocked, child env without provider keys); backup in
-  `~/.hermes/backups/foreman-a-ce9b01a-20261114-191153`. `notify` is still the boolean `true` (works; Hermes warns):
-  only `/foreman notify on`, typed by the owner, stores the string (`hermes config set` stores either a boolean or
-  the quotes).
+  `~/.hermes/backups/foreman-a-ce9b01a-20261114-191153`. `notify` is the string `on` since the owner typed
+  `/foreman notify on` (2026-11-14; `hermes config set` stores either a boolean or the quotes, never the string).
 - What waits for Pedro lives in OmniBrain (P-29 and P-30): `omnibrain_esperas` with repo `foreman`, or «Te espera» in the panel.
 
 ## Delivered
