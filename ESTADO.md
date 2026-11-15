@@ -13,6 +13,13 @@
   exists the guarded private import stays, as told to the maintainer.
 - Next action: post-hackathon work in "Next steps"; any plugin change now reaches users only through a SHA-bump pull
   request to the catalog (rule 4), re-reviewed. The unpushed local branch `claude/minimal-child-env` can be deleted.
+- The owner's Hermes (default profile) runs ce9b01a since 2026-11-14, installed pinned from the repo (Hermes v0.23.0's
+  bundled catalog predates the listing, so `hermes plugins install foreman` by name works only after a Hermes
+  update; then reinstall by name to get catalog updates). Settings and capability grants kept, gateway restarted, a
+  direct hook call verified (`gh pr merge` blocked, child env without provider keys); backup in
+  `~/.hermes/backups/foreman-a-ce9b01a-20261114-191153`. `notify` is still the boolean `true` (works; Hermes warns):
+  only `/foreman notify on`, typed by the owner, stores the string (`hermes config set` stores either a boolean or
+  the quotes).
 - What waits for Pedro lives in OmniBrain (P-29 and P-30): `omnibrain_esperas` with repo `foreman`, or «Te espera» in the panel.
 
 ## Delivered
