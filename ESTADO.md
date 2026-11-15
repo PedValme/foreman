@@ -1,21 +1,18 @@
-# Foreman state — 2026-11-12
+# Foreman state — 2026-11-14
 
 > Rewritten in full, never appended; kept short.
 
 <!-- pic-method: next-session -->
 ## Next session
-- Was doing: answering the catalog review. The hackathon submission is complete (2026-11-11: video on X
-  https://x.com/PedValme/status/2120610382024970591, form received, Hermes issue
-  https://github.com/NousResearch/hermes-agent/issues/153841). On the catalog pull request
-  https://github.com/NousResearch/hermes-agent/pull/153851 the maintainer requested two changes (2026-11-12), both
-  answered the same day: (1) git and gh with a minimal environment, done in PedValme/foreman#41
-  (`detector.child_env`, reviewed by a second agent); (2) the private `get_session_cwd` import kept guarded until the
-  seam asked in issue #153841 ships. The entry is re-pinned to ce9b01a (fork `PedValme/hermes-agent`, branch
-  `add-foreman-plugin`, validated, screenshots 200) and the answer is the pull request's comment 6825844129.
-- Tried: Foreman's own CI on #41 blocked a `skipTest` added to the new test (its test-skipped rule); it became an
-  assertion. An amend refused by auto mode left an unpushed local branch, `claude/minimal-child-env`, to delete.
-- Next action: wait for the maintainer's review of the delta from c15453c and the catalog CI; answer what comes.
-  When the cwd accessor ships in Hermes, drop the private import in a SHA-bump pull request.
+- Was doing: the catalog listing, now done. Foreman is in the Hermes catalog: NousResearch/hermes-agent#153851,
+  approved and merged by the maintainer on 2026-11-13 at the pin ce9b01a after both asks were fixed; its page is
+  https://hermes-agent.nousresearch.com/marketplace/foreman. The hackathon submission was complete on 2026-11-11
+  (video on X, form received); Nous posts the winners on X.
+- Tried: the seams issue NousResearch/hermes-agent#153841 was closed as "not planned" (2026-11-14) with the advice to
+  propose each seam as its own focused issue or PR against `hermes_cli/data/plugin_api.json`; until a cwd accessor
+  exists the guarded private import stays, as told to the maintainer.
+- Next action: post-hackathon work in "Next steps"; any plugin change now reaches users only through a SHA-bump pull
+  request to the catalog (rule 4), re-reviewed. The unpushed local branch `claude/minimal-child-env` can be deleted.
 - What waits for Pedro lives in OmniBrain (P-29 and P-30): `omnibrain_esperas` with repo `foreman`, or «Te espera» in the panel.
 
 ## Delivered
@@ -26,10 +23,11 @@
 - End-to-end verification in real sessions, the owner's sitting included (`trabajo/pruebas-punta-a-punta.md`).
 
 ## In progress
-- The catalog review: pull request #153851 and issue #153841 open in NousResearch/hermes-agent.
+- Nothing: the plugin is listed in the Hermes catalog at ce9b01a.
 
 ## Next steps
-1. Follow the catalog pull request's checks and review until it merges.
+1. Propose the seams one by one (Hermes's advice on #153841): first the terminal cwd accessor, which removes
+   the guarded private import; each as its own issue or PR against `hermes_cli/data/plugin_api.json`.
 2. The native model picker in Foreman's settings (`trabajo/model-picker.md`), after the hackathon. With the next
    plugin change: the README says to turn notifications on with `/foreman notify on`, since `hermes config set
    …notify on` stores a boolean and Hermes then warns "should be str (got bool)" on every load (seen on the owner's
@@ -46,7 +44,7 @@
   asks for it; `/foreman use <path>` is the way around.
 - Unresolved: one guarded private import (`tools.terminal_tool.get_session_cwd`) makes `hermes plugins validate`
   warn; a pushed notification cannot carry buttons, Hermes shows no approval prompt for a plugin's command, and
-  Telegram's choice buttons show only numbers. All four are in Hermes issue #153841.
+  Telegram's choice buttons show only numbers. All four were in Hermes issue #153841 (closed: to be proposed one by one).
 - Unresolved (debt from the reviews): state files are plain files behind a best-effort guard; a SARIF report
   replaced by a separate command is not noticed; `include`d makefiles and a new `GNUmakefile` are not covered; a
   merge through `gh api` or a direct push to the base branch is not blocked; the real-panel behaviour test runs only
