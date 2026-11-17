@@ -107,3 +107,11 @@ the owner confirms it. An option the owner turned down is a decision too and sta
   configurados» and «tiene que haber manera de llamarlo orgánicamente». Ajustes del agente: the dropdown is
   Hermes's own auxiliary-model picker (Foreman registers its review as an auxiliary task, by default on the first
   fallback model, no capability needed) rather than a page Foreman draws itself.
+- 2026-11-12 · Foreman stays in the owner's default Hermes profile, and Glorieto leaves its pull requests to the
+  owner's `/foreman merge` · lives in PedValme/glorieto DECISIONES.md, 2026-11-12.
+- 2026-11-14 · The owner's default profile runs the catalog's version of Foreman (ce9b01a, installed pinned from
+  the repo until Hermes's bundled catalog lists it, then by name) · Pedro: «sí, hazlo», to the recommendation to
+  install the catalog's version.
+- 2026-11-14 · The `foremandev` profile stays on the owner's Hermes machine: every new version is tried there before
+  it is pinned in the catalog and installed in the default profile · Pedro: «ok corrigela», after asking «si queremos
+  hacer mejoras o correcciones a Foreman, no necesitamos el foremandev?».
