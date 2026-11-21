@@ -1,10 +1,14 @@
-# Foreman state — 2026-11-17
+# Foreman state — 2026-11-20
 
 > Rewritten in full, never appended; kept short.
 
 <!-- pic-method: next-session -->
 ## Next session
-- Was doing: the catalog listing, now done. Foreman is in the Hermes catalog: NousResearch/hermes-agent#153851,
+- Foreman won 1st place in the Hermes Agent Plugin Hackathon (nearly 1,000 entries; Nous's post:
+  https://x.com/NousResearch/status/2123882434173559007). Both READMEs say so since 2026-11-20; the one in `plugin/`
+  reaches the catalog page only with the next SHA-bump pull request. How the prize is paid is unknown: Nous has not
+  written yet, and no official rules were found.
+- Before: the catalog listing, now done. Foreman is in the Hermes catalog: NousResearch/hermes-agent#153851,
   approved and merged by the maintainer on 2026-11-13 at the pin ce9b01a after both asks were fixed; its page is
   https://hermes-agent.nousresearch.com/marketplace/foreman. The hackathon submission was complete on 2026-11-11
   (video on X, form received); Nous posts the winners on X.
