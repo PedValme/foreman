@@ -4,6 +4,9 @@
 
 <!-- pic-method: next-session -->
 ## Next session
+- 2026-11-21: this repo hosts the owner's test of a `Co-authored-by` trailer with his GitHub noreply on the agents'
+  commits (the bot stays the author), to see whether GitHub counts them in his contribution graph; the rule itself
+  lives in PedValme/entorno, not here.
 - Foreman won 1st place in the Hermes Agent Plugin Hackathon (nearly 1,000 entries; Nous's post:
   https://x.com/NousResearch/status/2123882434173559007). Both READMEs say so since 2026-11-20; the one in `plugin/`
   reaches the catalog page only with the next SHA-bump pull request. How the prize is paid is unknown: Nous has not
