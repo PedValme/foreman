@@ -1,16 +1,22 @@
-# Foreman state — 2026-11-20
+# Foreman state — 2026-11-22
 
 > Rewritten in full, never appended; kept short.
 
 <!-- pic-method: next-session -->
 ## Next session
 - 2026-11-21: this repo hosts the owner's test of a `Co-authored-by` trailer with his GitHub noreply on the agents'
-  commits (the bot stays the author), to see whether GitHub counts them in his contribution graph; the rule itself
-  lives in PedValme/entorno, not here.
+  commits (the bot stays the author), to see whether GitHub counts them in his contribution graph (it does: the
+  commit count rose by one); the rule itself lives in PedValme/entorno, not here. Squash merges here still carry the
+  bot account's personal email as author until entorno turns on the bot's email privacy (asked of entorno 2026-11-22).
 - Foreman won 1st place in the Hermes Agent Plugin Hackathon (nearly 1,000 entries; Nous's post:
-  https://x.com/NousResearch/status/2123882434173559007). Both READMEs say so since 2026-11-20; the one in `plugin/`
+  https://x.com/NousResearch/status/2123882434173559007). Both READMEs say so since 2026-11-20 and open with a 9 s GIF
+  of the block (`docs/media/foreman-block.gif`, cut from the hackathon video) since 2026-11-22; the `plugin/` README
   reaches the catalog page only with the next SHA-bump pull request. How the prize is paid is unknown: Nous has not
   written yet, and no official rules were found.
+- Promotion split agreed with the owner (2026-11-22): the technical pieces about Foreman are done here (proposed, not
+  yet approved one by one: a Show HN post, an X thread with real blocked attempts, r/hermesagent); his posts, profile,
+  press in Peru and the AQP case study belong to the AQP Intelligence agent. A Foreman for other harnesses (Claude
+  Code, Codex, Cursor) is a product decision for later, not promotion.
 - Before: the catalog listing, now done. Foreman is in the Hermes catalog: NousResearch/hermes-agent#153851,
   approved and merged by the maintainer on 2026-11-13 at the pin ce9b01a after both asks were fixed; its page is
   https://hermes-agent.nousresearch.com/marketplace/foreman. The hackathon submission was complete on 2026-11-11
