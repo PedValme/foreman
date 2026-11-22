@@ -115,3 +115,6 @@ the owner confirms it. An option the owner turned down is a decision too and sta
 - 2026-11-14 · The `foremandev` profile stays on the owner's Hermes machine: every new version is tried there before
   it is pinned in the catalog and installed in the default profile · Pedro: «ok corrigela», after asking «si queremos
   hacer mejoras o correcciones a Foreman, no necesitamos el foremandev?».
+- 2026-11-22 · No catalog SHA bump for README-only changes (the hackathon award and the GIF): they reach the catalog
+  page together with the next substantial plugin change, in one pull request · Pedro: «mejor todavia, cusndo hagamos
+  un cambio mayor lo subimos todo», to the proposal of a bump with the notify README fix and the GIF.
