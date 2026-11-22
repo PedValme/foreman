@@ -3,6 +3,8 @@
 🏆 **1st place** in the [Nous Research Hermes Agent Plugin Hackathon](https://x.com/NousResearch/status/2123882434173559007)
 (nearly 1,000 entries).
 
+![Without a guard, a Hermes agent adds @unittest.skip to a failing test and commits it; with Foreman on, the same request is blocked as test-skipped and no commit is made](docs/media/foreman-block.gif)
+
 **A green check the agent did not rig.** Foreman is a [Hermes Agent](https://github.com/NousResearch/hermes-agent)
 plugin that reads the real diff before every commit, push, pull request and merge, and blocks a coding agent that
 skips, deletes or weakens tests, edits what the check runs, bypasses hooks or commits a secret. A second model reviews
