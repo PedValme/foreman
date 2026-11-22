@@ -4,10 +4,6 @@
 
 <!-- pic-method: next-session -->
 ## Next session
-- 2026-11-21: this repo hosts the owner's test of a `Co-authored-by` trailer with his GitHub noreply on the agents'
-  commits (the bot stays the author), to see whether GitHub counts them in his contribution graph (it does: the
-  commit count rose by one); the rule itself lives in PedValme/entorno, not here. Squash merges here still carry the
-  bot account's personal email as author until entorno turns on the bot's email privacy (asked of entorno 2026-11-22).
 - Foreman won 1st place in the Hermes Agent Plugin Hackathon (nearly 1,000 entries; Nous's post:
   https://x.com/NousResearch/status/2123882434173559007). Both READMEs say so since 2026-11-20 and open with a 9 s GIF
   of the block (`docs/media/foreman-block.gif`, cut from the hackathon video) since 2026-11-22; the `plugin/` README
