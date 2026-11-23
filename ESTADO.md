@@ -1,9 +1,13 @@
-# Foreman state — 2026-11-22
+# Foreman state — 2026-11-23
 
 > Rewritten in full, never appended; kept short.
 
 <!-- pic-method: next-session -->
 ## Next session
+- External PR #57 (`***REDACTED***` as a placeholder in the detector): read in full, nothing malicious seen, not run.
+  Changes asked on 2026-11-23: git-filter-repo's default marker is `***REMOVED***`, which it leaves blocked. Next:
+  when the author pushes the fix, re-read the whole diff, approve its held CI run (the owner chose to wait for the
+  fix), then decide the merge. Unverified by a run: by reading, `KEY=***REDACTED***#value` in a `.env` would pass.
 - Foreman won 1st place in the Hermes Agent Plugin Hackathon (nearly 1,000 entries; Nous's post:
   https://x.com/NousResearch/status/2123882434173559007). Both READMEs say so since 2026-11-20 and open with a 9 s GIF
   of the block (`docs/media/foreman-block.gif`, cut from the hackathon video) since 2026-11-22; the `plugin/` README
