@@ -98,7 +98,7 @@ SECRET_LIST = re.compile(r"(?i)^\+\s*-\s*" + _NAME + "=" + _VALUE)  # compose: `
 IS_SHELL = re.compile(r"(?i)\.(sh|bash|zsh)$|(^|/)\.envrc$|(^|/)[^/.]+$|(^|/)Dockerfile[^/]*$|\.dockerfile$")
 # A JWT in a test is a fixture; outside the tests it is a session or a service key.
 JWT = re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}")
-PLACEHOLDER = re.compile(r"(?i)replace|your|changeme|change_me|xxx|example|placeholder|^<.*>$|\$\{|\{\{|%\(")
+PLACEHOLDER = re.compile(r"(?i)replace|your|changeme|change_me|xxx|example|placeholder|^<.*>$|\$\{|\{\{|%\(|^\*+redacted\*+$")
 UUID = re.compile(r"(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 EXAMPLE_HOST = re.compile(r"(?i)(^|\.)example(\.|$)|^(localhost|127\.0\.0\.1|0\.0\.0\.0)$")
 

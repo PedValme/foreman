@@ -168,6 +168,29 @@ class LineRules(unittest.TestCase):
         self.assertEqual(len(detector.detect("", ["tests/test_x.py"])), 1)
 
 
+class ScrubbedValues(unittest.TestCase):
+    """A value a history scrubber removed is a placeholder, not a secret.
+
+    git-filter-repo writes its replacement marker (built at runtime here, like every other fixture in this file)
+    where it took a value out. A repository scrubbed that way and committed again leaks nothing, so the marker on
+    its own is a placeholder. Only the whole value: a real value with a marker pasted after it is still a finding.
+    """
+    MARK = "*" * 3 + "REDACT" + "ED" + "*" * 3
+
+    def test_the_marker_alone_is_not_a_secret(self):
+        self.assertFalse(one('api_' + 'key = "' + self.MARK + '"'))
+        self.assertFalse(one('pass' + 'word = "' + self.MARK + '"'))
+        self.assertFalse(one('"api_' + 'key": "' + self.MARK + '"'))                      # quoted JSON key
+        self.assertFalse(one('URL = "postgresql://' + 'app:' + self.MARK + '@db.internal/app"'))
+
+    def test_the_marker_in_an_env_or_yaml_file(self):
+        self.assertFalse(one("API_" + "KEY=" + self.MARK, "x/.env"))                      # unquoted, env file
+        self.assertFalse(one("  api_" + "key: " + '"' + self.MARK + '"', "cfg.yaml"))
+
+    def test_a_value_that_is_more_than_the_marker_still_counts(self):
+        self.assertTrue(one('api_' + 'key = "' + "sk-A1b2C3" + self.MARK + '"'))
+
+
 class SkipMarkers(unittest.TestCase):
     MARKERS = (
         "it." + "skip('x', () => {})", "test." + "only('x', () => {})", "describe." + "skip.each([1])('x', f)",
