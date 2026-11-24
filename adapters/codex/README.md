@@ -120,7 +120,8 @@ Limits in Codex:
   default reviewer is not raised a level above the session as it is in Claude Code, and the review says so.
 - **Codex does not say which model answered**, so the review names the one you chose, or none.
 - **The reviewer is not fully clean.** `--ignore-user-config` skips your `config.toml`, but Codex still loads your
-  global instructions file from its home, and the reviewer sees it (Codex warned of 39 KB of them in the runs here).
+  global instructions file from its home, and the reviewer sees it. Every review in Codex says so under its
+  "Reviewer:" line, with the tools that could not be switched off.
   Neither `-c project_doc_max_bytes=0` (it only silenced the warning) nor `-c model_instructions_file=` (the warning
   and the global file stayed) removed it. The file is not Foreman's, and the session has no tool to act on it.
 - **It takes as long as the model takes**, up to 7 minutes (retries included) with nothing shown meanwhile; the hook's

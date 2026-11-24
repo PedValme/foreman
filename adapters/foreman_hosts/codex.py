@@ -102,6 +102,12 @@ def _program_dirs(roots) -> tuple:
 # first. Not every model takes every level (gpt-5.5 stops at xhigh, the luna models at max): Codex says so itself
 # when one is refused, and the review shows its reason.
 EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
+
+# What every review in Codex says under its "Reviewer:" line: the limits Codex leaves no way to close
+# (adapters/codex/README.md has the measurements).
+REVIEWER_CAVEAT = ("In Codex the reviewer's session has no shell and a read-only sandbox, but Codex still gives it "
+                   "your global instructions and a few tools Foreman found no switch for (a patch tool the sandbox "
+                   "stops, sub-agents): what those could read was not verified.")
 _STATUS = re.compile(r"(?<!\d)([45]\d\d)(?!\d)")
 
 
@@ -217,7 +223,7 @@ def host(env=None, data=None) -> core.Host:
     return core.Host(
         name=NAME, label="Codex", person=lambda sub: "foreman " + sub, program_dirs=_program_dirs(roots),
         cli=CLI, switches_off=_switches_off, is_config=_is_config, config_off=_config_off,
-        fresh_session=_fresh_session(env), efforts=EFFORTS, session=session,
+        fresh_session=_fresh_session(env), efforts=EFFORTS, session=session, reviewer_caveat=REVIEWER_CAVEAT,
     )
 
 

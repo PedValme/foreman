@@ -150,6 +150,12 @@ class CodexReviewer(CodexCase):
         data.update(more)
         return codex.answer(data, env or {})
 
+    def test_every_review_in_codex_states_what_its_session_can_still_reach(self):
+        caveat = codex.host({}).reviewer_caveat
+        self.assertIn("no shell and a read-only sandbox", caveat)
+        self.assertIn("was not verified", caveat)
+        self.assertNotIn("\n", caveat)
+
     def test_the_efforts_are_codexs_own_levels(self):
         h = codex.host({})
         for level in ("low", "medium", "high", "xhigh", "max", "ultra"):  # what a review can really be given
