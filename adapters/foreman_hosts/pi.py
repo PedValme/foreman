@@ -23,7 +23,7 @@ import os
 import re
 from typing import Optional
 
-from . import core, neutral
+from . import core, neutral, reviewer
 
 NAME = "pi"
 CLI = ("pi", "pi-coding-agent")  # the command, and its npm package as `npx @earendil-works/pi-coding-agent` runs it
@@ -109,38 +109,9 @@ def _program_dirs(roots) -> tuple:
 PROGRAM = "pi"  # what the reviewer runs; a module name so that tests can replace it, never an environment variable
 EFFORTS = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
 
-_FENCE = re.compile(r"```[A-Za-z0-9_-]*[ \t]*\n(.*?)```", re.S)
-
-
 def _short(text: str, limit: int = 300) -> str:
     text = " ".join((text or "").split())
     return text if len(text) <= limit else text[:limit - 1] + "…"
-
-
-def read_object(text: str) -> Optional[dict]:
-    """The one JSON object in a model's final text: the text itself, a fenced block, or the first object with text
-    around it. None when there is none (an array or a scalar is not one)."""
-    text = (text or "").strip()
-    fenced = [m.strip() for m in _FENCE.findall(text)]
-    for candidate in [text] + fenced:
-        try:
-            value = json.loads(candidate)
-        except ValueError:
-            continue
-        if isinstance(value, dict):
-            return value
-    decoder = json.JSONDecoder()
-    for source in fenced + [text]:
-        at = source.find("{")
-        while at != -1:
-            try:
-                value, _end = decoder.raw_decode(source, at)
-            except ValueError:
-                value = None
-            if isinstance(value, dict):
-                return value
-            at = source.find("{", at + 1)
-    return None
 
 
 def _events(out: str) -> list:
@@ -165,16 +136,23 @@ def _fresh_session(env):
         import shutil
         import tempfile
         program = shutil.which(PROGRAM, path=env.get("PATH")) or PROGRAM  # Windows: `pi` is `pi.cmd`
-        argv = [program, "--mode", "json", "--no-tools", "--no-extensions", "--no-session",
-                "--no-context-files", "--no-skills", "--no-prompt-templates", "--no-themes",
-                "--system-prompt", system]
-        if model:
-            argv += ["--model", model]
-        if effort:
-            argv += ["--thinking", effort]
-        ask = ("%s\n\nAnswer with one JSON object that follows this JSON Schema, and nothing else: no text before "
-               "or after it.\n\nJSON Schema:\n%s\n" % (prompt, json.dumps(schema)))
-        with tempfile.TemporaryDirectory(prefix="foreman-review-") as empty:
+        # pi cannot hold its model to a schema: the answer is the one object that carries a seal made for this request
+        how, seal = reviewer.sealed(schema)
+        ask = "%s\n\n%s\n" % (prompt, how)
+        with tempfile.TemporaryDirectory(prefix="foreman-review-") as empty, \
+                tempfile.TemporaryDirectory(prefix="foreman-review-system-") as holder:
+            # The system text goes in a file (pi takes a path for --system-prompt): through pi.cmd on Windows a
+            # multi-line value is cut at its first line, and the flags after it with it. Model and thinking come first.
+            system_file = os.path.join(holder, "system.md")
+            with open(system_file, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(system)
+            argv = [program, "--mode", "json", "--no-tools", "--no-extensions", "--no-session", "--no-context-files",
+                    "--no-skills", "--no-prompt-templates", "--no-themes"]
+            if model:
+                argv += ["--model", model]
+            if effort:
+                argv += ["--thinking", effort]
+            argv += ["--system-prompt", system_file]
             code, out, err = core.run_session(argv, ask, seconds, env, cwd=empty)
         replies = [e["message"] for e in _events(out)
                    if e.get("type") == "message_end" and isinstance(e.get("message"), dict)
@@ -188,7 +166,7 @@ def _fresh_session(env):
         blocks = last.get("content") if isinstance(last.get("content"), list) else []
         final = "".join(b.get("text", "") for b in blocks
                         if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str))
-        return core.Answer(parsed=read_object(final), text=final, model=str(last.get("model") or ""),
+        return core.Answer(parsed=reviewer.read_sealed(final, seal), text=final, model=str(last.get("model") or ""),
                            provider=str(last.get("provider") or ""))
     return run
 

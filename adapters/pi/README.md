@@ -63,9 +63,11 @@ merge and reject with reasons (Foreman on Hermes Agent has them).
 
 ## Limits to know
 
-- **The review's limits in pi.** pi has no switch that forces a JSON schema, so Foreman puts the schema in what it
-  sends and reads the object out of the final text (plain, in a fenced block or among prose); a model that answers
-  with no object leaves the review without a verdict, and Foreman says so. Any model pi offers can be chosen, and a
+- **The review's limits in pi.** pi cannot hold its model to a schema, so Foreman puts the schema in what it sends
+  together with a seal made for that request, which the author of the diff cannot know. The answer is the one
+  object that carries that seal: an object quoted from the diff, or one without the seal, is never the answer. A
+  review with no such object, or with two different ones, is "could not run", never a pass. The system text goes to
+  pi as a file, so it survives `pi.cmd` on Windows. Any model pi offers can be chosen, and a
   small one may miss a rigged line or quote one wrongly (the quote is checked against the diff, a miss is not).
   A model that does not support the thinking level you chose gets the nearest one it does (pi clamps it). The
   review needs `pi` on the PATH and uses whatever login pi has for the model. The reviewer's session is started
