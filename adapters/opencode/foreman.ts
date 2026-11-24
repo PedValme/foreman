@@ -17,6 +17,7 @@ export type Request = Record<string, unknown> & { event: string }
 export type Answer = { action?: string; message?: string; reply?: string }
 
 const TIMEOUT_MS = 30_000 // the protocol's limit; the gate's own budget is 18 s
+const COMMAND_MS = 600_000 // a `command` request: the review starts a session of OpenCode and waits for it
 const PERMISSION = "foreman" // the action Foreman's questions carry in OpenCode's permission mechanism
 const PERSON_MS = 1_000 // a yes sooner than this after the question was not typed by a person
 const SHELL_TOOL = "shell"
@@ -35,7 +36,7 @@ function hookPath(): string {
 export const HOOK = hookPath()
 
 /** Run the Python side with one request. Resolves to its answer, or throws an Error saying why there is none. */
-export function ask(request: Request, hook = HOOK, python = "python3"): Promise<Answer> {
+export function ask(request: Request, hook = HOOK, python = "python3", limit = TIMEOUT_MS): Promise<Answer> {
   return new Promise((done, fail) => {
     let child
     try {
@@ -47,8 +48,8 @@ export function ask(request: Request, hook = HOOK, python = "python3"): Promise<
     const err: Buffer[] = []
     const timer = setTimeout(() => {
       child.kill("SIGKILL")
-      fail(new Error(`no answer within ${TIMEOUT_MS / 1000} s`))
-    }, TIMEOUT_MS)
+      fail(new Error(`no answer within ${limit / 1000} s`))
+    }, limit)
     child.stdout.on("data", (b: Buffer) => out.push(b))
     child.stderr.on("data", (b: Buffer) => err.push(b))
     child.on("error", (e: Error) => {
@@ -148,6 +149,16 @@ export function isRunning(session: unknown): boolean {
 export function commandArgs(prompt: unknown): string {
   const text = prompt && typeof prompt === "object" ? str((prompt as Record<string, unknown>).text) : undefined
   return (text ?? "").trim()
+}
+
+/** The session's model as OpenCode records it (`provider/model`, with `#variant` when it has one): the request's
+ * `model`, undefined when the record does not say. OpenCode has no separate effort: a variant is part of the model. */
+export function modelOf(session: unknown): string | undefined {
+  const ref = (session as any)?.model
+  if (!ref || typeof ref.providerID !== "string" || typeof ref.id !== "string" || !ref.providerID || !ref.id) {
+    return undefined
+  }
+  return `${ref.providerID}/${ref.id}${typeof ref.variant === "string" && ref.variant ? `#${ref.variant}` : ""}`
 }
 
 /** `/foreman allow <id>` is the one command that needs a person there. */
@@ -298,7 +309,7 @@ export default {
     await ctx.command.transform((editor: any) => {
       editor.add({
         name: "foreman",
-        description: "Foreman: status [path] | allow [id] | help",
+        description: "Foreman: status [path] | allow [id] | review [target] [--fresh] | reviewer [model] | help",
         execute: async (input: any) => {
           const args = commandArgs(input?.prompt)
           let attended = false
@@ -311,9 +322,15 @@ export default {
               attended = false
             }
           }
+          // The session's own model, as OpenCode records it, for what the review says about its reviewer.
+          let model: string | undefined
+          try {
+            model = modelOf(await ctx.session.get({ sessionID: String(input.sessionID) }))
+          } catch {}
           let answer: Answer
           try {
-            answer = await ask({ event: "command", args, cwd: base, attended })
+            answer = await ask({ event: "command", args, cwd: base, attended, ...(model ? { model } : {}) },
+                               HOOK, "python3", COMMAND_MS)
           } catch (e) {
             throw new Error(`Foreman could not run (${(e as Error).message}).`)
           }

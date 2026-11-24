@@ -18,12 +18,14 @@ How OpenCode turns a plugin off (its source, 2.3.2: ``config/plugin/source.ts`` 
 """
 from __future__ import annotations
 
+import json
 import os
 import re
+import tempfile
 
 from foreman import gate
 
-from . import core, neutral
+from . import core, neutral, reviewer
 
 NAME = "opencode"
 CLI = ("opencode", "opencode2", "opencode-ai")  # the commands the npm package installs, and its older package name
@@ -180,6 +182,81 @@ def _program_dirs() -> tuple:
     return tuple(os.path.join(ROOT, d) for d in ("adapters", "plugin"))
 
 
+def _short(text: str, limit: int = 300) -> str:
+    text = " ".join((text or "").split())
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+PROGRAM = "opencode"  # the command; tests replace this name (a Windows npm install is `opencode.cmd`: `which` finds it)
+
+# One sentence under every review's "Reviewer:" line: what its session still does that the others' do not.
+CAVEAT = ("OpenCode's own managed settings (an administrator's) load after Foreman's and could still override its "
+          "denial, and your global OpenCode instructions, MCP servers and plugin modules still load in that session.")
+
+
+def review_config(agent: str, system: str = "") -> dict:
+    """The reviewer's configuration (OpenCode 2.3.2, v2; passed as ``OPENCODE_CONFIG_CONTENT``, read after every
+    configuration file). OpenCode applies the last matching permission rule, and a person's own ``agents.build``
+    rules are appended after the top-level ones, so a top-level denial alone is not total: the session runs as an
+    agent defined here, under a name nobody else's configuration knows, whose own rules (appended last to its list)
+    deny every permission. No plugin but OpenCode's built-in ones is loaded."""
+    return {"permissions": [{"action": "*", "resource": "*", "effect": "deny"}], "plugins": ["-*", "opencode.*"],
+            "agents": {agent: {"mode": "primary", "system": system or "You review a code change. You have no tools.",
+                               "permissions": [{"action": "*", "resource": "*", "effect": "deny"}]}}}
+
+
+def _fresh_session(env=None):
+    """OpenCode's own headless command as the reviewer: one prompt on standard input, JSON events out, a private
+    server (``--standalone``, so the configuration reaches it), no ``--auto``, a session kept out of the person's
+    session lists (``--archived``), every permission denied. It starts in an empty directory, and ``PWD`` points there
+    too: ``opencode run`` takes its directory from ``PWD`` before the process's own."""
+    def run(system: str, prompt: str, schema: dict, model: str, effort: str, seconds: float) -> core.Answer:
+        import secrets
+        import shutil
+        base = dict(os.environ if env is None else env)
+        program = shutil.which(PROGRAM, path=base.get("PATH")) or PROGRAM
+        agent = "foreman-reviewer-" + secrets.token_hex(4)
+        argv = [program, "run", "--standalone", "--archived", "--format", "json", "--agent", agent]
+        if model:
+            argv += ["-m", model]
+        # OpenCode has no flag that makes a model answer in a JSON schema: the schema goes in words, with a seal the
+        # change's author cannot know, and only the object that carries it is read (reviewer.read_sealed).
+        asked, seal = reviewer.sealed(schema or {})
+        # Foreman's rules are the agent's own system text (in the configuration); only the sealed instruction and the
+        # review's prompt, the untrusted diff included, go in as the message.
+        message = "\n\n".join(part for part in (asked, prompt) if part)
+        with tempfile.TemporaryDirectory(prefix="foreman-review-") as empty:
+            child = dict(base, PWD=empty, OPENCODE_CONFIG_CONTENT=json.dumps(review_config(agent, system)),
+                         OPENCODE_DISABLE_CLAUDE_CODE="1")
+            code, out, err = core.run_session(argv, message, seconds, child, cwd=empty)
+        texts, errors = {}, []
+        for line in out.splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            if event.get("type") == "text" and isinstance(event.get("part"), dict):
+                part = event["part"]
+                texts.setdefault(str(part.get("messageID") or ""), []).append(str(part.get("text") or ""))
+            elif event.get("type") == "error":
+                detail = event.get("error")
+                if isinstance(detail, dict):
+                    status = detail.get("status")
+                    errors.append("%s%s" % ("(HTTP %s) " % status if isinstance(status, int) else "",
+                                            detail.get("message") or detail.get("type") or ""))
+                else:
+                    errors.append(str(detail))
+        if errors or code != 0 or not texts:
+            raise RuntimeError("OpenCode could not answer (exit code %d): %s"
+                               % (code, _short(" ".join(errors) or err or out) or "nothing"))
+        final = "".join(texts[list(texts)[-1]])  # the last assistant message
+        # OpenCode's JSON events never name the model that ran, so none is claimed.
+        return core.Answer(parsed=reviewer.read_sealed(final, seal), text=final, model="")
+    return run
+
+
 def host(request=None) -> core.Host:
     request = request if isinstance(request, dict) else {}
     return core.Host(
@@ -188,6 +265,10 @@ def host(request=None) -> core.Host:
         # The plugin says true only from the /foreman command's own handler, after the person answered OpenCode's
         # own question in its interface.
         attended=lambda: neutral.attended(request),
+        # No effort levels: OpenCode names reasoning levels per model (a ``#variant``), so the person names it as
+        # part of the model: ``/foreman reviewer provider/model#variant``.
+        fresh_session=_fresh_session(), efforts=(), session=lambda: neutral.session(request),
+        reviewer_caveat=CAVEAT,
     )
 
 

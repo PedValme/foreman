@@ -13,6 +13,12 @@ const plugin = module.default
 const { toolRequests } = module
 const running = new Set()
 
+// The time limit each request to the Python side was given: `ask` sets one timer per request.
+const delays = []
+const realSetTimeout = globalThis.setTimeout
+globalThis.setTimeout = (fn, ms, ...more) => { delays.push(ms); return realSetTimeout(fn, ms, ...more) }
+let sessionModel // what OpenCode's record of the session says about its model, when it does
+
 const hooks = {}
 const commands = {}
 const seen = { asked: [], synthetic: [] }
@@ -25,8 +31,9 @@ const ctx = {
     hook: async (name, fn) => { hooks["session." + name] = fn },
     synthetic: async (input) => { seen.synthetic.push(input) },
     // OpenCode's record of the session it is asked about: mid-run while its id is in `running`.
-    get: async ({ sessionID }) => ({ id: sessionID, time: running.has(sessionID) ? { busy: 2000, idle: 1000 }
-                                                                                  : { busy: 1000, idle: 2000 } }),
+    get: async ({ sessionID }) => ({ id: sessionID, ...(sessionModel ? { model: sessionModel } : {}),
+                                     time: running.has(sessionID) ? { busy: 2000, idle: 1000 }
+                                                                  : { busy: 1000, idle: 2000 } }),
   },
   permission: {
     hook: async (name, fn) => { hooks["permission." + name] = fn },
@@ -130,6 +137,26 @@ if (scenario === "gate") {
   out.allowed = await command("allow " + out.id)
   out.asked = seen.asked.length
   out.after = await tool("shell", { command: "git commit -m green" })
+} else if (scenario === "review") {
+  // The review's own command: a longer time, and the session's model as OpenCode's record states it.
+  out.shellDelays = delays.length
+  await tool("shell", { command: "ls" })
+  out.shellDelay = delays[delays.length - 1]
+  out.unknown = await command("reviewer p/m")                  // the person's choice, saved in the state directory
+  out.unknownDelay = delays[delays.length - 1]
+  out.unknownShown = (await command("reviewer")).error
+  sessionModel = { providerID: "p", id: "m" }
+  out.sameShown = (await command("reviewer")).error
+  sessionModel = { providerID: "p", id: "m", variant: "high" }
+  out.variantShown = (await command("reviewer p/m#high")).error
+  out.variantAgain = (await command("reviewer")).error
+  out.modelOf = [module.modelOf({ model: { providerID: "a", id: "b", variant: "max" } }),
+                 module.modelOf({ model: { providerID: "a", id: "b" } }), module.modelOf({}), module.modelOf(null),
+                 module.modelOf({ model: { providerID: "a" } })]
+} else if (scenario === "reviewer-env") {
+  out.registered = Object.keys(hooks)
+  out.commands = Object.keys(commands)
+  out.asked = seen.asked.length
 } else if (scenario === "broken") {
   process.env.PATH = join(repo, "no-python-here")            // no python3: the Python side cannot answer
   out.ls = await tool("shell", { command: "ls" })

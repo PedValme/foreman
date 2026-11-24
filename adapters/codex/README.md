@@ -16,7 +16,7 @@ FOREMAN=/path/to/foreman
 HOOK="python3 -I $FOREMAN/adapters/hook.py codex || exit 1"
 codex --dangerously-bypass-hook-trust \
   -c "hooks.PreToolUse=[{matcher=\"^(Bash|apply_patch|Edit|Write)\$\",hooks=[{type=\"command\",command=\"$HOOK\",timeout=30}]}]" \
-  -c "hooks.UserPromptSubmit=[{hooks=[{type=\"command\",command=\"$HOOK\",timeout=70}]}]" \
+  -c "hooks.UserPromptSubmit=[{hooks=[{type=\"command\",command=\"$HOOK\",timeout=600}]}]" \
   -c "hooks.Stop=[{hooks=[{type=\"command\",command=\"$HOOK\",timeout=30}]}]"
 ```
 
@@ -45,7 +45,8 @@ in `-s workspace-write`:
 - **Before the agent finishes.** A turn in which the agent changed the working tree and left one of those in it is
   sent back once with what to undo. A turn that only talked is never sent back.
 - **Your commands**, typed as a prompt and answered by the hook with no model turn: `foreman`,
-  `foreman status [path]`, `foreman allow`, `foreman help`. A prompt that is exactly one of these lines (a leading
+  `foreman status [path]`, `foreman allow`, `foreman help`, and the review's (below): `foreman review [target]
+  [--fresh]`, `foreman reviewer` (shows who reviews). A prompt that is exactly one of these lines (a leading
   `/` is accepted) is taken as a command; any other prompt, `foreman status looks wrong, why?` included, goes to the
   model. They are plain words, not `/foreman`, because Codex's interactive prompt refuses a slash command it does not
   know before any hook runs (read in Codex's program, not seen).
@@ -57,8 +58,74 @@ in `-s workspace-write`:
 Codex has no way for a hook to ask you. When Foreman would ask (it could not inspect a command, or the working
 directory does not exist), the call is refused with the reason; run it yourself if you have checked the change.
 
-What it does not do yet: the second-model review, the board, merge and reject with reasons (Foreman on Hermes Agent
-has them).
+What it does not do yet: the review when someone asks to merge and on every turn (it runs when you ask), the board,
+merge and reject with reasons (Foreman on Hermes Agent has them).
+
+## The review
+
+`foreman review [pull request|branch] [--fresh]`, typed as a prompt like your other commands, has Foreman start a
+fresh `codex exec` session that did not write the code. It reads the diff and answers one JSON object; Foreman checks
+that every finding quotes a line of the diff, prints a verdict (PASS, CONCERNS or BLOCK), and keeps the result. The
+same diff by the same reviewer is never sent twice (`--fresh` asks again). It is advice: it grants, merges and
+unblocks nothing, and Foreman's own gate decides what it decides without it.
+
+The session is `codex exec --ephemeral --ignore-user-config --sandbox read-only`, started by Foreman in an empty
+temporary directory, with the diff on standard input and Foreman's fixed rules as its instructions
+(`-c model_instructions_file=<file>`; the diff never goes in that file). Codex's read-only sandbox blocks writes and
+the network, not reads, so what the session can reach is decided by its tools. Foreman switches off what Codex lets it
+(`--disable shell_tool unified_exec view_image apps plugins image_generation multi_agent multi_agent_v2` and
+`-c web_search="disabled"`); the names were checked to exist on 0.171.0.
+
+What was found, by `codex debug prompt-input` with an empty Codex home (it calls no model): by default Codex declares a
+JavaScript `exec` tool whose nested tools include `exec_command`, `write_stdin`, `view_image`, `apply_patch` and the
+MCP resource tools; with the switches above `exec_command`, `write_stdin` and `view_image` are gone from that list.
+Still declared: `apply_patch` (it writes, and the read-only sandbox is what stops it; not tried), the MCP resource
+readers (with `--ignore-user-config` and an empty directory no MCP server is configured, so they have nothing to
+read), a clock, `request_user_input` and the sub-agent tools (the last two have no one to ask, and there is no
+switch for them that took effect in that list). Not shown by that command, so not verified: the web search tool and
+anything the login adds (apps, connectors); they are switched off by the flags above but a real session's tool list
+was not read. Measured with a real session, before the extra switches: with the shell on, a session asked to read a
+file outside its directory did; with the first three off it said it had no tool to do so.
+Codex's login is the one you already have.
+
+Who started it is not fully known. `foreman review` is a prompt, and nothing Codex tells its hooks was shown to
+separate your own prompt from one the agent writes for a subagent, so a review the agent asked for in that way
+cannot be told from yours. What it can do is small: it costs a model call and shows a verdict, which is advice.
+
+**Who reviews** is shown by `foreman reviewer`. Setting it is not available from a Codex prompt, for the reason
+`foreman allow <id>` is not: a choice saved by an agent's prompt would be reported by every later review as yours.
+You set it yourself in `config.json` in Foreman's state directory (`~/.foreman/config.json`), in this shape (either
+field may be left out):
+
+```
+{"reviewer": {"codex": {"model": "gpt-6-luna", "effort": "medium"}}}
+```
+
+With nothing chosen it is the model this session runs on (the hook input names it), in a clean context and no more:
+not another model, and the review says so in plain words. For an independent look, choose another. Effort levels,
+lowest first, are the ones in Codex 0.171.0's own model catalog (`codex debug models --bundled`): `low`, `medium`,
+`high`, `xhigh`, `max`, `ultra`. Not every model takes every level (the catalog gives `gpt-5.5` up to `xhigh`);
+Codex refuses one the model lacks and the review says why.
+
+Seen on Codex CLI 0.171.0 (macOS) with `gpt-6-luna` at `low`, in a throwaway repository: an `assertEqual` loosened to
+`assertTrue` came back as BLOCKED, with the new line quoted as evidence. The second `foreman review` printed the
+stored result and called no model. A review took about 8 seconds.
+
+Limits in Codex:
+
+- **`codex exec` shows nothing of a blocked prompt's reason**, and a review is a blocked prompt. In `codex exec` the
+  review runs, but you read it only in the file it saves (`~/.foreman/reviews/`, the path is the last line of the
+  result), not on screen. Use the interactive terminal. Not seen: the interactive terminal and the desktop app.
+- **The session's effort is not known.** Codex's hook input names the session's model (`model`) and no effort, so the
+  default reviewer is not raised a level above the session as it is in Claude Code, and the review says so.
+- **Codex does not say which model answered**, so the review names the one you chose, or none.
+- **The reviewer is not fully clean.** `--ignore-user-config` skips your `config.toml`, but Codex still loads your
+  global instructions file from its home, and the reviewer sees it. Every review in Codex says so under its
+  "Reviewer:" line, with the tools that could not be switched off.
+  Neither `-c project_doc_max_bytes=0` (it only silenced the warning) nor `-c model_instructions_file=` (the warning
+  and the global file stayed) removed it. The file is not Foreman's, and the session has no tool to act on it.
+- **It takes as long as the model takes**, up to 7 minutes (retries included) with nothing shown meanwhile; the hook's
+  timeout above is 600 seconds for that. A rate limit (429) or a server error (5xx) is retried by the review.
 
 ## Limits to know
 
