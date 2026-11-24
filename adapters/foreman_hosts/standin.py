@@ -22,6 +22,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 from typing import Optional
 
 from foreman import board, gate
@@ -39,6 +40,15 @@ DOCS = {
 }
 MAX_OPTIONS = 20
 _DISMISSED = "cancel"  # the option a dismissed dialog counts as, where the question has it
+
+
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f  ]")
+
+
+def _plain(text: str) -> str:
+    """One line of a dialog: a directory's name or a pull request's title is somebody else's text, and a control
+    character in it (an escape sequence) must not redraw what the person is choosing between."""
+    return " ".join(_CONTROL.sub(" ", text).split())
 
 
 def question_id(question: str, values: list) -> str:
@@ -66,8 +76,8 @@ class _Context:
         options = []
         for choice in (choices or [])[:MAX_OPTIONS]:
             if isinstance(choice, dict) and isinstance(choice.get("value"), str) and choice["value"]:
-                label = " ".join(str(choice.get("label") or choice["value"]).split())
-                detail = " ".join(str(choice.get("description") or "").split())
+                label = _plain(str(choice.get("label") or choice["value"]))
+                detail = _plain(str(choice.get("description") or ""))
                 options.append({"value": choice["value"], "label": "%s — %s" % (label, detail) if detail else label})
         if not options:
             return None
@@ -78,7 +88,8 @@ class _Context:
             if isinstance(picked, str) and picked in values:
                 return picked
             return _DISMISSED if _DISMISSED in values else None  # the dialog was closed without a choice
-        raise core.Asking({"id": asked, "question": core.reword(self.host, str(question)), "options": options})
+        shown = "\n".join(_plain(line) for line in core.reword(self.host, str(question)).split("\n"))
+        raise core.Asking({"id": asked, "question": shown, "options": options})
 
 
 @contextlib.contextmanager

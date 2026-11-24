@@ -217,13 +217,11 @@ export function questionOf(answer: Answer): Question | undefined {
 	return options.length ? { id: q.id, question: q.question, options } : undefined;
 }
 
-/** The lines pi's selector shows, one per option and each different: two options with the same label get a number. */
+/** The lines pi's selector shows, one per option and each different (the pick is found by its line): when two
+ * options share a label, every line gets its number. */
 export function optionLines(options: Option[]): string[] {
-	const seen = new Map<string, number>();
-	for (const o of options) {
-		seen.set(o.label, (seen.get(o.label) ?? 0) + 1);
-	}
-	return options.map((o, i) => ((seen.get(o.label) ?? 0) > 1 ? `${i + 1}. ${o.label}` : o.label));
+	const labels = options.map((o) => o.label);
+	return new Set(labels).size === labels.length ? labels : labels.map((label, i) => `${i + 1}. ${label}`);
 }
 
 export default function foreman(pi: ExtensionAPI) {

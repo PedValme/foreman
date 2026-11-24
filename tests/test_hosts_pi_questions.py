@@ -44,7 +44,7 @@ class Questions(base.PiCase):
 
     def test_two_options_with_the_same_label_stay_two_lines(self):
         out = self.drive("question")
-        self.assertEqual(out["lines"], ["1. x", "2. x", "y"])
+        self.assertEqual(out["lines"], ["1. x", "2. x", "3. y"])  # every line numbered: none can equal another
         self.assertEqual(out["not_a_question"], [None, None, None])
 
     @unittest.skipIf(os.name == "nt", "the stand-in interpreter is a POSIX shell script")

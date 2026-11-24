@@ -57,7 +57,8 @@ cannot ask, because it answers one request and ends: it answers with the questio
 in its own dialog and sends the command again with your pick (`neutral.py`, "question"). pi has that dialog;
 OpenCode's plugin does not yet, so there the command prints the list and what to type. Seen on pi 1.5.0 in a real
 session without a model turn (`pi -p "/foreman"`, `verdict`, `pipeline`, `use`, on a repository without a GitHub
-remote); pi's selector and the board with pull requests were run in the tests, not yet seen in a session. Merge
+remote); pi's selector was run in the tests and not yet seen in a session, and the board with pull requests is
+tested in the Hermes plugin's own tests, not through pi or OpenCode. Merge
 and reject with reasons are only in Foreman on Hermes Agent so far; Claude Code and Codex have no board.
 
 ## The review in the four

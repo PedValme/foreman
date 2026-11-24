@@ -64,8 +64,8 @@ Each of these was seen in a real session on pi 1.5.0 (macOS, the default model, 
   session (`/foreman status` and `/foreman review` then read the pinned one). `/foreman use` alone asks you which
   repository in pi's own selector; with nobody at the interface it prints the list and what to type. Seen on pi
   1.5.0 with `-p` and no model turn, on a repository without a GitHub remote: the board, `verdict`, `pipeline`,
-  `prs` ("GitHub is not available here"), `use` and `use .`. The selector and the board with pull requests were run
-  in the tests, not yet seen in a session.
+  `prs` ("GitHub is not available here"), `use` and `use .`. The selector was run in the tests and not yet seen in
+  a session; the board with pull requests is tested in the Hermes plugin's own tests, not through pi.
 
 What it does not do yet: the review when someone asks to merge and on every turn (it runs when you ask), merge and
 reject with reasons (Foreman on Hermes Agent has them).

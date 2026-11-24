@@ -189,6 +189,17 @@ class AQuestionForThePerson(StandinCase):
             standin._Context(host, self.root, {"id": asked, "value": "merge"}).ask_choice(
                 "Merge?", choices + [{"value": "later", "label": "Later"}])
 
+    def test_somebody_elses_text_cannot_redraw_the_dialog(self):
+        host = pi.host({"attended": True})
+        escape = "\x1b[2K\x1b[1A"
+        with self.assertRaises(core.Asking) as asked:
+            standin._Context(host, self.root, None).ask_choice(
+                "Merge PR #7?\nTitle: fix" + escape + "\rMerge PR #9?",
+                [{"value": "merge", "label": "Merge" + escape + " PR #7"}, {"value": "cancel", "label": "Cancel\x07"}])
+        q = asked.exception.question
+        self.assertEqual([o["label"] for o in q["options"]], ["Merge [2K [1A PR #7", "Cancel"])
+        self.assertEqual(q["question"].split("\n"), ["Merge PR #7?", "Title: fix [2K [1A Merge PR #9?"])
+
     def test_the_question_is_not_an_exception_the_board_reads_as_no_answer(self):
         self.assertFalse(issubclass(core.Asking, Exception))
 
