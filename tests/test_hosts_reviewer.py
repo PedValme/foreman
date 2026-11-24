@@ -442,6 +442,9 @@ class ThroughThePersonsCommand(ReviewerCase):
         ahead = time.time() + 2
         os.utime(path, (ahead, ahead))
         self.assertTrue(core.reviewer_session({"FOREMAN_REVIEWER": token}))
+        minute = time.time() + 60  # ...and a minute ahead is not: the slack is seconds
+        os.utime(path, (minute, minute))
+        self.assertFalse(core.reviewer_session({"FOREMAN_REVIEWER": token}))
         later = os.path.getmtime(path) + 10 * 365 * 24 * 3600
         os.utime(path, (later, later))
         self.assertFalse(core.reviewer_session({"FOREMAN_REVIEWER": token}))

@@ -44,12 +44,29 @@ OpenCode 2.3.2); each harness's own README says exactly what was seen, what was 
 The same everywhere: the gate is the Hermes plugin's, on the agent's own machine, so the independent control stays
 the required check in CI (`examples/foreman-check.yml`); Foreman's hooks and state are files, guarded against the
 plain attempt and not a disguised one; the board and merge or reject with reasons are only in Foreman on Hermes
-Agent so far. The review outside Hermes is a fresh session of the harness itself (`foreman_hosts/reviewer.py`), on
-the model and effort you choose; the row below says where it exists.
+Agent so far.
+
+## The review in the four
+
+Outside Hermes the review is a fresh session of the harness itself, started by Foreman and never by the agent that
+wrote the code (`foreman_hosts/reviewer.py`): no tools, the diff in, one answer out, every finding checked against
+the diff. It runs when you ask for it; it is advice and unblocks nothing. Each was seen in a real session: an
+assertion loosened from an exact value to "is true", which the gate cannot see, came back BLOCKED with the line
+quoted, and the same review asked again returned the stored result with no model call.
 
 | | Claude Code | Codex | pi | OpenCode |
 |---|---|---|---|---|
-| The review, when you ask for it | `/foreman:review` | not yet | not yet | not yet |
+| You ask with | `/foreman:review` | `foreman review` | `/foreman review` | `/foreman review` |
+| You choose who reviews with | `/foreman:reviewer` | a file (not from a prompt) | `/foreman reviewer` | `/foreman reviewer` |
+| With nothing chosen | the default model, one effort level up once the session's effort is known | the session's model | the session's model, one thinking level up | the session's model |
+| Does the harness say which model wrote the code | no | yes | yes | yes |
+| The answer's form is held by | the harness (a schema) | the harness (a schema) | a seal made for that request | a seal made for that request |
+| What the session can still see | nothing of yours | your global instructions; a few tools with no switch | maybe your own appended system text | your global instructions; your MCP servers start |
+
+The review says, in every case, who reviewed and what Foreman does and does not know about it: it never calls the
+reviewer "the model that wrote the code" unless the harness named that model, and never "another model" at all.
+Where a harness leaves something its session can still see or do, every review there carries a sentence saying so.
+Each harness's README has the exact command line of its session and what was measured.
 
 ## Claude Code
 

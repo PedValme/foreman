@@ -38,6 +38,8 @@ Read the index below, then ESTADO.md, its "Next session" first (where the last s
   too: remove what a real-session test leaves there. Foreman's own check reads this repository's test files, so a
   fixture builds a skip marker from parts (`"@pytest.mark." + "skip"`, `detector.MARKER`), never literally; CI runs
   on Windows, so a test never compares a Unix-only path as a string (build paths from the test's temp directory).
+  A new conditional skip (`skipIf` for a platform) goes in a new test file: added to an existing one it is a
+  finding of Foreman's own check, by design (there it could be switching off tests that already ran).
 
 ## Where things are: one document per question
 | Question | Document | Who writes it |

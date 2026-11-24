@@ -58,9 +58,16 @@ session that did not write the code, the Hermes plugin untouched until one subst
   `{"plugins": ["-*", "opencode.*", "foreman"]}` leaves the user's global plugins out (global MCP servers still
   load). Read, not seen: the user-level plugins folder; a session moved to a worktree leaves a project-level plugin
   behind; the TUI's autoaccept and the app's auto-approve.
-- Headless sessions for the reviewer (flags read in each `--help`): `claude -p --model --effort --json-schema
-  --tools ""`; `codex exec -m -c … --output-schema --sandbox`; `pi -p --model <id>:<level> --no-tools`;
-  `opencode run -m provider/model#variant --format json`.
+- The reviewer's session in each (measured; the exact command lines are in each harness's README): Claude Code
+  `claude -p --json-schema … --tools "" --strict-mcp-config --setting-sources local` in an empty directory carries
+  about 1,300 tokens of context and one tool, the structured answer; it tells no hook the session's model, and its
+  effort only on tool and stop events. Codex `codex exec --sandbox read-only` reads any file unless its shell tools
+  are switched off (`--disable shell_tool unified_exec view_image …`, seen with a marker file); its API needs a
+  closed schema; its global instructions file loads whatever is passed; its output never names the model. pi and
+  OpenCode cannot hold a model to a schema: the answer is the one object carrying a per-request seal
+  (`reviewer.sealed`). OpenCode needs `--standalone`, `PWD` set to the empty directory and a dedicated agent with
+  deny-all permissions in `OPENCODE_CONFIG_CONTENT` (a person's own agent rules outrank top-level ones); its free
+  models hit their usage limit.
 
 ## Acceptance criteria
 - [x] Claude Code, Codex, pi and OpenCode, each in real sessions on macOS: an agent's commit that skips a test is
@@ -69,8 +76,11 @@ session that did not write the code, the Hermes plugin untouched until one subst
   a model turn; allowing a finding does nothing with nobody attending. Each harness's README lists what was seen
   and what was not (Windows nowhere; the person's commands in Codex's interactive terminal; a marketplace or
   package installation of any of them).
-- [ ] The reviewer in the four: a fresh session launched by Foreman, its model and effort the user's choice, each
-  finding verified against the diff.
+- [x] The reviewer in the four, when the person asks: a fresh session launched by Foreman, its model and effort the
+  user's choice, each finding verified against the diff; seen in a real session in each (a loosened assertion the
+  gate calls CLEAN came back BLOCKED with the line quoted; the second time, the stored result).
+- [ ] The review when someone asks to merge, and on every turn when the user turns it on (the owner's decision of
+  2026-11-24): needs `/foreman merge` outside Hermes (T6) and a long-running end-of-turn hook.
 - [ ] pi and OpenCode: `/foreman` board, verdict, review, merge, reject, allow and pipeline.
 - [x] `plugin/` unchanged by the adapters; `hermes plugins validate plugin` and the tests green throughout.
 
@@ -82,9 +92,12 @@ session that did not write the code, the Hermes plugin untouched until one subst
   automatic yes is not detected. Its end-of-turn nudge depends on a hook OpenCode marks experimental.
 - In every harness the hooks and Foreman's state are files (same debt as Hermes's state guard), and a second agent
   started without Foreman (`pi -ne`, a harness run with its hooks off) is outside the gate: CI stays the control.
-- T5: the reviewer session loads Foreman's own hooks (recursion): needs a guard; `claude --bare` skips hooks but
-  does not read a subscription login. T6 on OpenCode: a command can answer only through an error notice, so the
-  board needs another surface there.
+- The reviewer in Claude Code is the account's default model, not necessarily the session's: Claude Code names the
+  model to no hook. In Codex the choice of reviewer is a file, and the session still sees the person's global
+  instructions and declares a few tools with no switch. None of the four was tried on Windows.
+- The Hermes plugin's own review keeps line breaks in a finding's text (ESTADO, known issues): one line in
+  `review.verify`, for the catalog update.
+- T6 on OpenCode: a command can answer only through an error notice, so the board needs another surface there.
 - Whether the Hermes catalog's scanner reads outside `subdir`: unknown; nothing binary is committed anywhere.
 - Names and distribution (marketplace, npm, how Codex's hooks are installed): the owner, T7.
 
@@ -93,12 +106,15 @@ session that did not write the code, the Hermes plugin untouched until one subst
 - [x] T2 Codex adapter (#64), on the shared base (#62).
 - [x] T3 pi extension (#63).
 - [x] T4 OpenCode v2 plugin (#65).
-- [ ] T5 The reviewer as a fresh session, in the four.
-- [ ] T6 `/foreman` complete on pi and OpenCode.
+- [x] T5 The reviewer as a fresh session, in the four, when the person asks (#67 the neutral half and Claude Code,
+  #68 Codex, #69 pi, #70 OpenCode).
+- [ ] T6 `/foreman` complete on pi and OpenCode, and with `/foreman merge` the review at merge time; then the
+  per-turn loop where the user turns it on.
 - [ ] T7 READMEs, names and publication (owner's yes); the one Hermes catalog update with what the core needed.
 
 ## Next step
-T5. Start in `core.py`: a host-neutral "review this diff in a fresh session" that each dialect implements with its
-harness's headless command (the flags above), reusing `plugin/foreman/review.py` through the context it already
-takes (`review.bind(ctx)`: a stand-in with `llm.complete_structured`), so nothing under `plugin/` changes. Decide
-the recursion guard first.
+T6. `plugin/foreman/board.py` holds the board, merge and reject over `gh`; it asks the person and runs the merge
+through Hermes's context (`ask_choice`, `dispatch_tool`). As with the review, give it a stand-in for that context in
+`adapters/foreman_hosts/` and let pi and OpenCode ask through their own interface (`neutral.py` needs a way for the
+Python side to ask a question and get the answer back: a second request, not a callback). Start with `board` and
+`verdict`, which only read; `merge` last, with the review before it.
