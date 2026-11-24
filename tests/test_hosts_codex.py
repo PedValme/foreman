@@ -118,10 +118,11 @@ class PreToolUse(CodexCase):
             verdict, reason = self.decision(out)
             self.assertEqual(verdict, "deny", workdir)
             self.assertIn("tests/test_cart.py:4", reason)
-        self.assertEqual(codex._where("/a/b", {"workdir": "c"}), os.path.normpath("/a/b/c"))
-        self.assertEqual(codex._where("/a/b", {"workdir": "/x"}), "/x")
-        self.assertEqual(codex._where("/a/b", {"workdir": 3}), "/a/b")
-        self.assertEqual(codex._where("/a/b", {}), "/a/b")
+        # real paths of this machine: what is absolute differs between systems
+        self.assertEqual(codex._where(clean, {"workdir": "c"}), os.path.join(clean, "c"))
+        self.assertEqual(codex._where(clean, {"workdir": self.root}), os.path.normpath(self.root))
+        self.assertEqual(codex._where(clean, {"workdir": 3}), clean)
+        self.assertEqual(codex._where(clean, {}), clean)
 
     def test_edit_and_write_carrying_a_patch_are_read_as_patches(self):
         for name in ("Edit", "Write"):
