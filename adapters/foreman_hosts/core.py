@@ -235,6 +235,26 @@ def _person_only(host: Host, command: str) -> bool:
 _PYTHON = re.compile(r"^(?:python[\d.]*|pypy[\d.]*|py|hook\.py)$")
 
 
+def _without_redirections(words: list) -> list:
+    """The words the program really receives: output redirections (the gate's own reading) and input ones
+    (`< file`, `<file`, `<<< text`) removed with their targets."""
+    words = [w for i, w in enumerate(words)  # the descriptor number of `2>file` is its own word to the tokenizer
+             if not (w.isdigit() and i + 1 < len(words) and isinstance(words[i + 1], gate._Redir))]
+    words, _writes = gate._strip_redirs(words)
+    out, i = [], 0
+    while i < len(words):
+        word = words[i]
+        if not isinstance(word, gate._Op) and re.match(r"^\d*<{1,3}$", word):
+            i += 2
+            continue
+        if re.match(r"^\d*<{1,3}[^<]", word) and len(out) > 0:
+            i += 1
+            continue
+        out.append(word)
+        i += 1
+    return out
+
+
 def _runs_entry(command: str) -> bool:
     """The adapters' entry point run by hand, wherever it is named from (`cd <plugin> && python3 adapters/hook.py
     claude-code`): the way to hand Foreman a made-up "the person typed this". Naming the file (`git add
@@ -242,6 +262,7 @@ def _runs_entry(command: str) -> bool:
     for prog, words in programs(command):
         if not _PYTHON.match(prog):
             continue
+        words = _without_redirections(words)  # `hook.py < forged.json pi` still runs `hook.py pi`
         for i, word in enumerate(words[:-1]):
             # the entry point takes the harness's name as its one argument: `…/hook.py pi`, not a `hook.py` that
             # merely lives under a folder called `pi` or is given some other word
@@ -363,15 +384,25 @@ def _patch_switches_off(host: Host, patch: str, full: Callable[[str], str]) -> b
     it, or by moving another file over it."""
     try:
         sides = {full(path): (old, new) for path, old, new, _is_new in gate._v4a_files(patch)}
-        source = None
-        for line in patch.splitlines():
-            m = _PATCH_HEADER.match(line)
-            if not m:
-                continue
+    except Exception:
+        logger.warning("foreman: cannot read the patch's files", exc_info=True)
+        return False
+    source = None
+    for line in patch.splitlines():
+        m = _PATCH_HEADER.match(line)
+        if not m:
+            continue
+        try:  # one file's failed check never skips the next file's
             kind, path = m.group(1), full(m.group(2))
             if kind == "Move to":
-                # the gate files a moved file's content under the name it had: judge it where it lands
-                if host.is_config(path) and host.config_off(_read_config(path), sides.get(source, ("", ""))[1]):
+                if source is None:
+                    continue
+                # The gate files a moved file's lines under the name it had. Where it lands it is the file on
+                # disk plus what the patch adds; where it leaves from, it is gone.
+                landed = _read_config(source) + "\n" + sides.get(source, ("", ""))[1]
+                if host.is_config(path) and host.config_off(_read_config(path), landed):
+                    return True
+                if host.is_config(source) and host.config_off(_read_config(source), ""):
                     return True
                 continue
             source = path
@@ -382,8 +413,8 @@ def _patch_switches_off(host: Host, patch: str, full: Callable[[str], str]) -> b
                     return True
             elif host.config_off(*sides.get(path, ("", ""))):
                 return True
-    except Exception:
-        logger.warning("foreman: the host's config check failed", exc_info=True)
+        except Exception:
+            logger.warning("foreman: the host's config check failed", exc_info=True)
     return False
 
 
