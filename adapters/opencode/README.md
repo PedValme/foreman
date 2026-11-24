@@ -61,7 +61,8 @@ of `examples/cart` with the link above:
   one of those in it, Foreman sends the agent back once with what to undo. Seen: after the refused commit above, the
   agent reported and stopped, Foreman sent it back, it removed the skip. A run that only answered "hello", with a skip
   the person had left in the tree, was not sent back.
-- **Your command**, `/foreman status [path]`, `/foreman allow [id]`, `/foreman help`: code, no model turn. OpenCode
+- **Your command**, `/foreman status [path]`, `/foreman allow [id]`, `/foreman review`, `/foreman reviewer`,
+  `/foreman help` (the review has its own section below): code, no model turn. OpenCode
   lets a plugin command answer only through an error notice, so the reply appears as one (on a new session its
   title reads "Failed to set up session"; the text is Foreman's). `/foreman allow <id>` first asks you through
   OpenCode's permission prompt; the finding is allowed only when a person approves it there. Seen in the TUI:
@@ -69,6 +70,58 @@ of `examples/cart` with the link above:
 - **When Foreman must ask you** (it could not inspect a command), the call waits on OpenCode's permission prompt.
   Seen: approved in the TUI, the call ran; under `opencode run` OpenCode rejected it and the model read Foreman's
   message.
+
+## The review
+
+`/foreman review [pull request|branch] [--fresh]`: Foreman starts a fresh OpenCode session that did not write the
+code, gives it the diff and checks that every finding it returns quotes a line of that diff. It is advisory: it
+grants, merges and unblocks nothing. The same diff by the same reviewer is never sent twice (`--fresh` asks again).
+Who reviews is yours: `/foreman reviewer [model]` (`default` to go back), a model as `opencode models` lists it,
+`provider/model`.
+
+- **A variant is part of the model.** OpenCode has no effort setting. A model may have variants (named options,
+  usually a reasoning level or a thinking budget), written `provider/model#variant`, and the names belong to each
+  model (its catalog entry or your `variants`), not to a fixed ladder: `#high` exists for one model and not for
+  another. So Foreman has no effort levels here: name the variant in the model, `/foreman reviewer
+  openai/gpt-6.1-sol#high`. An unknown variant is an error from OpenCode and the review says so.
+- **What it runs**: `opencode run --standalone --archived --format json --agent foreman-reviewer-<random> [-m
+  <model>]`, the prompt on standard input (never on the command line), in an empty temporary directory, so it reads
+  neither the repository nor its project settings. It is a private server (`--standalone`) so that the configuration
+  below reaches it, and it is never started with `--auto`. `--archived` keeps its session out of your session lists;
+  OpenCode still stores it, the diff included, in its own database.
+- **It cannot change anything.** OpenCode applies the last matching permission rule, and the rules in your own
+  `agents.build` come after the top-level ones, so a top-level "deny everything" alone would not be total. Foreman
+  passes, in `OPENCODE_CONFIG_CONTENT` (read after your configuration files), an agent of its own under a name nobody
+  else's configuration knows, whose own rules deny every permission and come last in its list, runs the session as
+  that agent, and turns off every plugin but OpenCode's built-in ones. `OPENCODE_DISABLE_CLAUDE_CODE=1` leaves your
+  Claude Code instructions out; the token of this review in `FOREMAN_REVIEWER` makes Foreman's own hook (`hook.py`)
+  answer nothing inside that session. Seen: told to create a file and run `ls`, the session answered that it has no
+  tools, and the file did not exist. What can still undo it: OpenCode's managed settings (an administrator's) load
+  after Foreman's.
+- **What of your OpenCode setup still reaches it**: your global configuration directory still applies. Its MCP
+  servers start (their tools are denied, the servers still run), its global `AGENTS.md` still reaches the model
+  (OpenCode has no setting to leave it out), and your plugin modules are imported before `-*` turns them off. Foreman
+  cannot close these from the configuration it passes; each review says so in one line under its "Reviewer:" line.
+- **Who reviews by default**: the model this session runs on, when OpenCode's record of the session names it (the
+  plugin sends it), in a clean context and with nothing raised: OpenCode has no effort to raise. With no model in the
+  record it is OpenCode's default model. Either way it is the model that wrote the code: choose another to get a
+  second opinion. Each review says who it was.
+- **Seen** (OpenCode 2.3.2, macOS, an OpenCode Go model, a throwaway copy of `examples/cart`): an assertion loosened
+  from an exact value to "is true", which the gate cannot see (CLEAN), came back BLOCKED with the line quoted. The same
+  diff again was answered from the stored result without a call. The Python side was called as the plugin does
+  (`adapters/hook.py opencode` with the `command` request), not through `/foreman` typed in OpenCode's interface.
+- **Where you read it.** OpenCode shows a command's reply as an error notice, which is not made for a long text:
+  the reply ends with `Saved: <path>`, the stored record of the review (JSON, in Foreman's state directory,
+  `~/.foreman/reviews/` unless OpenCode's plugin storage says otherwise). The whole review is in that file.
+- **Limits.** It takes as long as the model takes, up to ten minutes, with nothing shown meanwhile (the plugin gives a
+  command ten minutes instead of thirty seconds). OpenCode's JSON output never names the model that ran, so the
+  review does not say which one answered. OpenCode has no flag that makes a model answer with a given JSON schema:
+  Foreman puts the schema in what it sends, with a random seal that the diff's author cannot know, and reads only the
+  object that carries the seal (a fenced block or text around it is fine; an object written inside the diff is
+  never taken for the answer); a reply with no sealed object is a review that could not run. A failed run (a
+  model's usage limit, an unknown model) comes back with its reason and the HTTP status when OpenCode gives one; a
+  rate limit (429) or a server error (5xx) is retried. The reviewer sees the diff and your global instructions: it has
+  no tools and no repository. Foreman's rules for it are the agent's own system text, apart from the diff.
 
 ## Limits to know
 
@@ -91,7 +144,7 @@ of `examples/cart` with the link above:
 - **OpenCode's permission prompt shows "Call tool foreman", not Foreman's message** (2.3.2 renders no text for a
   plugin's own question). The model gets the message when the call is refused; `/foreman status` shows the verdict.
 - **`/foreman` only works where OpenCode runs commands** (its TUI and apps). `opencode run "/foreman status"` sends
-  the text to the model as an ordinary prompt (seen), so Foreman's commands do nothing there.
+  the text to the model as an ordinary prompt (seen), so Foreman's commands, the review included, do nothing there.
 - **When the plugin cannot run Python** (no `python3`, an error, no answer within 30 seconds), the agent keeps
   working: a shell command that names git or gh with commit, push, pr or config goes to you as an ask (refused with
   nobody there), every other call runs, and the error is shown once per session, when the run ends, as a failed
@@ -118,5 +171,5 @@ of `examples/cart` with the link above:
 - Not seen yet: Windows; OpenCode's background service (all runs above used `--standalone`); OpenCode's desktop and
   web apps.
 
-What it does not do yet: the second-model review, the board, merge and reject with reasons (Foreman on Hermes Agent
-has them).
+What it does not do yet: the review when someone asks to merge and on every turn (it runs when you ask), the board,
+merge and reject with reasons (Foreman on Hermes Agent has them).

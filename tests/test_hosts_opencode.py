@@ -318,6 +318,30 @@ class Plugin(OpenCodeCase):
         self.assertEqual(out["asked"], 2)  # only `allow <id>` asks, once each time
         self.assertTrue(out["after"]["ok"])
 
+    def test_the_review_command_waits_ten_minutes_and_carries_the_sessions_model(self):
+        out = self.drive("review")
+        self.assertEqual(out["shellDelay"], 30_000)      # every other request keeps the protocol's limit
+        self.assertEqual(out["unknownDelay"], 600_000)   # a command may start a session of OpenCode and wait for it
+        self.assertIn("does not tell Foreman which model wrote the code", out["unknownShown"])  # no model stated
+        self.assertIn("It is the same model that wrote the code", out["sameShown"])             # `p/m` stated
+        self.assertNotIn("only the effort differs", out["sameShown"])
+        # a variant is part of the model name: `p/m#high` as the session's own and as the person's choice agree
+        self.assertIn("same model", out["variantAgain"])
+        self.assertEqual(out["modelOf"], ["a/b#max", "a/b", None, None, None])
+
+    def test_the_variable_alone_switches_nothing_off_in_the_plugin(self):
+        # Foreman stands down in hook.py, for the token of a review that is running; a project's configuration
+        # can set the variable for every session, so the plugin does not read it.
+        home = os.path.join(self.tmp, "home")
+        os.makedirs(home, exist_ok=True)
+        env = dict(os.environ, HOME=home, USERPROFILE=home, FOREMAN_REVIEWER="1")
+        r = subprocess.run(RUNTIME + [os.path.join(ROOT, "tests", "opencode_plugin.mjs"), self.root, "reviewer-env"],
+                           capture_output=True, env=env, timeout=120)
+        self.assertEqual(r.returncode, 0, r.stderr.decode())
+        out = json.loads(r.stdout.decode())
+        self.assertEqual(out["commands"], ["foreman"])
+        self.assertIn("tool.execute.before", out["registered"])
+
     def test_when_python_cannot_answer_the_agent_keeps_working_and_git_goes_to_the_person(self):
         out = self.drive("broken")
         self.assertTrue(out["ls"]["ok"])
