@@ -1,8 +1,9 @@
 <!-- pic-method: 1 -->
 # Foreman — how we work
 
-Foreman is a plugin for Hermes Agent (NousResearch/hermes-agent) that stops a coding agent from rigging its own
-green check; it is our entry to the Hermes Agent Plugin Hackathon (closes 2026-11-11 17:00 EST). Pedro owns it and
+Foreman stops a coding agent from rigging its own green check. It is a plugin for Hermes Agent
+(NousResearch/hermes-agent), listed in its catalog and first place in the Hermes Agent Plugin Hackathon, and from
+2026-11-24 the same gate for other harnesses through adapters (PRODUCTO.md, rules 22 to 26). Pedro owns it and
 decides what the product does. Talk to the owner in their language (Spanish). Project files are in English.
 
 <!-- pic-method: first-action -->
@@ -22,10 +23,19 @@ Read the index below, then ESTADO.md, its "Next session" first (where the last s
   - Every catalog admission rule is a requirement — a broken rule is a declined entry (DECISIONES.md, 2026-11-09).
   - Nothing of the owner's private stack (his private tooling and its prompts, names, hosts, accounts) enters this
     public repository — it is private and unlicensed.
+  - An adapter never needs an edit in `plugin/`; what the core does need lands on `main` and reaches Hermes in one
+    substantial catalog update — the listed plugin is what Hermes users run, and each update is re-reviewed by
+    Hermes's maintainer (DECISIONES.md, 2026-11-24).
+  - Each harness's adapter is published when its own end-to-end test in a real session passes, and its name and
+    where it is published are the owner's — a gate announced before it was seen working is a promise the product
+    does not keep (DECISIONES.md, 2026-11-24 and 2026-11-10).
 - Operation: see "This repository".
 - Known pitfalls: the Hermes on the Windows development PC has no model provider, so a real session can only run
   on the owner's Hermes machine; `hermes plugins install --ref` needs the full 40-character commit; with a gateway running, a slash
-  command runs inside the gateway process, whose directory is the Hermes home, not the user's.
+  command runs inside the gateway process, whose directory is the Hermes home, not the user's. Claude Code's
+  interactive prompt rejects a `/foreman` that is not a real command before any hook sees it, so the person's
+  commands are plugin commands (`/foreman:status`); outside Hermes Foreman's state is `~/.foreman`, on this machine
+  too: remove what a real-session test leaves there.
 
 ## Where things are: one document per question
 | Question | Document | Who writes it |
@@ -43,10 +53,18 @@ Code and tests are what the system really does; when a document and the code dis
   (registration), the `foreman/` package, `desktop/`, `dashboard/`, `README.md` (the full one) and `LICENSE`. Nothing
   in it reads outside `plugin/`. The root keeps the tests, examples and working documents. Requires Hermes
   >= 0.22.6. The user-facing README, messages and command output are in English.
-- Check, from the root: `python -m unittest discover -s tests -q` (`tests/tests_support.py` puts `plugin/` on
-  `sys.path`; import it before `foreman`) and `hermes plugins validate plugin --install-deps`. Both run before
-  every commit. The detector and its tests are the product's controls: a change to them is reviewed by an agent that
-  did not write it.
+- The adapters for other harnesses are in `adapters/` (its README says what each file is): `foreman_hosts/core.py`
+  is the host-neutral half, one module per harness is its dialect, and `hook.py` is the entry point a harness's
+  hook runs (`python3 -I`, Python 3.9+). They import the gate from `plugin/foreman/`; `plugin/` never imports
+  them. The repository root is the package another harness installs (`.claude-plugin/` for Claude Code), so
+  nothing binary, generated or private is committed anywhere in it.
+- Check, from the root: `python -m unittest discover -s tests -q` (`tests/tests_support.py` puts `plugin/` and
+  `adapters/` on `sys.path`; import it before `foreman`) and `hermes plugins validate plugin --install-deps`. Both
+  run before every commit; `claude plugin validate .` when the Claude Code plugin's files change. The detector, the
+  adapters and their tests are the product's controls: a change to them is reviewed by an agent that did not write
+  it.
+- Try the Claude Code adapter without installing it: `claude --plugin-dir <this clone>` in a throwaway repository
+  (`-p --setting-sources project,local` for a scripted session that leaves the owner's own hooks out).
 - Try it without touching the owner's Hermes setup: `hermes plugins doctor plugin` (temporary HERMES_HOME), or a
   dedicated profile (`hermes -p foreman-dev …`). Never install it into the default profile.
 - Hermes's plugin documentation, read before using a surface: `website/docs/developer-guide/plugins/` and
