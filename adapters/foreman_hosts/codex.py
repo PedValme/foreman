@@ -25,6 +25,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import sys
 from typing import Optional
 
@@ -97,13 +98,111 @@ def _program_dirs(roots) -> tuple:
     return tuple(out)
 
 
-def host(env=None) -> core.Host:
+# `model_reasoning_effort` as Codex 0.171.0's own model catalog (`codex debug models --bundled`) lists it, lowest
+# first. Not every model takes every level (gpt-5.5 stops at xhigh, the luna models at max): Codex says so itself
+# when one is refused, and the review shows its reason.
+EFFORTS = ("low", "medium", "high", "xhigh", "max", "ultra")
+_STATUS = re.compile(r"(?<!\d)([45]\d\d)(?!\d)")
+
+
+def _short(text: str, limit: int = 300) -> str:
+    text = " ".join((text or "").split())
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def _event_message(event: dict) -> str:
+    error = event.get("error")
+    for value in (event.get("message"), error.get("message") if isinstance(error, dict) else error):
+        if isinstance(value, str) and value.strip():
+            return value
+    return ""
+
+
+def _strict(schema):
+    """The schema as Codex's API takes it (seen: a 400 without it): every object closed with
+    ``additionalProperties: false`` and every property required."""
+    if isinstance(schema, list):
+        return [_strict(s) for s in schema]
+    if not isinstance(schema, dict):
+        return schema
+    out = {k: _strict(v) for k, v in schema.items()}
+    if out.get("type") == "object" and isinstance(out.get("properties"), dict):
+        out["additionalProperties"] = False
+        out["required"] = list(out["properties"])
+    return out
+
+
+def _fresh_session(env):
+    """Codex's own headless mode as the reviewer: one prompt, a read-only sandbox, no session kept, the JSON the
+    schema asks for. It starts in an empty directory (so it reads neither the repository under review nor its
+    instructions), without the user's config.toml (their hooks, servers and model settings), and uses the login
+    Codex already has. Its events come back as JSON lines: the answer is the last agent message."""
+    def run(system: str, prompt: str, schema: dict, model: str, effort: str, seconds: float) -> core.Answer:
+        import tempfile
+        with tempfile.TemporaryDirectory(prefix="foreman-review-") as empty:
+            schema_file = os.path.join(empty, "schema.json")
+            with open(schema_file, "w", encoding="utf-8") as fh:
+                json.dump(_strict(schema or {}), fh)
+            work = os.path.join(empty, "work")
+            os.mkdir(work)
+            argv = [shutil.which("codex", path=env.get("PATH")) or "codex", "exec", "--ephemeral", "--ignore-user-config",
+                    "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", "--json",
+                    "--output-schema", schema_file]
+            if model:
+                argv += ["--model", model]
+            if effort:
+                argv += ["-c", "model_reasoning_effort=%s" % effort]
+            argv.append("-")  # the prompt comes from standard input
+            # `codex exec` has no system prompt of its own: the reviewer's rules go first in the one prompt.
+            full = "%s\n\n%s" % (system, prompt) if system else prompt
+            code, out, err = core.run_session(argv, full, seconds, env, cwd=work)
+        text, failure = "", ""
+        for line in out.splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            kind, item = event.get("type"), event.get("item")
+            if kind == "item.completed" and isinstance(item, dict) and item.get("type") == "agent_message":
+                text = item.get("text") if isinstance(item.get("text"), str) else text
+            elif kind in ("error", "turn.failed"):
+                failure = _event_message(event) or failure
+        if failure or (code != 0 and not text):
+            reason = failure or err or out
+            status = _STATUS.search(reason)
+            raise RuntimeError("Codex could not answer%s: %s" % (
+                " (%s)" % status.group(1) if status else "", _short(reason) or "exit code %d" % code))
+        try:
+            parsed = json.loads(text)
+        except ValueError:
+            parsed = None
+        # Codex does not say which model answered: the review then names the one asked for, or none.
+        return core.Answer(parsed=parsed if isinstance(parsed, dict) else None, text=text)
+    return run
+
+
+def _model(data: dict) -> str:
+    model = data.get("model") if isinstance(data, dict) else None
+    return model if isinstance(model, str) else ""
+
+
+def host(env=None, data=None) -> core.Host:
     env = os.environ if env is None else env
+    data = data if isinstance(data, dict) else {}
     roots = dict.fromkeys(r for r in (ROOT, env.get("PLUGIN_ROOT")) if r)
+
+    def session() -> core.Session:
+        # The hook input names the session's model; Codex does not give a hook the reasoning effort, so the
+        # reviewer's default is not raised a level.
+        return core.Session(model=_model(data))
+
     # Never attended (the module's docstring says why): allowing a finding is answered before core is asked.
     return core.Host(
         name=NAME, label="Codex", person=lambda sub: "foreman " + sub, program_dirs=_program_dirs(roots),
         cli=CLI, switches_off=_switches_off, is_config=_is_config, config_off=_config_off,
+        fresh_session=_fresh_session(env), efforts=EFFORTS, session=session,
     )
 
 
@@ -216,8 +315,17 @@ def _pre_tool_answer(decision: Optional[dict]) -> Optional[dict]:
 
 
 # The person's commands, only as these exact one-line prompts; anything else is a prompt for the model.
-_PERSON_COMMAND = re.compile(r"[ \t]*/?foreman(?:[ \t]+(?:status(?:[ \t]+\S+)?|allow(?:[ \t]+\S+)?|help))?[ \t]*",
-                             re.I)
+# `review` takes one target and `--fresh`, in either order. `reviewer` takes `default`, an effort, or a model name
+# with an optional effort: a lone word has to look like a model name (a dash, dot, digit...), so that
+# "foreman reviewer please look" and "foreman reviewer is slow" still reach the model.
+_EFFORT_WORD = "(?:%s)" % "|".join(EFFORTS)
+_MODEL_WORD = r"[A-Za-z0-9][A-Za-z0-9._:/@#+-]{0,119}"
+_MODEL_LIKE = r"(?=[^\s]*[-._:/@0-9])" + _MODEL_WORD
+_PERSON_COMMAND = re.compile(
+    r"[ \t]*/?foreman(?:[ \t]+(?:status(?:[ \t]+\S+)?|allow(?:[ \t]+\S+)?|help"
+    r"|review(?:[ \t]+--fresh(?:[ \t]+[^\s-]\S*)?|[ \t]+[^\s-]\S*(?:[ \t]+--fresh)?)?"
+    r"|reviewer(?:[ \t]+(?:default|%s|%s(?:[ \t]+%s)?))?))?[ \t]*" % (_EFFORT_WORD, _MODEL_LIKE, _EFFORT_WORD),
+    re.I)
 _ALLOW_ID = re.compile(r"[ \t]*/?foreman[ \t]+allow[ \t]+\S+[ \t]*", re.I)
 NO_ALLOW = ("Foreman: allowing a finding is not available in Codex yet. Nothing Codex tells its hooks was shown to "
             "tell your own prompt in an interactive session from a prompt the agent writes for a subagent or a "
@@ -241,7 +349,7 @@ def person_reply(h: core.Host, prompt, cwd: str = "") -> Optional[str]:
 
 def answer(data: dict, env=None) -> Optional[dict]:
     """What Codex should read back for this hook input, or None for nothing (the call goes on)."""
-    h = host(env)
+    h = host(env, data)
     event = data.get("hook_event_name")
     cwd, session, turn = _text(data.get("cwd")), _text(data.get("session_id")), _text(data.get("turn_id"))
     if event == "PreToolUse":

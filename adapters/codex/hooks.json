@@ -11,7 +11,7 @@
     "UserPromptSubmit": [
       {
         "hooks": [
-          {"type": "command", "command": "python3 -I \"/path/to/foreman/adapters/hook.py\" codex || exit 1", "timeout": 70}
+          {"type": "command", "command": "python3 -I \"/path/to/foreman/adapters/hook.py\" codex || exit 1", "timeout": 600}
         ]
       }
     ],
