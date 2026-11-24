@@ -24,7 +24,9 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK = join(HERE, "..", "hook.py");
 const TIMEOUT_MS = 30_000; // neutral.py: no answer within 30 seconds is no answer (the gate's own budget is 18)
-export const COMMAND_TIMEOUT_MS = 600_000; // /foreman review waits for a model: neutral.py gives a `command` ten minutes
+// /foreman review waits for a model (seven minutes at most), and /foreman merge then for gh (three): neutral.py
+// gives a `command` twelve minutes where it can merge, so Foreman is never stopped while gh may still be merging
+export const COMMAND_TIMEOUT_MS = 720_000;
 const SHELL_TOOLS =new Set(["bash", "powershell"]);
 const READ_TOOLS = new Set(["read", "grep", "find", "ls"]);
 const PATH_KEYS = ["path", "file_path", "filePath", "file"];
@@ -300,7 +302,7 @@ export default function foreman(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("foreman", {
-		description: "Foreman: the board, verdict [pr|branch], pipeline, prs, issues, use, status, allow [id], review, reviewer, help",
+		description: "Foreman: the board, verdict [pr|branch], merge <pr>, reject <pr>, pipeline, prs, issues, use, status, allow [id], review, reviewer, help",
 		handler: async (args, ctx) => {
 			// the review starts a session of pi and waits for it: ten minutes, not thirty seconds
 			const request: Request = {

@@ -38,6 +38,7 @@ OpenCode 2.3.2); each harness's own README says exactly what was seen, what was 
 | A turn that left one behind is sent back once | `Stop` | `Stop` | `agent_before_settle` | `experimental.idle` |
 | Your commands, no model turn | `/foreman:status` | `foreman status` as a prompt | `/foreman status` | `/foreman status` (TUI, apps) |
 | The board (`/foreman`, `verdict`, `pipeline`, `prs`, `issues`, `use`) | no | no | yes | yes, as an error notice |
+| Merge and reject with reasons (`/foreman merge`, `reject`) | no | no | yes, confirmed in pi's selector | not yet |
 | Allowing a marked finding | typed in an interactive session | not available yet | at pi's interface | approved in OpenCode's permission prompt |
 | When Foreman must ask you | the permission prompt | refused with the reason | pi's dialog | the permission prompt |
 | With nobody attending | refused | refused | refused | refused |
@@ -55,11 +56,33 @@ issues they close, each change's stages. With it come `verdict [pr|branch]`, `pi
 context (`foreman_hosts/standin.py`). When a command needs you to choose (which repository), Foreman's program
 cannot ask, because it answers one request and ends: it answers with the question, the harness's extension shows it
 in its own dialog and sends the command again with your pick (`neutral.py`, "question"). pi has that dialog;
-OpenCode's plugin does not yet, so there the command prints the list and what to type. Seen on pi 1.5.0 in a real
-session without a model turn (`pi -p "/foreman"`, `verdict`, `pipeline`, `use`, on a repository without a GitHub
-remote); pi's selector was run in the tests and not yet seen in a session, and the board with pull requests is
-tested in the Hermes plugin's own tests, not through pi or OpenCode. Merge
-and reject with reasons are only in Foreman on Hermes Agent so far; Claude Code and Codex have no board.
+OpenCode's plugin does not yet, so there the command prints the list and what to type. Seen on pi 1.5.0 in real
+sessions: without a model turn (`pi -p "/foreman"`, `verdict`, `pipeline`, `use`), on a repository without a GitHub
+remote and on one with ten open pull requests. Not yet seen in OpenCode's TUI. Claude Code and Codex have no board.
+
+## Merge and reject, on pi
+
+`/foreman merge <pr>` and `/foreman reject <pr> [--close] [note]` are the board's own commands too, and they write
+to GitHub as you. What Hermes gives the board for that is its terminal tool behind its approval; here it is
+Foreman's own `gh` process (no shell, gh's own login, only `gh pr merge`, `gh pr comment` and `gh pr close`),
+started only for a command you typed with you at the session. With nobody attending they do nothing, whatever the
+command says; the agent's own `gh pr merge` stays refused by the gate, and so does a nested harness started from
+the agent's shell to type `/foreman merge`.
+
+A merge goes as in Hermes: the verdict must be CLEAN and GitHub must call the pull request mergeable (neither can
+be overridden); then the review, by a fresh session that did not write the code (the one `/foreman review` uses,
+so a pull request already reviewed is not sent to a model again), whose verified blocking findings refuse the
+merge; then you confirm in the harness's dialog, and GitHub merges exactly the commit Foreman inspected
+(`--match-head-commit`) or nothing. Because Foreman's program answers one request and ends, the command runs twice,
+once to ask and once with your answer: the second run computes the verdict again and reads the stored review (a
+review that failed on the first run is tried once more on the second, which can take minutes again), and
+your answer counts only if the question is still the same one (the same commit, the same CI state, the same review
+notes). So each merge leaves its gate, review and "waiting for your decision" lines twice in `/foreman pipeline`.
+
+Seen on pi 1.5.0 in its terminal UI, on throwaway pull requests of the demo repository: `/foreman merge 19` reviewed
+it, asked in pi's selector with the commit and the command it would run, and merged it by squash; `/foreman reject
+20 --close <note>` asked first (closing the selector with Escape posted nothing), then posted the reasons signed
+"from pi" and closed it; with `-p` both answered "nobody is attending" and did nothing. OpenCode has neither yet.
 
 ## The review in the four
 

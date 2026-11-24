@@ -175,7 +175,7 @@ class TheExtensionsReview(PiCase):
             fh.write("#!/bin/sh\ncat >> '%s'\necho >> '%s'\necho '{\"reply\": \"ok\"}'\n" % (record, record))
         os.chmod(recorder, 0o755)
         out = self.drive("review", FAKE_PYTHON=recorder)
-        self.assertEqual(out["timeout_ms"], 600000)
+        self.assertEqual(out["timeout_ms"], 720000)  # the review's seven minutes and a merge's three, with room
         self.assertEqual(out["session"], [{"model": "p1/m-1", "effort": "medium"}, {"model": "bare"}, {}, {}])
         with open(record, encoding="utf-8") as fh:
             requests = [json.loads(line) for line in fh.read().split("\n") if line.strip()]

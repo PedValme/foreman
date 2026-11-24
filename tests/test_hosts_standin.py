@@ -44,13 +44,13 @@ class StandinCase(GitRepoCase):
 class WhatEachHarnessAnswers(StandinCase):
     def test_pi_and_opencode_have_the_board_and_the_others_do_not(self):
         from foreman_hosts import claude_code, codex
-        for module in (pi, opencode):
-            self.assertEqual(module.host({}).board, core.BOARD_READS)
+        self.assertEqual(pi.host({}).board, core.BOARD_READS + core.BOARD_WRITES)
+        self.assertEqual(opencode.host({}).board, core.BOARD_READS)  # no merge or reject there yet
         for module in (claude_code, codex):
             self.assertEqual(module.host({}).board, ())
 
     def test_every_subcommand_a_harness_lists_is_the_boards_own_and_has_a_help_line(self):
-        for name in core.BOARD_READS:
+        for name in core.BOARD_READS + core.BOARD_WRITES:
             self.assertIn(name, board.SUBCOMMANDS)
             self.assertIn(name, standin.DOCS)
 
@@ -58,9 +58,10 @@ class WhatEachHarnessAnswers(StandinCase):
         for module in (pi, opencode):
             text = self.reply("help", module)
             lines = [line.split()[1] for line in text.splitlines() if line.startswith("  /foreman ")]
-            self.assertEqual(lines[:len(core.BOARD_READS)], list(core.BOARD_READS))
+            offered = list(module.host({}).board)
+            self.assertEqual(lines[:len(offered)], offered)
             self.assertIn("status", lines)
-            self.assertNotIn("merge", lines)
+            self.assertEqual("merge" in lines, module is pi)
             self.assertIn("GitHub CLI", text)
 
     def test_a_harness_without_the_board_answers_as_before(self):
@@ -114,11 +115,10 @@ class TheCommandsThatOnlyRead(StandinCase):
         # the pin is this conversation's: another session still reads its own directory
         self.assertEqual(repository(self.reply("status", session="s-2")), "repo")
 
-    def test_the_writes_are_not_offered_yet(self):
-        for module in (pi, opencode):
-            for name in ("merge 7", "reject 7"):
-                text = self.reply(name, module, attended=True)
-                self.assertIn("is not available in %s yet" % module.host({}).label, text)
+    def test_the_writes_are_offered_only_where_the_harness_lists_them(self):
+        for name in ("merge 7", "reject 7"):  # OpenCode does not list them yet (tests/test_hosts_standin_writes.py)
+            text = self.reply(name, opencode, attended=True)
+            self.assertIn("is not available in OpenCode yet", text)
 
 
 class AQuestionForThePerson(StandinCase):

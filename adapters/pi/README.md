@@ -63,12 +63,23 @@ Each of these was seen in a real session on pi 1.5.0 (macOS, the default model, 
   pipeline`, `/foreman prs`, `/foreman issues` and `/foreman use [path|n]`, which pins the repository for this pi
   session (`/foreman status` and `/foreman review` then read the pinned one). `/foreman use` alone asks you which
   repository in pi's own selector; with nobody at the interface it prints the list and what to type. Seen on pi
-  1.5.0 with `-p` and no model turn, on a repository without a GitHub remote: the board, `verdict`, `pipeline`,
-  `prs` ("GitHub is not available here"), `use` and `use .`. The selector was run in the tests and not yet seen in
-  a session; the board with pull requests is tested in the Hermes plugin's own tests, not through pi.
+  1.5.0 with `-p` and no model turn: the board, `verdict`, `pipeline`, `prs`, `use` and `use .` on a repository
+  without a GitHub remote ("GitHub is not available here"), and the board and `verdict <pr>` on one with ten open
+  pull requests. `/foreman use` alone in the selector was run in the tests, not seen in a session.
+- **Merge**, `/foreman merge <pr> [--merge|--rebase]`: only for you at pi's interface. The verdict must be CLEAN and
+  GitHub must call it mergeable; then a fresh pi session that did not write the code reviews that exact commit
+  (the stored review when `/foreman review <pr>` already did), and a verified blocking finding refuses the merge;
+  then pi's selector asks you, naming the repository, the commit and the command; then Foreman's own `gh` merges
+  that commit or nothing (`--match-head-commit`). `--yes` skips the selector, never the verdict or the review, and
+  does nothing with nobody attending. Seen in pi's terminal UI on a throwaway pull request: reviewed (PASS, with
+  who reviewed in plain words), asked, merged by squash; `pi -p "/foreman merge 19 --yes"` answered "nobody is
+  attending" and merged nothing.
+- **Reject**, `/foreman reject <pr> [--close] [note]`: posts the verdict's reasons and your note on the pull request
+  as a comment signed "from pi"; `--close` asks you first (post and close, post only, or cancel). Seen in pi's
+  terminal UI: Escape in the selector posted nothing; the second time the comment was posted and the pull request
+  closed. With `-p`, nothing is posted.
 
-What it does not do yet: the review when someone asks to merge and on every turn (it runs when you ask), merge and
-reject with reasons (Foreman on Hermes Agent has them).
+What it does not do yet: the review on every turn (it runs when you ask, and before a merge).
 
 ## Limits to know
 
@@ -95,7 +106,8 @@ reject with reasons (Foreman on Hermes Agent has them).
   shows its error each time.
 - Foreman's extension and state are files. It refuses what names them (the clone's `adapters/` and `plugin/`,
   `~/.foreman`, `adapters/hook.py pi` run by hand), `pi remove` of Foreman, `pi config` (pi's screen that switches
-  extensions off), a nested `pi` given `/foreman allow`, and a write to pi's settings (`~/.pi/agent/settings.json`,
+  extensions off), a nested `pi` given `/foreman allow`, `/foreman merge` or `/foreman reject`, and a write to
+  pi's settings (`~/.pi/agent/settings.json`,
   `.pi/settings.json`, `$PI_CODING_AGENT_DIR/settings.json`) that drops Foreman from them or excludes it. That
   stops the plain attempt, not a disguised one. Loaded with `-e`, Foreman is in no settings file: the agent's way to
   lose it is to start another pi without it, which does not change your session.
@@ -107,8 +119,15 @@ reject with reasons (Foreman on Hermes Agent has them).
 - Paths are read as pi's own tools read them (a leading `@` dropped, `~/` expanded, relative to the session's
   directory).
 - "A person is at the interface" is pi's `ctx.hasUI`: true in the terminal UI and in RPC mode, false in `-p` and
-  `--mode json`. A program driving pi's RPC mode counts as a person; the guard above, not this flag, is what keeps
-  the agent's own shell from `/foreman allow`.
+  `--mode json`. A program driving pi's RPC mode counts as a person, for `/foreman allow` and for `/foreman merge`
+  and its selector alike; the guard above, not this flag, is what keeps the agent's own shell from them.
+- **A merge runs the command twice**, once to ask you and once with your answer (Foreman's program answers one
+  request and ends). The second run checks everything again and your answer counts only for the same question, so
+  a pull request that got a new commit or a new CI state while the selector was open is asked again (at most
+  three times). `/foreman pipeline` shows that merge's gate, review and "waiting for your decision" lines twice.
+  A review that could not run on the first run is tried once more on the second (minutes again); if it then
+  answers, you are asked the new question. The selector shows the review's notes and "could not run"; its verdict
+  line and who reviewed come with the reply, after the merge (`/foreman review <pr>` shows them before).
 - pi gives no id for one run of the agent, so Foreman starts a run at `before_agent_start` (once per prompt; a
   continuation does not fire it) and sends the agent back at most once until the next prompt.
 - pi runs each `bash` call in the session's directory: a `cd` does not carry to the next call, and Foreman inspects
