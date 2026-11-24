@@ -209,7 +209,7 @@ class Patches(NeutralCase):
         self.assertIn("] tests/test_new.py", inside["message"])          # found in the repository the harness is in
         outside = self.patch(body, cwd=elsewhere)
         self.assertEqual(outside["action"], core.BLOCK)
-        self.assertIn(os.path.join("elsewhere", "tests", "test_new.py"), outside["message"])  # ...not in this process's
+        self.assertIn("elsewhere/tests/test_new.py", outside["message"].replace("\\", "/"))  # ...not this process's
         self.assertEqual(os.getcwd(), before)
 
     def test_a_patch_cannot_reach_foremans_state_or_switch_it_off(self):
