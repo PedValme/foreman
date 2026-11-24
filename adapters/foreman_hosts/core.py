@@ -82,6 +82,9 @@ class Host:
     fresh_session: Optional[Callable[..., "Answer"]] = None
     efforts: tuple = ()                              # the harness's effort levels, lowest first; () when it has none
     session: Callable[[], Session] = _no_session     # the model and effort of the session that asked
+    # One sentence every review in this harness carries under its "Reviewer:" line: what its reviewer's session can
+    # still do or see that the others' cannot (a limit the harness leaves no way to close). "" when there is none.
+    reviewer_caveat: str = ""
 
 
 HOSTS = tuple(MODULES)  # what `adapters/hook.py <host>` accepts
