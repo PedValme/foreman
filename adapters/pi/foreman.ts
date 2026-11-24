@@ -17,7 +17,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -31,7 +32,7 @@ type Request = Record<string, unknown>;
 type Answer = { action?: string; message?: string; reply?: string };
 
 /** Foreman's answer, or an Error saying why there is none (no Python, a failed adapter, no JSON). */
-export function ask(request: Request, cwd?: string): Promise<Answer | Error> {
+export function ask(request: Request, cwd?: string, timeoutMs: number = TIMEOUT_MS): Promise<Answer | Error> {
 	const python = process.env.FOREMAN_PYTHON || "python3";
 	return new Promise((resolve) => {
 		let out = "";
@@ -48,7 +49,7 @@ export function ask(request: Request, cwd?: string): Promise<Answer | Error> {
 			child = spawn(python, ["-I", HOOK, "pi"], {
 				cwd: cwd && existsSync(cwd) ? cwd : HERE,
 				stdio: ["pipe", "pipe", "pipe"],
-				timeout: TIMEOUT_MS,
+				timeout: timeoutMs,
 				windowsHide: true,
 			});
 		} catch (e) {
@@ -60,7 +61,8 @@ export function ask(request: Request, cwd?: string): Promise<Answer | Error> {
 		child.on("error", (e: Error) => finish(new Error(`cannot run ${python}: ${e.message}`)));
 		child.on("close", (code: number | null) => {
 			if (code !== 0) {
-				finish(new Error(err.trim() || `${python} exited with code ${code}`));
+				const why = code === null ? `no answer within ${timeoutMs / 1000} seconds` : `${python} exited with code ${code}`;
+				finish(new Error(code === null ? why : err.trim() || why));
 				return;
 			}
 			try {
@@ -75,9 +77,27 @@ export function ask(request: Request, cwd?: string): Promise<Answer | Error> {
 	});
 }
 
-/** The command may be one Foreman inspects. Used only when Python could not answer: never a decision on its own. */
+/** The gate's own quick filter (`gate._quick`, copied exactly): a git or gh word and a commit, push, pr or config
+ * word, anywhere. Used only when Python could not answer: never a decision on its own. */
 export function looksGated(command: string): boolean {
-	return /\bgit\b[\s\S]*\b(commit|push)\b|\bgh\b[\s\S]*\bpr\b[\s\S]*\b(create|merge)\b/i.test(command);
+	return /\b(?:git|gh)(?:\.exe)?\b/i.test(command) && /\b(?:commit|push|pr|config)\b/i.test(command);
+}
+
+/** The file a pi tool will touch, resolved as pi's own tools do (`resolveToCwd`): a leading `@` dropped, `~` and
+ * `~/` expanded, a `file://` URL read as a path, the rest resolved against the session's directory. */
+export function resolvePiPath(path: string, cwd: string): string {
+	let p = path.startsWith("@") ? path.slice(1) : path;
+	if (p === "~") {
+		p = homedir();
+	} else if (p.startsWith("~/") || (process.platform === "win32" && p.startsWith("~\\"))) {
+		p = join(homedir(), p.slice(2));
+	} else if (/^file:\/\//.test(p)) {
+		p = fileURLToPath(p);
+	}
+	if (!p) {
+		return "";
+	}
+	return isAbsolute(p) ? resolve(p) : resolve(cwd || process.cwd(), p);
 }
 
 function text(value: unknown): string {
@@ -86,11 +106,12 @@ function text(value: unknown): string {
 
 /** The requests one tool call becomes: none (not Foreman's business), or one per change it makes. */
 export function toolRequests(toolName: string, input: Record<string, unknown>, base: Request): Request[] {
+	const where = (value: unknown) => resolvePiPath(text(value), text(base.cwd));
 	if (SHELL_TOOLS.has(toolName)) {
 		return [{ ...base, event: "shell", command: text(input.command) }];
 	}
 	if (toolName === "write") {
-		return [{ ...base, event: "write", path: text(input.path), content: text(input.content) }];
+		return [{ ...base, event: "write", path: where(input.path), content: text(input.content) }];
 	}
 	if (toolName === "edit") {
 		const edits: unknown[] = Array.isArray(input.edits) ? [...input.edits] : [];
@@ -99,8 +120,8 @@ export function toolRequests(toolName: string, input: Record<string, unknown>, b
 		}
 		const out = edits
 			.filter((e): e is Record<string, unknown> => !!e && typeof e === "object")
-			.map((e) => ({ ...base, event: "write", path: text(input.path), old: text(e.oldText), new: text(e.newText) }));
-		return out.length ? out : [{ ...base, event: "write", path: text(input.path) }];
+			.map((e) => ({ ...base, event: "write", path: where(input.path), old: text(e.oldText), new: text(e.newText) }));
+		return out.length ? out : [{ ...base, event: "write", path: where(input.path) }];
 	}
 	if (READ_TOOLS.has(toolName)) {
 		return [];
@@ -108,7 +129,7 @@ export function toolRequests(toolName: string, input: Record<string, unknown>, b
 	// Another tool (an extension's, an MCP server's): if it names a file, Foreman's own files stay out of its reach.
 	for (const key of PATH_KEYS) {
 		if (typeof input[key] === "string" && input[key]) {
-			return [{ ...base, event: "write", path: input[key] }];
+			return [{ ...base, event: "write", path: where(input[key]) }];
 		}
 	}
 	return [];
@@ -121,7 +142,8 @@ function cannotRun(error: Error): string {
 function show(ctx: ExtensionContext, message: string, level: "info" | "error"): void {
 	if (ctx.hasUI) {
 		ctx.ui.notify(message, level);
-	} else if (level === "error") {
+	} else if (level === "error" || ctx.mode !== "print") {
+		// `--mode json` and RPC own standard output (their event stream): Foreman never writes into it
 		process.stderr.write(`${message}\n`);
 	} else {
 		process.stdout.write(`${message}\n`);
@@ -140,6 +162,7 @@ async function personDecides(ctx: ExtensionContext, message: string) {
 export default function foreman(pi: ExtensionAPI) {
 	// pi starts a fresh copy of the extension for each session (startup, /new, /resume, /fork, /reload).
 	let errorShown = false;
+	let continued = false; // this run was already sent back once
 	const failed = (ctx: ExtensionContext, what: string, error: Error) => {
 		if (!errorShown) {
 			errorShown = true; // once per session: the person sees it, the agent is not held up by Foreman's fault
@@ -179,6 +202,7 @@ export default function foreman(pi: ExtensionAPI) {
 
 	// A prompt starts a run (before_agent_start fires once per prompt; a continuation asked below does not fire it).
 	pi.on("before_agent_start", async (_event, ctx) => {
+		continued = false;
 		const answer = await ask({ ...base(ctx), event: "turn_start" }, ctx.cwd);
 		if (answer instanceof Error) {
 			failed(ctx, "start this turn", answer);
@@ -186,8 +210,12 @@ export default function foreman(pi: ExtensionAPI) {
 		return undefined;
 	});
 
-	// pi's final actionable boundary. Python counts the nudges: the second time in one run it answers {}.
+	// pi's final actionable boundary. Python counts the nudges (the second time in one run it answers {}); this side
+	// also sends the agent back at most once per run, so a Python side that cannot save its count never loops.
 	pi.on("agent_before_settle", async (event, ctx) => {
+		if (continued) {
+			return undefined;
+		}
 		const answer = await ask({ ...base(ctx), event: "turn_end" }, ctx.cwd);
 		if (answer instanceof Error) {
 			failed(ctx, "check the end of this turn", answer);
@@ -196,6 +224,7 @@ export default function foreman(pi: ExtensionAPI) {
 		if (answer.action !== "continue") {
 			return undefined;
 		}
+		continued = true;
 		return {
 			entries: [
 				...event.entries,

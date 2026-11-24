@@ -177,42 +177,86 @@ class EntryPoint(PiCase):
         self.assertIn("In pi:", json.loads(stdout.getvalue())["reply"])
 
 
-def _node_runs_typescript() -> bool:
+def _node_skip_reason() -> str:
+    """Why the extension's tests cannot run here, or "" when they can."""
     node = shutil.which("node")
     if not node:
-        return False
+        return "no node on the PATH: these tests need node 22.18 or newer (it loads TypeScript as it is)"
     probe = subprocess.run([node, "-e", "import(process.argv[1]).then(() => process.exit(0), () => process.exit(3))",
                             os.path.join(ROOT, "adapters", "pi", "foreman.ts")], capture_output=True, timeout=60)
-    return probe.returncode == 0
+    if probe.returncode == 0:
+        return ""
+    version = subprocess.run([node, "--version"], capture_output=True, timeout=60).stdout.decode().strip()
+    return "node %s cannot load TypeScript: these tests need node 22.18 or newer" % (version or "(unknown version)")
 
 
-@unittest.skipUnless(_node_runs_typescript(), "needs node that loads TypeScript (22.18 or newer)")
+NODE_SKIP = _node_skip_reason()
+# Commands for the quick filter's copy: the TypeScript must answer as `gate._quick` does on each.
+QUICK_COMMANDS = ["git commit -m x", "git push", "gh pr create", "gh pr merge 7", "gh pr edit 3", "gh pr ready 3",
+                  "git config core.hooksPath /dev/null", "GIT.EXE COMMIT", "cd x && git -C y push origin", "ls -la",
+                  "git status", "gh issue list", "echo commit", "github push", "make pr", "git.exe log", "gh-pr",
+                  "pushd x && git log", "git log --pretty=format:%s | grep commit"]
+
+
+@unittest.skipIf(NODE_SKIP, NODE_SKIP)
 class TheExtension(PiCase):
     """The extension's handlers, called as pi calls them, each running the real entry point."""
 
-    def drive(self, scenario):
+    def drive(self, scenario, **env_more):
         home = os.path.join(self.tmp, "home")
         os.makedirs(home, exist_ok=True)
-        env = dict(os.environ, HOME=home, USERPROFILE=home)
+        env = dict(os.environ, HOME=home, USERPROFILE=home, **env_more)
         env.pop("FOREMAN_PYTHON", None)
         r = subprocess.run([shutil.which("node"), os.path.join(ROOT, "tests", "pi_extension_driver.mjs"), self.root,
                             scenario], capture_output=True, env=env, timeout=240)
         self.assertEqual(r.returncode, 0, r.stderr.decode())
         return json.loads(r.stdout.decode())
 
+    def fake_python(self, body):
+        """A stand-in for python3 that ignores its request and runs ``body`` (a POSIX shell script)."""
+        path = os.path.join(self.tmp, "fake-python")
+        with open(path, "w") as fh:
+            fh.write("#!/bin/sh\ncat > /dev/null\n" + body + "\n")
+        os.chmod(path, 0o755)
+        return path
+
+    def test_the_quick_filter_is_the_gates_own(self):
+        out = self.drive("quick", QUICK_COMMANDS=json.dumps(QUICK_COMMANDS))
+        self.assertEqual(dict(zip(QUICK_COMMANDS, out["gated"])),
+                         {c: core.looks_gated(c) for c in QUICK_COMMANDS})
+
+    @unittest.skipIf(os.name == "nt", "the stand-in interpreter is a POSIX shell script")
+    def test_the_extension_sends_the_agent_back_at_most_once_per_run_on_its_own(self):
+        out = self.drive("always-continue",
+                         FAKE_PYTHON=self.fake_python("""echo '{"action": "continue", "message": "undo it"}'"""))
+        self.assertTrue(out["first"]["continue"])
+        self.assertIsNone(out["second"])
+        self.assertTrue(out["next_run"]["continue"])
+
+    @unittest.skipIf(os.name == "nt", "the stand-in interpreter is a POSIX shell script")
+    def test_no_answer_in_time_is_no_answer(self):
+        out = self.drive("timeout", FAKE_PYTHON=self.fake_python("sleep 5; echo '{}'"))
+        self.assertIn("no answer within 0.3 seconds", out["timeout"])
+
     def test_it_registers_what_it_needs_and_gates_the_tools(self):
         self.write("tests/test_cart.py", SKIPPED)
+        self.write(".pi/settings.json", '{"extensions": ["/src/foreman/adapters/pi/foreman.ts"]}')
         self.git("add", "-A")
         out = self.drive("gate")
         self.assertEqual(out["registered"], {"events": ["agent_before_settle", "before_agent_start", "tool_call"],
                                              "commands": ["foreman"]})
-        for key in ("commit", "merge", "powershell_merge", "edit", "legacy_edit", "write", "other_tool_on_state"):
-            self.assertTrue(out[key]["block"], key)
+        for key in ("commit", "merge", "powershell_merge", "edit", "legacy_edit", "write", "other_tool_on_state",
+                    "two_edits", "tilde_state", "at_settings", "at_test"):
+            self.assertTrue((out[key] or {}).get("block"), key)
         self.assertIn("tests/test_cart.py:4", out["commit"]["reason"])
-        for key in ("ordinary_write", "ls", "read"):
+        self.assertIn("own program and state", out["tilde_state"]["reason"])
+        self.assertIn("user's decision", out["at_settings"]["reason"])
+        for key in ("ordinary_write", "ls", "read", "one_harmless_edit"):
             self.assertIsNone(out[key], key)
         self.assertIn("In pi:", out["help"]["printed"])
         self.assertIn("Foreman: BLOCKED", out["status"]["printed"])
+        self.assertEqual(out["help_json"]["printed"], "")  # never mixed into pi's JSON event stream
+        self.assertIn("In pi:", out["help_json"]["stderr"])
 
     def test_a_turn_is_sent_back_once_and_a_turn_that_talked_is_not(self):
         out = self.drive("turn")
@@ -223,6 +267,8 @@ class TheExtension(PiCase):
         self.assertEqual((entry["type"], entry["customType"], entry["display"]), ("custom_message", "foreman", True))
         self.assertIn("tests/test_cart.py", entry["content"])
         self.assertIsNone(out["second"])
+        self.assertIsNone(out["shell_again"])
+        self.assertTrue(out["third"]["continue"])  # the next prompt is a new run: nudged again
 
     def test_ask_goes_to_the_person_and_with_nobody_there_is_refused(self):
         out = self.drive("ask")
@@ -251,7 +297,7 @@ class TheExtension(PiCase):
         self.assertIsNone(out["write"])
         self.assertIsNone(out["settle"])
         self.assertEqual(out["help"]["printed"], "")  # the person's command shows its error instead
-        self.assertIn("Foreman could not run: cannot run", out["stderr"])
+        self.assertIn("Foreman could not run: cannot run", out["help"]["stderr"])
         # a failed check reaches the person once per session, not on every call
         self.assertEqual(out["stderr"].count("not checking this session"), 1, out["stderr"])
         self.assertIn("could not inspect a bash call", out["stderr"])

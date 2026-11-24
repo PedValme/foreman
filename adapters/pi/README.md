@@ -35,7 +35,8 @@ Each of these was seen in a real session on pi 1.5.0 (macOS, the default model, 
   that only talked is never sent back. Seen: a skip copied in with `cp` from the shell was sent back once; the agent
   removed it and fixed the code, and the second settle passed.
 - **Your command**, `/foreman status [path]`, `/foreman allow [id]`, `/foreman help`, answered by the extension
-  with no model turn, also in `pi -p`. Allowing a finding needs you at pi's interface (its terminal UI, or a client
+  with no model turn, also in `pi -p` (on standard output there; with `--mode json`, on standard error, so pi's
+  event stream stays clean). Allowing a finding needs you at pi's interface (its terminal UI, or a client
   on its RPC mode): with `-p` or `--mode json` it does nothing. Seen: `pi -p "/foreman allow 328d40c6"` answered
   "nobody is attending"; the same command typed in pi's terminal UI allowed it, and the agent's next commit passed.
 - **When Foreman needs you** (the gate could not inspect a commit, for example its directory is gone), pi asks you
@@ -48,9 +49,9 @@ has them).
 
 - The gate runs on the agent's own machine. The independent control is still the required check in CI
   (`examples/foreman-check.yml`).
-- **When Python cannot answer** (no `python3`, an error, no answer within 30 seconds): a shell command Foreman
-  would inspect (`git commit`, `git push`, `gh pr create`, `gh pr merge`) goes to you, or is refused with nobody
-  there; it never passes unseen. Every other call goes on, and pi shows the error once per session ("Foreman could
+- **When Python cannot answer** (no `python3`, an error, no answer within 30 seconds): a shell command that names
+  `git` or `gh` together with `commit`, `push`, `pr` or `config`, anywhere in it (the gate's own quick filter),
+  goes to you, or is refused with nobody there; it never passes unseen. Every other call goes on, and pi shows the error once per session ("Foreman could
   not …: until this is fixed Foreman is not checking this session"); in `-p` it goes to standard error. `/foreman`
   shows its error each time.
 - Foreman's extension and state are files. It refuses what names them (the clone's `adapters/` and `plugin/`,
@@ -59,6 +60,13 @@ has them).
   `.pi/settings.json`, `$PI_CODING_AGENT_DIR/settings.json`) that drops Foreman from them or excludes it. That
   stops the plain attempt, not a disguised one. Loaded with `-e`, Foreman is in no settings file: the agent's way to
   lose it is to start another pi without it, which does not change your session.
+- Only pi's own shell tools (`bash`, `powershell`) reach the gate. A tool from another extension or an MCP server
+  that runs commands is not inspected (one that names a file meets only the guard around Foreman's own files),
+  and a pi started with `--no-extensions` (`-ne`; a subagent launcher may start one so) runs without Foreman.
+- Keep `foreman.ts` inside its clone: it finds `hook.py` and the gate from its own location (`../hook.py`), so a
+  copy of the file alone in pi's extensions folder cannot run.
+- Paths are read as pi's own tools read them (a leading `@` dropped, `~/` expanded, relative to the session's
+  directory).
 - "A person is at the interface" is pi's `ctx.hasUI`: true in the terminal UI and in RPC mode, false in `-p` and
   `--mode json`. A program driving pi's RPC mode counts as a person; the guard above, not this flag, is what keeps
   the agent's own shell from `/foreman allow`.
