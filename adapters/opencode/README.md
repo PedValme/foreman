@@ -7,10 +7,24 @@ request (`../foreman_hosts/neutral.py`) and does what the answer says. OpenCode'
 
 Needs Python 3.9 or newer as `python3` on the PATH OpenCode runs with, and git. No npm package, no build step.
 
-## Try it from a clone
+## Install it
 
-Use a clone you are not working in (Foreman keeps the agent out of the clone's `adapters/` and `plugin/`). In the
-project where you want Foreman, link the plugin into OpenCode's project plugin folder:
+Use a clone you are not working in (Foreman keeps the agent out of the clone's `adapters/` and `plugin/`).
+
+**For real use, link it into your user plugin folder**, so it covers every project and every worktree a session
+moves to:
+
+```
+mkdir -p ~/.config/opencode/plugins
+ln -s /path/to/foreman/adapters/opencode/foreman.ts ~/.config/opencode/plugins/foreman.ts
+```
+
+OpenCode loads every `.ts` file in the `plugins` folder of its configuration directories, the user's included. This
+form was read in OpenCode's documentation and source (2.3.2), not seen running: the trials below never wrote to a
+user's OpenCode configuration.
+
+**To try it in one project**, link it into that project's plugin folder instead (this is what the trials below
+used):
 
 ```
 mkdir -p .opencode/plugins
@@ -18,9 +32,9 @@ ln -s /path/to/foreman/adapters/opencode/foreman.ts .opencode/plugins/foreman.ts
 opencode
 ```
 
-OpenCode loads every `.ts` file in `.opencode/plugins` of the project. A plugin named in `opencode.json`'s `"plugins"`
-must be a folder, not a file, so the link is the simple way. The plugin finds `hook.py` through the link, next to its
-real file. To keep your own global plugins out of a trial, add to the project's `opencode.json`:
+A plugin named in `opencode.json`'s `"plugins"` must be a folder, not a file, so a link is the simple way. The
+plugin finds `hook.py` through the link, next to its real file. To keep your own global plugins out of a trial, add
+to the project's `opencode.json`:
 
 ```
 { "plugins": ["-*", "opencode.*", "foreman"] }
@@ -56,12 +70,22 @@ of `examples/cart` with the link above:
 
 ## Limits to know
 
-- **The end-of-turn nudge uses OpenCode's `experimental.idle` hook.** OpenCode marks it experimental: its name and
-  shape may change in a later version.
+- **The project-level link is for trying it.** It is an untracked file: `git clean -fdx`, `git stash -u` or a
+  disguised removal takes it away and Foreman with it (the dialect refuses the plain `rm`/`mv` of `.opencode` or its
+  plugin folder, not those), and OpenCode watches its plugin folders, so that may unload Foreman mid-session (not
+  seen). A session that moves to a git worktree (`opencode run --worktree`, the model's own `worktree_create` and
+  `session_move` tools) lands where OpenCode's configuration search does not find the project's `.opencode`, so its
+  commits there are not gated (read in the source, not seen). The user-level link has neither limit.
+- **The end-of-turn nudge uses OpenCode's `experimental.idle` hook.** OpenCode marks it experimental. If a later
+  version renames or drops it, the plugin still loads and the gate still works, but the nudge stops without notice.
 - **Nobody attending means refused.** `opencode run` rejects every permission question, so Foreman's ask is refused
-  there. `opencode run --auto` approves every question itself, within milliseconds (seen); Foreman counts a yes that
-  came sooner than one second after its question as nobody attending and refuses the call. A person who answers in
-  under a second is refused too and can run the command again.
+  there. An auto-approve mode answers every question itself within milliseconds: `opencode run --auto` (seen), the
+  TUI's autoaccept permissions and the app's auto-approve (read, not seen). Foreman counts a yes that came sooner than
+  one second after its question as nobody attending and refuses the call. What this is not: a yes that an automatic
+  mode gives late (a question approved when the person switches back to that session, the app's retries) is not
+  detected and passes; and in an autoaccept mode a person typing `/foreman allow <id>` is refused too, because that
+  yes also arrives in milliseconds (turn autoaccept off to allow a finding). A person who answers in under a second
+  is refused and can run the command again.
 - **OpenCode's permission prompt shows "Call tool foreman", not Foreman's message** (2.3.2 renders no text for a
   plugin's own question). The model gets the message when the call is refused; `/foreman status` shows the verdict.
 - **`/foreman` only works where OpenCode runs commands** (its TUI and apps). `opencode run "/foreman status"` sends
@@ -71,15 +95,16 @@ of `examples/cart` with the link above:
   nobody there), every other call runs, and the error is shown once per session, when the run ends, as a failed
   session hook.
 - **Turns.** OpenCode gives a session id (`ses_…`) and an id to each message (`msg_…`), but none to one run of the
-  agent. The plugin counts a run from your prompt (its message id); OpenCode's own input to the agent does not start
-  a new one.
+  agent. The plugin counts a run from your prompt to a session at rest (its message id); a message you send while
+  the agent works, and OpenCode's own input to the agent, do not start a new one.
 - **The agent's shell starts in the session's directory each time.** A `cd` in one call does not carry to the next,
   and the plugin judges each call in the directory OpenCode runs it in (the `workdir` argument against the session's
   directory).
 - The gate runs on the agent's own machine. The independent control is still the required check in CI
   (`examples/foreman-check.yml`). Foreman's plugin file and state are files: the dialect refuses the plain attempts
-  to remove or rewrite them (`opencode plugin remove foreman`, `"-foreman"` in `opencode.json`, deleting the
-  plugin file, starting a nested OpenCode with `OPENCODE_DISABLE_PROJECT_CONFIG` or another configuration), not a
+  to remove or rewrite them (`opencode plugin remove foreman`, `"-foreman"` or `"-*"` written to `opencode.json`,
+  deleting the plugin file or the project's `.opencode` folder, starting a nested OpenCode with
+  `OPENCODE_DISABLE_PROJECT_CONFIG` or another configuration), not a
   disguised one.
 - Not seen yet: Windows; OpenCode's background service (all runs above used `--standalone`); OpenCode's desktop and
   web apps.

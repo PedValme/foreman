@@ -43,8 +43,24 @@ class Guards(OpenCodeCase):
                         "echo '{\"plugins\": [\"-foreman\"]}' > opencode.json",
                         "rm .opencode/plugins/foreman.ts", "rm ~/.config/opencode/plugins/foreman.ts",
                         "OPENCODE_DISABLE_PROJECT_CONFIG=1 opencode run 'commit it'",
-                        "env OPENCODE_CONFIG_CONTENT='{}' opencode run x"):
+                        "env OPENCODE_CONFIG_CONTENT='{}' opencode run x",
+                        # the project's plugin link, removed with its folder
+                        "rm -rf .opencode", "rm -rf ./.opencode/", "rm .opencode/plugins/mine.ts",
+                        "mv .opencode /tmp/x", "unlink .opencode/plugin/f.ts",
+                        # a plugin-removing entry written to the configuration without naming Foreman
+                        "echo '{\"plugins\": [\"-*\"]}' > opencode.json",
+                        "jq '.plugins += [\"-*\"]' opencode.json > t && mv t opencode.json",
+                        "printf '%s' '{\"plugins\":[\"-*\"]}' | tee .opencode/opencode.jsonc"):
             self.assertEqual(self.ask("shell", command=command).get("action"), "block", command)
+
+    def test_ordinary_work_near_opencodes_files_is_not_refused(self):
+        for command in ("rm -rf .opencode-cache node_modules", "rm -rf build/.opencode.bak", "ls .opencode",
+                        "grep -n '\"-*\"' opencode.json", "jq .plugins opencode.json",
+                        "git commit --allow-empty -m 'drop \"-*\" from opencode.json'",
+                        "echo '{\"model\": \"a/b\"}' > opencode.json",
+                        # a plain copy over the configuration: its content is not in the command (see _switches_off)
+                        "cp opencode.example.json opencode.json"):
+            self.assertNotEqual(self.ask("shell", command=command).get("action"), "block", command)
 
     def test_reading_opencodes_settings_is_ordinary_work(self):
         for command in ("opencode plugin list", "cat opencode.json", "grep foreman .opencode/plugins/foreman.ts",
@@ -194,7 +210,7 @@ class Plugin(OpenCodeCase):
         return json.loads(r.stdout.decode())
 
     def test_block_reaches_the_model_as_the_tools_error(self):
-        out = self.drive("gate", "def test_total():", SKIP + "\ndef test_total():")
+        out = self.drive("gate", "def test_total():", SKIP + "\ndef test_total():", SKIPPED)
         self.assertEqual(out["registered"], ["permission.evaluate", "session.experimental.idle", "session.prompt",
                                              "tool.execute.before"])
         self.assertFalse(out["merge"]["ok"])
@@ -203,6 +219,14 @@ class Plugin(OpenCodeCase):
         self.assertFalse(out["edit"]["ok"])
         self.assertIn("test-skipped", out["edit"]["error"])
         self.assertTrue(out["read"]["ok"])  # reading is never Foreman's to judge
+        self.assertFalse(out["write"]["ok"])
+        self.assertIn("test-skipped", out["write"]["error"])
+        self.assertFalse(out["patch"]["ok"])  # the hunk after a file's own end line is still read
+        self.assertIn("test-skipped", out["patch"]["error"])
+        self.assertTrue(out["plainPatch"]["ok"])
+        self.assertTrue(out["misspelt"]["ok"])  # Foreman's own failure does not hold the call up...
+        self.assertFalse(out["misspeltIdle"]["ok"])  # ...and the person sees it when the run ends
+        self.assertIn("Foreman could not run", out["misspeltIdle"]["error"])
         self.assertEqual(out["evaluated"]["effect"], "ask")  # a saved "always" never answers Foreman's question
         self.assertEqual(out["evaluated"]["message"], "why")
 
@@ -224,6 +248,21 @@ class Plugin(OpenCodeCase):
         self.assertEqual(len(out["synthetic"]), 1)  # once: the Python side counts, the plugin adds no loop
         self.assertEqual(out["synthetic"][0]["sessionID"], "s1")
         self.assertIn("tests/test_cart.py:4", out["synthetic"][0]["text"])
+
+    def test_a_message_the_person_sends_mid_run_keeps_the_runs_nudge(self):
+        out = self.drive("steer", "tests/test_cart.py", SKIPPED)
+        self.assertTrue(out["shell"]["ok"])
+        self.assertEqual(len(out["synthetic"]), 1)
+        self.assertIn("tests/test_cart.py:4", out["synthetic"][0]["text"])
+
+    def test_the_directory_of_a_shell_call(self):
+        out = self.drive("requests")
+        self.assertEqual(out["relative"], os.path.join(self.root, "sub", "dir"))
+        self.assertEqual(out["home"], os.path.join(self.tmp, "home", "work"))
+        self.assertEqual(out["absolute"], "/srv/x")
+        self.assertEqual(out["none"], self.root)
+        self.assertEqual(out["todo"], [])
+        self.assertEqual([(r["event"], r["path"]) for r in out["mcp"]], [("write", "y.txt")])
 
     def test_a_run_that_only_talked_is_not_sent_back(self):
         self.write("tests/test_cart.py", SKIPPED)  # the person's own work

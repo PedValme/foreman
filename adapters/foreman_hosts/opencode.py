@@ -34,22 +34,39 @@ _CONFIG_FILE = re.compile(r"(?i)(?:^|[/\\\s\"'=])opencode\.jsonc?\b")
 _PLUGIN_DIR = re.compile(r"(?i)(?:\.opencode|opencode)[/\\]plugins?\b")
 _CONFIG_ENV = re.compile(r"\bOPENCODE_(?:DISABLE_PROJECT_CONFIG|CONFIG_PROJECT_DISABLE|CONFIG|CONFIG_DIR|CONFIG_CONTENT)\b")
 _REMOVES = re.compile(r"[\"']-(?:\*|%s)[\"']" % re.escape(PLUGIN_ID))
-_DEFINES = re.compile(r"\bid\s*:\s*[\"']%s[\"']" % re.escape(PLUGIN_ID))
+_REMOVERS = {"rm", "rmdir", "unlink", "mv", "trash", "srm", "shred"}
+# The project's `.opencode` folder itself, or its plugin folder or anything in it.
+_PROJECT_PLUGINS = re.compile(r"(?i)(?:^|/)\.opencode(?:/*$|/plugins?(?:/|$))")
+_DEFINES =re.compile(r"\bid\s*:\s*[\"']%s[\"']" % re.escape(PLUGIN_ID))
 
 
 def _switches_off(command: str) -> bool:
     """`opencode plugin remove foreman`, an OpenCode started with its configuration replaced or the project's
-    skipped, or a command that rewrites OpenCode's configuration or its plugin folder where Foreman is named. Each
-    simple command on its own; one that only reads (`cat`, `grep`) or git (which records a path or a message) is
-    not one."""
-    for prog, words in core.programs(command):
+    skipped, a command that rewrites OpenCode's configuration or its plugin folder where Foreman is named, one that
+    deletes or moves the project's `.opencode` folder or its plugin folder, or a line that writes OpenCode's
+    configuration with an entry removing plugins (`"-*"`). One that only reads (`cat`, `grep`) or git (which records
+    a path or a message) is not one.
+
+    Not judged: a plain copy of another file over the configuration (`cp mine.json opencode.json`), whose content
+    the command does not show; refusing every such copy would block ordinary work on a project's own settings, and
+    the required check in CI stays the independent control."""
+    programs = core.programs(command)
+    writes = False
+    for prog, words in programs:
         text = " ".join(words)
         if prog in CLI and _PLUGIN_OFF.search(text) and _FOREMAN.search(text):
             return True
         if prog == "git" or core.only_reads(prog, words):
             continue
+        writes = True
         if (_CONFIG_FILE.search(text) or _PLUGIN_DIR.search(text)) and _FOREMAN.search(text):
             return True
+        if prog in _REMOVERS and any(_PROJECT_PLUGINS.search(w.replace("\\", "/")) for w in words[1:]):
+            return True  # `rm -rf .opencode`: a plugin linked into the project goes with it
+    # A line that writes OpenCode's configuration with an entry that removes plugins, whatever program writes it
+    # and wherever the entry sits in the line (`jq '.plugins += ["-*"]' opencode.json > t && mv t opencode.json`).
+    if writes and _CONFIG_FILE.search(command or "") and _REMOVES.search(command or ""):
+        return True
     # The variables go before the program (`OPENCODE_DISABLE_PROJECT_CONFIG=1 opencode run …`), where programs()
     # skips them, or through `env`/`export`: judge the line as a whole once it starts OpenCode.
     return bool(_CONFIG_ENV.search(command or "")) and any(prog in CLI for prog, _words in core.programs(command))

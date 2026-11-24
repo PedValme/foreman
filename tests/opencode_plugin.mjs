@@ -8,7 +8,10 @@ import { fileURLToPath } from "node:url"
 
 const [repo, scenario, ...rest] = process.argv.slice(2)
 const here = dirname(fileURLToPath(import.meta.url))
-const plugin = (await import(pathToFileURL(join(here, "..", "adapters", "opencode", "foreman.ts")).href)).default
+const module = await import(pathToFileURL(join(here, "..", "adapters", "opencode", "foreman.ts")).href)
+const plugin = module.default
+const { toolRequests } = module
+let running = false
 
 const hooks = {}
 const commands = {}
@@ -21,6 +24,7 @@ const ctx = {
   session: {
     hook: async (name, fn) => { hooks["session." + name] = fn },
     synthetic: async (input) => { seen.synthetic.push(input) },
+    get: async () => ({ time: running ? { busy: 2000, idle: 1000 } : { busy: 1000, idle: 2000 } }),
   },
   permission: {
     hook: async (name, fn) => { hooks["permission." + name] = fn },
@@ -53,10 +57,36 @@ if (scenario === "gate") {
   out.ls = await tool("shell", { command: "ls" })
   out.edit = await tool("edit", { path: "tests/test_cart.py", oldString: rest[0], newString: rest[1] })
   out.read = await tool("read", { path: join(process.env.HOME, ".foreman", "x") })
+  out.write = await tool("write", { path: "tests/test_cart.py", content: rest[2] })
+  // A file whose own content holds the end line must not hide the hunk after it.
+  out.patch = await tool("patch", { patchText: "*** Begin Patch\n*** Add File: notes.txt\n+*** End Patch\n"
+                                    + "*** Update File: tests/test_cart.py\n@@\n-" + rest[0] + "\n+" + rest[1]
+                                    .split("\n").join("\n+") + "\n*** End Patch\n" })
+  out.plainPatch = await tool("patch", { patchText: "*** Begin Patch\n*** Add File: notes.txt\n+hi\n*** End Patch\n" })
+  // A shell call without a command string (OpenCode's own check refuses it): Foreman cannot answer it, the call
+  // is not held up, and the error reaches the person at the end of the run.
   out.misspelt = await tool("shell", { cmd: "git commit -m x" })
+  out.misspeltIdle = await idle()
   const event = { action: "foreman", effect: "allow", metadata: { message: "why" } }
   await hooks["permission.evaluate"](event)
   out.evaluated = event
+} else if (scenario === "requests") {
+  out.relative = toolRequests("shell", { command: "ls", workdir: "sub/dir" }, repo, "s1", "t1")[0].cwd
+  out.home = toolRequests("shell", { command: "ls", workdir: "~/work" }, repo, "s1", "t1")[0].cwd
+  out.absolute = toolRequests("shell", { command: "ls", workdir: "/srv/x" }, repo, "s1", "t1")[0].cwd
+  out.none = toolRequests("shell", { command: "ls" }, repo, "s1", "t1")[0].cwd
+  out.todo = toolRequests("todowrite", { path: "x" }, repo, "s1", "t1")
+  out.mcp = toolRequests("mcp_writer", { filePath: "y.txt" }, repo, "s1", "t1")
+} else if (scenario === "steer") {
+  await prompt("s1", "m1")
+  out.shell = await tool("shell", { command: "perl -pi -e s/x/y/ " + rest[0] })
+  writeFileSync(join(repo, rest[0]), rest[1])
+  running = true                                             // OpenCode's record: the run is still going
+  await prompt("s1", "m2")                                   // the person writes while the agent works
+  running = false
+  out.first = await idle()
+  out.second = await idle()
+  out.synthetic = seen.synthetic
 } else if (scenario === "ask") {
   const gone = { command: "git commit -m x", workdir: join(repo, "gone") }
   out.unattended = await tool("shell", gone)                 // `opencode run`: OpenCode rejects the question

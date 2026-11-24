@@ -20,7 +20,7 @@ const TIMEOUT_MS = 30_000 // the protocol's limit; the gate's own budget is 18 s
 const PERMISSION = "foreman" // the action Foreman's questions carry in OpenCode's permission mechanism
 const PERSON_MS = 1_000 // a yes sooner than this after the question was not typed by a person
 const SHELL_TOOL = "shell"
-const READ_ONLY_TOOLS = new Set(["read", "glob", "grep", "webfetch", "websearch", "skill", "question", "todo"])
+const READ_ONLY_TOOLS = new Set(["read", "glob", "grep", "webfetch", "websearch", "skill", "question", "todowrite"])
 
 // Where Foreman is: next to this file, resolved through a symlink (the plugin is usually linked into a
 // `.opencode/plugins` folder), never a path from the agent's working directory.
@@ -110,8 +110,9 @@ export function toolRequests(tool: string, input: unknown, base: string, session
     const text = str(args.patchText) ?? ""
     const start = text.indexOf("*** Begin Patch")
     if (start >= 0) {
-      const end = text.indexOf("*** End Patch", start)
-      const patch = end >= 0 ? text.slice(start, end + "*** End Patch".length) + "\n" : text.slice(start)
+      // OpenCode reads up to the last end line: a file whose content holds that line must not hide what follows.
+      const end = text.lastIndexOf("*** End Patch")
+      const patch = end > start ? text.slice(start, end + "*** End Patch".length) + "\n" : text.slice(start)
       return [{ event: "patch", patch, ...where }]
     }
     // Not the format Foreman reads: what it names still meets the guards around Foreman's own files.
@@ -122,6 +123,25 @@ export function toolRequests(tool: string, input: unknown, base: string, session
   // cannot read.
   const path = str(args.path) ?? str(args.filePath) ?? str(args.file_path)
   return path ? [{ event: "write", path, ...where }] : []
+}
+
+function millis(value: unknown): number | undefined {
+  if (typeof value === "number") return value
+  if (typeof value === "string") {
+    const n = Date.parse(value)
+    return Number.isNaN(n) ? undefined : n
+  }
+  if (value instanceof Date) return value.getTime()
+  return undefined
+}
+
+/** A session in the middle of a run, from OpenCode's record of it: its last execution started after the one
+ * before ended (`time.busy` holds the start of the latest, `time.idle` the end of the last completed one). */
+export function isRunning(session: unknown): boolean {
+  const time = (session as any)?.time
+  const busy = millis(time?.busy)
+  const idle = millis(time?.idle)
+  return busy !== undefined && (idle === undefined || busy > idle)
 }
 
 /** The person's `/foreman <args>`: the text after the command name. */
@@ -164,7 +184,9 @@ export default {
         ...(source ? { source } : {}),
       })
       if (Date.now() - asked < PERSON_MS) {
-        throw new Error("OpenCode approved this by itself (--auto): nobody is attending to answer Foreman.")
+        throw new Error("OpenCode approved this within a second, by itself (an auto-approve mode: `opencode run "
+                        + "--auto`, the TUI's autoaccept permissions, the app's auto-approve): nobody is attending "
+                        + "to answer Foreman.")
       }
     }
 
@@ -191,10 +213,10 @@ export default {
           // end of the run.
           const text = fault(session, e as Error)
           if (request.event !== "shell" || !looksGated(request.command)) continue
+          // Not marked shown: OpenCode's question does not display this text, and under `opencode run` only the
+          // model reads it. The end of the run still shows it.
           answer = { action: "ask", message: `${text} It could not inspect this command: approve only if you have `
                                              + "checked the change yourself." }
-          failed.delete(session)
-          shown.add(session)
         }
         const message = answer.message || "Foreman refused this call."
         if (answer.action === "block") throw new Error(message)
@@ -213,11 +235,27 @@ export default {
       }
     })
 
-    // The person's prompt: a run of the agent starts. (OpenCode does not fire this for its own synthetic input.)
+    // Whether the session is in the middle of a run. OpenCode's record says so (`time.busy` later than
+    // `time.idle`), which also covers a run that ended by interruption, when the idle hook does not fire; this
+    // plugin's own record is the fallback.
+    const active = new Set<string>()
+    const running = async (session: string): Promise<boolean> => {
+      try {
+        return isRunning(await ctx.session.get({ sessionID: session }))
+      } catch {
+        return active.has(session)
+      }
+    }
+
+    // The person's prompt. OpenCode fires this for every prompt, also one sent while the agent is working (steer,
+    // queue): only a prompt to a session at rest starts a new run, so a message mid-run keeps that run's notes and
+    // its nudge. (OpenCode does not fire this for its own synthetic input.)
     await ctx.session.hook("prompt", async (event: any) => {
       const session = String(event.sessionID ?? "")
       const turn = String(event.messageID ?? "")
+      if (turns.has(session) && (await running(session))) return
       turns.set(session, turn)
+      active.add(session)
       try {
         await ask({ event: "turn_start", cwd: base, session, turn })
       } catch (e) {
@@ -249,7 +287,9 @@ export default {
       }
       if (answer.action === "continue" && answer.message) {
         await ctx.session.synthetic({ sessionID: session, text: answer.message, metadata: { source: "foreman" } })
+        return // the run goes on
       }
+      active.delete(session)
     })
 
     // `/foreman <args>`: code, no model turn. OpenCode shows a command's error to the person and nothing else, so
