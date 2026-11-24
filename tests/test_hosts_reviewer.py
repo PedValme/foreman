@@ -212,6 +212,16 @@ class WhoReviews(ReviewerCase):
         self.author = core.Session(model="--not-a-model", effort="medium")  # never passed on as a flag
         self.assertEqual(self.plan().model, "")
 
+    def test_when_another_model_answers_the_review_does_not_call_it_the_authors(self):
+        self.author = core.Session(model="vendor/model-a", effort="medium")
+        p = self.plan()
+        same = "\n".join(reviewer.describe(self.host, p, ran="model-a-20260101"))
+        self.assertIn("That is the model that wrote the code:", same)
+        other = "\n".join(reviewer.describe(self.host, p, ran="model-z"))
+        self.assertNotIn("That is the model that wrote the code:", other)
+        self.assertIn("not what answered: model-z did, and Foreman cannot say that is the model that wrote the code",
+                      other)
+
     def test_no_sentence_claims_another_model_when_foreman_cannot_know(self):
         for author in (core.Session(), core.Session(effort="medium"), core.Session(effort="max")):
             self.author = author
@@ -321,6 +331,20 @@ class ThroughThePersonsCommand(ReviewerCase):
         self.assertEqual(os.listdir(os.path.join(grants.store_dir(), core.REVIEWER_DIR)), [])
         self.assertFalse(core.reviewer_session({}))
         self.assertFalse(core.reviewer_session({"FOREMAN_REVIEWER": "1"}))
+
+    def test_a_token_dated_in_the_future_is_not_a_running_review(self):
+        directory = os.path.join(grants.store_dir(), core.REVIEWER_DIR)
+        os.makedirs(directory)
+        token = "ab" * 16
+        path = os.path.join(directory, token)
+        with open(path, "w") as fh:
+            fh.write("x")
+        self.assertTrue(core.reviewer_session({"FOREMAN_REVIEWER": token}))
+        later = os.path.getmtime(path) + 10 * 365 * 24 * 3600
+        os.utime(path, (later, later))
+        self.assertFalse(core.reviewer_session({"FOREMAN_REVIEWER": token}))
+        core.run_session([sys.executable, "-c", "pass"], "", 30)  # the next review clears it away
+        self.assertEqual(os.listdir(directory), [])
 
     def test_a_session_does_not_inherit_what_it_is_told_to_drop(self):
         env = dict(os.environ, KEEP="k", DROPPED="d")

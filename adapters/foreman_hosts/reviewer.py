@@ -135,7 +135,11 @@ def describe(host: core.Host, p: Plan, ran: str = "") -> list:
             return [line, "%s does not tell Foreman which model wrote the code, so whether this one differs is "
                           "for you to know." % host.label]
         return [line]
-    if p.model:  # the harness named the session's model, and the reviewer is that same model
+    if p.model and ran and not review.same_model_id(ran, p.model):
+        # asked for the session's model and another one answered: say what happened, claim nothing about it
+        who = "%s, the model this session runs on," % p.model
+        what = "not what answered: %s did, and Foreman cannot say that is the model that wrote the code" % ran
+    elif p.model:  # the harness named the session's model, and the reviewer is that same model
         who, what = "%s, the model this session runs on," % p.model, "the model that wrote the code"
     else:
         who = "%s's default model" % host.label

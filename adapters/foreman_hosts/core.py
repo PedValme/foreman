@@ -594,9 +594,15 @@ def reviewer_session(env) -> bool:
     if not isinstance(token, str) or not _TOKEN.match(token) or not directory:
         return False
     try:
-        return time.time() - os.path.getmtime(os.path.join(directory, token)) < REVIEWER_TOKEN_SECONDS
+        return _token_is_live(os.path.join(directory, token))
     except OSError:
         return False
+
+
+def _token_is_live(path: str) -> bool:
+    """A token file written within the last hour. One dated in the future is not live either: nothing of
+    Foreman's writes such a file, and it would otherwise never expire."""
+    return 0 <= time.time() - os.path.getmtime(path) < REVIEWER_TOKEN_SECONDS
 
 
 def run_session(argv: list, prompt: str, seconds: float, env=None, cwd: Optional[str] = None,
@@ -615,9 +621,11 @@ def run_session(argv: list, prompt: str, seconds: float, env=None, cwd: Optional
         if directory:
             os.makedirs(directory, exist_ok=True)
             for name in os.listdir(directory):  # what an interrupted review left behind
-                stale = os.path.join(directory, name)
-                if time.time() - os.path.getmtime(stale) > REVIEWER_TOKEN_SECONDS:
-                    os.unlink(stale)
+                try:  # each on its own: another review ending now removes its file under this loop
+                    if not _token_is_live(os.path.join(directory, name)):
+                        os.unlink(os.path.join(directory, name))
+                except OSError:
+                    pass
             marker = os.path.join(directory, token)
             with open(marker, "w", encoding="utf-8") as fh:
                 fh.write(str(int(time.time())))
