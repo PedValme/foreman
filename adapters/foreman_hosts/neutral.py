@@ -42,9 +42,11 @@ What every extension must get right, so the harnesses behave alike:
 - **``ask``**: show the message through the harness's own question to the person only when someone is attending;
   otherwise refuse the call with the message. Never let it through unanswered.
 - **When this program cannot answer** (exit code other than 0, nothing or no JSON on standard output, or no answer
-  within 30 seconds; the gate's own budget is 18): the extension goes on as the harness does after any failed hook
-  and shows the error text to the person once per session. It never turns that into a silent pass of a call it
-  knows the gate inspects without the person seeing the error.
+  within 30 seconds; the gate's own budget is 18): Foreman's own fault must not stop the agent from working, and
+  must not open the gate quietly either. A shell command that names git or gh together with commit, push or pr
+  (the gate's own quick filter, ``core.looks_gated``: the one check an extension repeats on its side) goes to the
+  person as an ``ask`` would, refused with nobody attending; every other call runs. The error text is shown to
+  the person once per session.
 - **Where Foreman is**: the extension runs ``hook.py`` by the absolute path of its own installation (next to the
   extension's file), never a path taken from the agent's working directory.
 """
