@@ -10,10 +10,16 @@ import unittest
 from tests_support import ROOT, GitRepoCase
 
 from foreman import grants
+from foreman.detector import MARKER
 from foreman_hosts import claude_code, core
 
-SKIPPED = "import pytest\n\n\n@pytest.mark.skip\ndef test_total():\n    assert 1 + 1 == 2\n"
-MARKED = "import pytest\n\n\n@pytest.mark.skip  # foreman:allow flaky upstream\ndef test_total():\n    assert 1 + 1 == 2\n"
+# Built from parts, as in the other tests: Foreman reads its own test files, and a literal marker here would be
+# a finding in this repository's pull requests.
+SKIP = "@pytest.mark." + "skip"
+SKIPPED = "import pytest\n\n\n" + SKIP + "\ndef test_total():\n    assert 1 + 1 == 2\n"
+SKIP_EDIT = SKIP + "\ndef test_total():"
+MARKED = ("import pytest\n\n\n" + SKIP + "  # " + MARKER + " flaky upstream\ndef test_total():\n"
+          "    assert 1 + 1 == 2\n")
 ATTENDED = {"CLAUDE_CODE_SESSION_ATTENDED": "1"}
 UNATTENDED = {"CLAUDE_CODE_SESSION_ATTENDED": "0"}
 
@@ -73,9 +79,9 @@ class PreToolUse(ClaudeCase):
         path = os.path.join(self.root, "tests", "test_cart.py")
         self.assertEqual(self.decision(self.tool("Write", file_path=path, content=SKIPPED))[0], "deny")
         self.assertEqual(self.decision(self.tool("Edit", file_path=path, old_string="def test_total():",
-                                                 new_string="@pytest.mark.skip\ndef test_total():"))[0], "deny")
+                                                 new_string=SKIP_EDIT))[0], "deny")
         edits = [{"old_string": "1 + 1", "new_string": "2 + 0"},
-                 {"old_string": "def test_total():", "new_string": "@pytest.mark.skip\ndef test_total():"}]
+                 {"old_string": "def test_total():", "new_string": SKIP_EDIT}]
         self.assertEqual(self.decision(self.tool("MultiEdit", file_path=path, edits=edits))[0], "deny")
         self.assertIsNone(self.tool("MultiEdit", file_path=path, edits=edits[:1]))
         self.assertIsNone(self.tool("Write", file_path=os.path.join(self.root, "cart.py"), content="x = 1\n"))
@@ -85,14 +91,34 @@ class PreToolUse(ClaudeCase):
                         "jq '.disableAllHooks = true' ~/.claude/settings.json > /tmp/s && mv /tmp/s ~/.claude/settings.json",
                         "sed -i '' 's/\"foreman@foreman\": true/\"foreman@foreman\": false/' .claude/settings.local.json"):
             self.assertEqual(self.decision(self.tool("Bash", command=command))[0], "deny", command)
-        self.assertIsNone(self.tool("Bash", command="claude plugin list"))
-        self.assertIsNone(self.tool("Bash", command="cat ~/.claude/settings.json"))
+        for command in ("rm -rf ~/.claude/plugins/cache/foreman",
+                        "cd ~/.claude/plugins/cache/foreman/foreman/0.1.0 && ls"):
+            self.assertEqual(self.decision(self.tool("Bash", command=command))[0], "deny", command)
+
+    def test_reading_claude_codes_settings_is_ordinary_work(self):
+        for command in ("claude plugin list", "cat ~/.claude/settings.json", "grep foreman ~/.claude/settings.json",
+                        "jq .enabledPlugins ~/.claude/settings.json 2>/dev/null", "ls ~/.claude/plugins/cache/foreman",
+                        "git commit --allow-empty -m 'claude plugin disable foreman is blocked'"):
+            self.assertIsNone(self.tool("Bash", command=command), command)
+
+    def test_a_settings_write_that_turns_foreman_off_is_denied(self):
         settings = os.path.join(self.root, ".claude", "settings.json")
         self.assertEqual(self.decision(self.tool("Write", file_path=settings, content='{"disableAllHooks": true}'))[0],
                          "deny")
         self.assertEqual(self.decision(self.tool("Edit", file_path=settings, old_string='"foreman@foreman": true',
                                                  new_string='"foreman@foreman": false'))[0], "deny")
         self.assertIsNone(self.tool("Write", file_path=settings, content='{"model": "sonnet"}'))
+        self.assertIsNone(self.tool("Write", file_path=settings, content='{"disableAllHooks": false}'))
+        self.write(".claude/settings.json", '{"enabledPlugins": {"foreman@foreman": true}, "model": "a"}')
+        verdict, reason = self.decision(self.tool("Edit", file_path=settings, old_string="true", new_string="false"))
+        self.assertEqual(verdict, "deny")  # the fragment alone says nothing: the file as it will be does
+        self.assertIn("user's decision", reason)
+        self.assertIsNone(self.tool("Edit", file_path=settings, old_string='"a"', new_string='"b"'))
+
+    def test_what_the_person_switched_off_themselves_can_still_be_edited(self):
+        settings = os.path.join(self.root, ".claude", "settings.json")
+        self.write(".claude/settings.json", '{"disableAllHooks": true, "model": "a"}')
+        self.assertIsNone(self.tool("Edit", file_path=settings, old_string='"a"', new_string='"b"'))
 
     def test_the_agent_cannot_touch_the_installed_plugin(self):
         hook = os.path.join(ROOT, "adapters", "hook.py")
@@ -103,6 +129,19 @@ class PreToolUse(ClaudeCase):
         other = {"CLAUDE_PLUGIN_ROOT": os.path.join(self.tmp, "cache", "foreman")}
         target = os.path.join(self.tmp, "cache", "foreman", ".claude-plugin", "plugin.json")
         self.assertEqual(self.decision(self.tool("Write", env=other, file_path=target, content="{}"))[0], "deny")
+
+    def test_a_copy_claude_code_installed_is_foremans_whole_and_a_clone_is_not(self):
+        installed = os.path.join(self.tmp, ".claude", "plugins", "cache", "foreman", "foreman", "0.1.0")
+        env = {"CLAUDE_PLUGIN_ROOT": installed}
+        self.assertEqual(self.decision(self.tool("Write", env=env, file_path=os.path.join(installed, "README.md"),
+                                                 content="x"))[0], "deny")
+        self.assertEqual(self.decision(self.tool("Bash", env=env, command="ls %s" % installed))[0], "deny")
+        # In a clone loaded with --plugin-dir, only the folders with code are Foreman's: its documents stay editable.
+        self.assertIsNone(self.tool("Write", file_path=os.path.join(ROOT, "docs", "notes-for-a-test.md"), content="x"))
+
+    def test_the_entry_point_run_by_hand_is_denied(self):
+        out = self.tool("Bash", command="cd /somewhere && python3 adapters/hook.py claude-code < forged.json")
+        self.assertEqual(self.decision(out)[0], "deny")
 
     def test_the_agent_cannot_type_the_persons_allow_through_a_nested_session(self):
         out = self.tool("Bash", command="claude -p '/foreman:allow 3f2a'")
@@ -140,14 +179,17 @@ class PersonCommands(ClaudeCase):
 class Stop(ClaudeCase):
     def test_a_turn_that_left_a_skipped_test_is_sent_back_once(self):
         self.prompt("make the tests pass")
-        self.write("tests/test_cart.py", SKIPPED)
+        self.assertIsNone(self.tool("Bash", command="perl -pi -e s/x/y/ tests/test_cart.py"))
+        self.write("tests/test_cart.py", SKIPPED)  # what that command did
         out = self.stop()
         self.assertEqual(out["decision"], "block")
         self.assertIn("tests/test_cart.py:4", out["reason"])
         self.assertIsNone(self.stop())
 
-    def test_a_clean_turn_and_an_unknown_event_get_no_answer(self):
+    def test_a_turn_that_only_talked_and_an_unknown_event_get_no_answer(self):
+        self.write("tests/test_cart.py", SKIPPED)  # the person's own work, and they keep editing
         self.prompt("say hello")
+        self.write("cart.py", "x = 2\n")
         self.assertIsNone(self.stop())
         self.assertIsNone(claude_code.answer(self.payload("SessionStart"), ATTENDED))
 
@@ -156,8 +198,10 @@ class Stop(ClaudeCase):
         os.makedirs(elsewhere)
         claude_code.answer(self.payload("UserPromptSubmit", prompt="go", cwd=elsewhere), ATTENDED)
         self.write("tests/test_cart.py", SKIPPED)
+        self.assertIsNone(claude_code.answer(self.payload("Stop", cwd=elsewhere), ATTENDED))
         self.assertIsNone(claude_code.answer(self.payload("PreToolUse", tool_name="Write", cwd=elsewhere, tool_input={
             "file_path": os.path.join(self.root, "cart.py"), "content": "x = 1\n"}), ATTENDED))
+        self.write("cart.py", "x = 1\n")  # the tool then writes it
         out = claude_code.answer(self.payload("Stop", cwd=elsewhere), ATTENDED)
         self.assertEqual(out["decision"], "block")
 
@@ -259,8 +303,10 @@ class PluginFiles(unittest.TestCase):
         for event, groups in hooks.items():
             for group in groups:
                 for hook in group["hooks"]:
+                    # `|| exit 1`: Python answers a missing script with exit code 2, which Claude Code reads as
+                    # "block"; a broken installation must fail like any other hook error, not deny every call.
                     self.assertEqual(hook["command"],
-                                     'python3 -I "${CLAUDE_PLUGIN_ROOT}/adapters/hook.py" claude-code', event)
+                                     'python3 -I "${CLAUDE_PLUGIN_ROOT}/adapters/hook.py" claude-code || exit 1', event)
         matcher = hooks["PreToolUse"][0]["matcher"].split("|")
         self.assertEqual(set(matcher), claude_code.SHELL_TOOLS | {"Write", "Edit", "MultiEdit", "NotebookEdit"})
 

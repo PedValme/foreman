@@ -22,6 +22,9 @@ Not published yet. To try it from a clone:
 claude --plugin-dir /path/to/foreman
 ```
 
+Use a clone you are not working in: Foreman keeps the agent out of its own code (`adapters/`, `plugin/`,
+`.claude-plugin/` of the clone it runs from), so an agent asked to change Foreman from that same clone is denied.
+
 What it does there, each seen in a real session on Claude Code 2.1.331:
 
 - **Before the agent's shell command.** `git commit`, `git push` and `gh pr create` are inspected (the real diff,
@@ -29,8 +32,11 @@ What it does there, each seen in a real session on Claude Code 2.1.331:
   the check runs, bypasses hooks or carries a secret. An agent-run `gh pr merge` is always denied. The denial holds
   in every permission mode, `bypassPermissions` included.
 - **Before a write.** A `Write` or `Edit` that switches off a test is denied.
-- **Before the agent finishes.** A turn that left one of those in the working tree, by any tool, is sent back once
-  with what to undo.
+- **Before the agent finishes.** A turn in which the agent changed the working tree and left one of those in it is
+  sent back once with what to undo. What counts as the agent's change: a file it wrote with `Write` or `Edit`, and,
+  when it used the shell, any difference in the repository the shell ran in. A turn that only talked is never sent
+  back. Not seen at this point (the commit gate still sees it): a shell edit in another repository reached with
+  `cd` inside one command, and a change inside a folder git already listed as untracked.
 - **Your commands**, answered by the hook with no model turn: `/foreman:status [path]`, `/foreman:allow [id]`,
   `/foreman:help`. Allowing a finding needs you at an interactive session: with `-p` it does nothing.
 
@@ -42,6 +48,9 @@ Limits to know:
 - The gate runs on the agent's own machine. The independent control is still the required check in CI
   (`examples/foreman-check.yml`).
 - Foreman's hooks and state are files. The adapter denies what names them (its installation, `~/.foreman`,
-  `claude plugin disable foreman`, a settings write that disables hooks), which stops the plain attempt, not a
-  disguised one.
-- Without `python3` on the PATH the hooks fail and Claude Code goes on without the gate, showing the hook's error.
+  `claude plugin disable foreman`, a settings write that disables hooks, its entry point run by hand), which stops
+  the plain attempt, not a disguised one. "A person is at the session" tells an interactive session from `-p` and no
+  more: it is that guard, not the session being interactive, that keeps the agent's shell from `allow`.
+- When the hook cannot run at all (no `python3` on the PATH, a Python older than 3.9, a damaged installation), it
+  fails as any hook error does: Claude Code shows the error and goes on without the gate. When the hook runs and
+  cannot inspect a commit, push or pull request, the call goes to you instead.

@@ -60,8 +60,9 @@ to 25; ESTADO.md says which ones exist today). Rules 1 to 21 are written for Her
     stay in the repository and never reach a user's machine.
 22. **One core, an adapter per harness.** The detector and the gate live in `plugin/foreman/`, the single source.
     An adapter (`adapters/`) only translates: what its harness sends becomes the gate's own calls, and the gate's
-    answer becomes what that harness understands. An adapter adds no rule and loosens none; `plugin/` never reads
-    outside itself.
+    answer becomes what that harness understands. An adapter adds no gate rule and loosens none; what it adds is
+    the guard around Foreman's own program and state, which outside Hermes are files the agent's shell can reach.
+    `plugin/` never reads outside itself.
 23. **The Hermes plugin changes only with a catalog update.** Changes to the core land on `main` with the tests
     green and reach Hermes users together, in one substantial update tried first in the `foremandev` profile.
 24. **What a person decides stays out of the agent's reach, in every harness.** `allow` and `merge` exist only where

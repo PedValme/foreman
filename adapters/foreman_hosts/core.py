@@ -6,7 +6,7 @@ one of them into the gate's own call (``foreman.gate``, the code the Hermes plug
 one of four decisions: nothing (allow), ``block``, ``ask`` (a person must decide) or ``continue`` (send the agent
 back before it finishes).
 
-An adapter adds no rule and loosens none (PRODUCTO.md, rule 22). What it adds is what the gate gets from Hermes and
+An adapter adds no gate rule and loosens none (PRODUCTO.md, rule 22). What it adds is what the gate gets from Hermes and
 another harness does not give: which files the turn changed (the gate's end-of-turn scan needs them), words that fit
 the harness, and a guard around Foreman's own program and state, which outside Hermes are plain files the agent's
 shell can reach.
@@ -49,8 +49,14 @@ class Host:
     program_dirs: tuple = ()                     # where Foreman is installed: not the agent's to run or edit
     cli: tuple = ()                              # the harness's own command names ("claude"): see _person_only
     switches_off: Callable[[str], bool] = _never        # a shell command that turns Foreman off in this harness
-    config_off: Callable[[str, str], bool] = _never     # (path, new text): a write that turns Foreman off
-    attended: Callable[[], bool] = _never        # a person is at this session (only then can a finding be allowed)
+    is_config: Callable[[str], bool] = _never           # a path that is one of the harness's settings files
+    config_off: Callable[[str, str], bool] = _never     # (its text before, after): the write turns Foreman off
+    # An interactive session, as opposed to an unattended one. It tells the two apart and no more: the agent's own
+    # shell inherits it, so what keeps the agent from the person's commands is the guard below, not this.
+    attended: Callable[[], bool] = _never
+
+
+HOSTS = ("claude-code",)  # what `adapters/hook.py <host>` accepts
 
 
 # ─── Words ───────────────────────────────────────────────────────────────────
@@ -148,21 +154,60 @@ def _is_own_path(host: Host, path: str) -> bool:
     return any(gate._inside(path, gate._canon(d)) for d in dirs)
 
 
-def _person_only(host: Host, command: str) -> bool:
-    """The agent starting its own harness to type the person's command (`claude -p "/foreman:allow 3f2a"`). A
-    command that only mentions the words (a commit message, a grep) is not one: each part of the line on its own
-    needs the harness's command name too."""
-    if not host.cli:
+def programs(command: str, _depth: int = 0) -> list:
+    """[(program name, its words)] for each simple command of a line, as the gate's own tokenizer reads it: wrappers
+    (`sudo`, `env`…) and leading `VAR=value` skipped, and the script handed to a shell or a runner (`bash -c "…"`,
+    `eval "…"`) read as a line of its own. So `claude` is the program of `claude -p x`, and not of a grep, a path
+    or a commit message that only contains the word."""
+    out = []
+    for words in gate.segments(command or ""):
+        words = list(words)
+        for _ in range(4):
+            if len(words) > 1 and gate._prog(words[0]) in gate._WRAPPERS:
+                words = gate._skip_wrapper(words)
+            else:
+                break
+        while words and gate._ASSIGNMENT.match(words[0]):
+            words = words[1:]
+        if not words:
+            continue
+        prog = gate._prog(words[0])
+        out.append((prog, words))
+        if _depth < 3 and prog in (gate._SHELLS | gate._POWERSHELLS | gate._RUNNERS):
+            for word in words[1:]:
+                if re.search(r"\s", word):
+                    out += programs(word, _depth + 1)
+    return out
+
+
+def only_reads(prog: str, words: list) -> bool:
+    """True for a program that only prints (`cat`, `grep`, `jq`…) with no redirection to a file and no in-place
+    edit: reading a settings file is ordinary work."""
+    if prog not in gate._READERS and prog not in ("ls", "stat", "file", "wc", "bat"):
         return False
-    names = re.compile(r"(?i)\b(?:%s)(?:\.exe)?\b" % "|".join(re.escape(n) for n in host.cli))
-    for part in re.split(r"[;&|\n]+", command or ""):
-        if names.search(part) and _ALLOW_WORDS.search(part):
+    _clean, writes = gate._strip_redirs(words)
+    return not writes and not any(w.startswith("-i") or w == "--in-place" for w in words[1:])
+
+
+def _person_only(host: Host, command: str) -> bool:
+    """The agent starting its own harness to type the person's command (`claude -p "/foreman:allow 3f2a"`). The
+    harness must be the program that runs: a commit message or a grep that only mentions the words is not one."""
+    return any(prog in host.cli and _ALLOW_WORDS.search(" ".join(words)) for prog, words in programs(command))
+
+
+def _runs_entry(command: str) -> bool:
+    """The adapters' entry point run by hand, wherever it is named from (`cd <plugin> && python3 adapters/hook.py
+    claude-code`): the way to hand Foreman a made-up "the person typed this"."""
+    for _prog, words in programs(command):
+        text = " ".join(words)
+        if re.search(r"\bhook\.py\b", text) and any(re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(h), text)
+                                                     for h in HOSTS):
             return True
     return False
 
 
 def _guard_command(host: Host, command: str) -> Optional[dict]:
-    if _names_own(host, command):
+    if _names_own(host, command) or _runs_entry(command):
         return {"action": BLOCK, "message": _OWN}
     try:
         if host.switches_off(command):
@@ -176,13 +221,14 @@ def _guard_command(host: Host, command: str) -> Optional[dict]:
 
 # ─── Before a shell command ──────────────────────────────────────────────────
 
-def pre_shell(host: Host, command, cwd: str = "", session: str = "") -> Optional[dict]:
+def pre_shell(host: Host, command, cwd: str = "", session: str = "", turn: str = "") -> Optional[dict]:
     """Before the agent runs ``command`` in ``cwd``: the gate's decision, or None to let it run."""
     if not isinstance(command, str) or not command.strip():
         return None
     guard = _guard_command(host, command)
     if guard:
         return guard
+    _note_shell(host, cwd, session, turn)
     args = {"command": command}
     if isinstance(cwd, str) and cwd and os.path.isabs(cwd):
         args["workdir"] = cwd  # explicit: the gate then never guesses the session's directory
@@ -198,6 +244,36 @@ def looks_gated(command) -> bool:
 
 # ─── Before a write ──────────────────────────────────────────────────────────
 
+_MAX_CONFIG_BYTES = 2 * 1024 * 1024
+
+
+def _config_write_off(host: Host, full: str, content, old, new, replace_all) -> bool:
+    """True when this write would leave one of the harness's settings files switching Foreman off and the file does
+    not do so already (what the person set there themselves stays theirs). The file is judged as it will be, not
+    by the replaced fragment alone: `true` -> `false` says nothing on its own."""
+    try:
+        if not host.is_config(full):
+            return False
+        before = ""
+        try:
+            if os.path.getsize(full) <= _MAX_CONFIG_BYTES:
+                with open(full, encoding="utf-8", errors="replace") as fh:
+                    before = fh.read()
+        except OSError:
+            pass
+        if isinstance(content, str):
+            after = content
+        elif isinstance(new, str):
+            old = old if isinstance(old, str) else ""
+            after = before.replace(old, new, -1 if replace_all else 1) if old and old in before else new
+        else:
+            return False
+        return bool(host.config_off(before, after))
+    except Exception:
+        logger.warning("foreman: the host's config check failed", exc_info=True)
+        return False
+
+
 def pre_write(host: Host, path, cwd: str = "", session: str = "", turn: str = "", content=None, old=None,
               new=None, replace_all: bool = False) -> Optional[dict]:
     """Before the agent writes ``path``: a whole file (``content``) or a replacement (``old`` -> ``new``). With
@@ -207,12 +283,8 @@ def pre_write(host: Host, path, cwd: str = "", session: str = "", turn: str = ""
     full = os.path.normpath(path if os.path.isabs(path) else os.path.join(cwd or os.getcwd(), path))
     if _is_own_path(host, full):
         return {"action": BLOCK, "message": _OWN}
-    text = content if isinstance(content, str) else new if isinstance(new, str) else ""
-    try:
-        if host.config_off(full, text):
-            return {"action": BLOCK, "message": _OFF}
-    except Exception:
-        logger.warning("foreman: the host's config check failed", exc_info=True)
+    if _config_write_off(host, full, content, old, new, replace_all):
+        return {"action": BLOCK, "message": _OFF}
     if isinstance(content, str):
         out = gate.on_pre_tool_call("write_file", {"path": full, "content": content},
                                     task_id=session or "", session_id=session or "")
@@ -230,8 +302,10 @@ def pre_write(host: Host, path, cwd: str = "", session: str = "", turn: str = ""
 
 # ─── A session's turns ───────────────────────────────────────────────────────
 # Hermes tells the gate which paths a turn changed; another harness does not. Two sources stand in for it: the
-# files that went through pre_write, and whether the repository the turn started in looks different at its end
-# (HEAD, and the size and time of every file git reports as changed), which also sees edits made from the shell.
+# files that went through pre_write and exist changed since the turn began, and, when the agent used the shell,
+# whether the repository it ran in looks different at the end (HEAD, and the size and time of every file git
+# reports as changed) from how it looked before the turn's first command there. A turn that only talked is
+# therefore never sent back, and a prompt costs no git call.
 
 def _session_file(host: Host, session: str, suffix: str) -> Optional[str]:
     state = _state_dir()
@@ -346,19 +420,15 @@ def _prune_sessions() -> None:
         pass
 
 
+def _new_turn(turn: str) -> dict:
+    return {"turn": turn or "", "at": time.time(), "nudges": 0, "roots": {}, "cwds": {}}
+
+
 def turn_start(host: Host, cwd: str = "", session: str = "", turn: str = "") -> None:
-    """A turn starts: remember what the repository in ``cwd`` looks like, and forget the last turn's writes."""
+    """A turn starts: forget the last one's writes and nudges. No git call: this runs on every prompt."""
     if not session:
         return
-    deadline = time.monotonic() + TURN_BUDGET_SECONDS
-    roots = {}
-    try:
-        root = detector.find_repo(cwd, deadline=deadline) if cwd and os.path.isdir(cwd) else None
-        if root:
-            roots[root] = _signature(root, deadline)
-    except GitError:
-        pass
-    _save(host, session, {"turn": turn or "", "at": time.time(), "nudges": 0, "roots": roots})
+    _save(host, session, _new_turn(turn))
     touched = _session_file(host, session, ".touched")
     try:
         os.unlink(touched)
@@ -367,16 +437,57 @@ def turn_start(host: Host, cwd: str = "", session: str = "", turn: str = "") -> 
     _prune_sessions()
 
 
+def _note_shell(host: Host, cwd: str, session: str, turn: str) -> None:
+    """The agent is about to run a shell command in ``cwd``: the first time this turn it does so in a repository,
+    remember how that repository looks now, before the command. Later commands there cost one small file read."""
+    if not session or not isinstance(cwd, str) or not cwd:
+        return
+    try:
+        state = _load(host, session)
+        if not state or state.get("turn") != (turn or ""):
+            state = _new_turn(turn)  # a turn whose start this adapter did not see
+        cwds = state["cwds"] if isinstance(state.get("cwds"), dict) else {}
+        roots = state["roots"] if isinstance(state.get("roots"), dict) else {}
+        if cwd in cwds:
+            return
+        deadline = time.monotonic() + TURN_BUDGET_SECONDS
+        root = (detector.find_repo(cwd, deadline=deadline) if os.path.isdir(cwd) else None) or ""
+        cwds[cwd] = root
+        if root and root not in roots:
+            roots[root] = _signature(root, deadline)
+        state["cwds"], state["roots"] = cwds, roots
+        _save(host, session, state)
+    except Exception:  # bookkeeping for the end-of-turn nudge: never in the way of the gate itself
+        logger.warning("foreman: cannot note the shell's repository", exc_info=True)
+
+
+def _written_since(paths: list, since) -> list:
+    """The remembered writes that happened: the file exists and changed after the turn began. A write the person
+    refused at the harness's prompt was remembered too, and left the file as it was."""
+    if not isinstance(since, (int, float)):
+        return paths
+    out = []
+    for path in paths:
+        try:
+            if os.path.getmtime(path) >= since - 2:
+                out.append(path)
+        except OSError:
+            pass
+    return out
+
+
 def end_of_turn(host: Host, cwd: str = "", session: str = "", turn: str = "") -> Optional[dict]:
     """The agent is about to finish: ``continue`` with what to undo when this turn left a blocker in the working
     tree, else None. One nudge per turn, the gate's own rule; a turn this adapter did not see start is left alone."""
     if not session:
         return None
     state = _load(host, session)
-    if not state or (turn and state.get("turn") != turn):
+    if turn and state.get("turn") != turn:
+        state = dict(_new_turn(turn), at=None)  # its start was not seen: only this turn's own writes can count
+    elif not state:
         return None
     turn = turn or str(state.get("turn") or "")
-    changed = _touched(host, session, turn)
+    changed = _written_since(_touched(host, session, turn), state.get("at"))
     deadline = time.monotonic() + TURN_BUDGET_SECONDS
     roots = state.get("roots") if isinstance(state.get("roots"), dict) else {}
     for root, before in roots.items():
@@ -418,6 +529,9 @@ def person_command(host: Host, text, cwd: str = "", session: str = "") -> Option
     parts = (m.group(1) or "").strip().split(None, 1)
     name = parts[0].lower() if parts else "status"
     rest = parts[1].strip() if len(parts) > 1 else ""
+    spaced = not re.match(r"^\s*/foreman:", text, re.I)
+    if spaced and parts and name not in PERSON_SUBCOMMANDS and name not in _hermes_subcommands():
+        return None  # "/foreman is blocking my commit, why?" is a question for the model, not a command
     try:
         return reword(host, _run_person(host, name, rest, cwd))
     except Exception as e:  # the person asked: always an answer, never a stack trace
@@ -425,13 +539,23 @@ def person_command(host: Host, text, cwd: str = "", session: str = "") -> Option
         return "Foreman failed: %s: %s" % (type(e).__name__, e)
 
 
+def _hermes_subcommands() -> set:
+    try:
+        from foreman import commands
+        return set(commands.SUBCOMMANDS)
+    except Exception:
+        return set()
+
+
 def _run_person(host: Host, name: str, rest: str, cwd: str) -> str:
     from foreman import commands  # late: it loads the board, the review and the notifications
     if name == "status":
         where = os.path.expanduser(rest) if rest else cwd
-        if where and not os.path.isabs(where):
-            where = os.path.join(cwd or os.getcwd(), where)
-        return commands.cmd_status(os.path.normpath(where) if where else "")
+        if not where or not (os.path.isabs(where) or cwd):
+            return "Foreman: this session has no working directory. Give a path: `%s <path>`." % host.person("status")
+        if not os.path.isabs(where):
+            where = os.path.join(cwd, where)
+        return commands.cmd_status(os.path.normpath(where))
     if name == "allow":
         if rest and not host.attended():
             return ("Foreman: allowing a finding needs a person at the session, and nobody is attending this one. "

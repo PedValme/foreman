@@ -39,7 +39,12 @@ session that did not write the code, the Hermes plugin untouched until one subst
   next one; Claude Code's own cap is 8); `UserPromptSubmit` with `decision: block` prints the reason with no model
   turn (0 tokens), which is how the person's `/foreman …` works. The payload has `session_id`, `cwd`, `prompt_id`
   (one per turn), `permission_mode`, `effort.level`; no model name. The hook's environment has
-  `CLAUDE_CODE_SESSION_ATTENDED` (1 interactive, 0 in `-p`).
+  `CLAUDE_CODE_SESSION_ATTENDED` (1 interactive, 0 in `-p`), and so does the agent's own shell in an interactive
+  session. Also measured: the interactive prompt rejects an unknown `/foreman` before any hook, while a plugin
+  command (`/foreman:status`) fires `UserPromptSubmit` first; the hook's `cwd` follows a `cd` made in an earlier
+  Bash call (and Claude Code resets a `cd` out of the project, which the hook's `cwd` reflects); a subagent's tool
+  calls carry the session's `session_id` and `prompt_id` plus an `agent_id`; `python3 <missing file>` exits 2,
+  which Claude Code reads as "block" (hence `|| exit 1` in `hooks.json`).
 - Codex CLI 0.171.0 (read): `PreToolUse` on `Bash` and `apply_patch`, the same field names as Claude Code, `Stop`
   continues with the reason; no `ask` (the call proceeds); a hook runs only after the person trusts it, by hash; its
   documentation calls hooks "not a complete enforcement boundary". Not verified: `codex exec` and the no-approval
@@ -56,9 +61,12 @@ session that did not write the code, the Hermes plugin untouched until one subst
   `opencode run -m provider/model#variant --format json`.
 
 ## Acceptance criteria
-- [ ] Claude Code, real session: an agent's commit that skips a test is blocked with the file and line; its
-  `gh pr merge` is blocked; a turn that leaves a skipped test is sent back once; `/foreman status` and
-  `/foreman allow` answer the person without a model turn; `allow` does nothing with nobody attending.
+- [x] Claude Code, real session (2026-11-24, 2.1.331, macOS, `bypassPermissions`): an agent's commit that skips a
+  test is blocked with the file and line; its `gh pr merge` is blocked; an `Edit` that skips a test is blocked; a
+  turn that leaves a skipped test is sent back once and a turn that only talked is not; `/foreman:status`,
+  `/foreman:allow` and `/foreman:help` answer the person without a model turn; `allow` does nothing with nobody
+  attending and works typed in an interactive session. Not seen yet: Windows; an installation through the
+  marketplace (it goes into the owner's own Claude Code: his to try).
 - [ ] Codex, pi and OpenCode: the same gate, each seen in a real session.
 - [ ] The reviewer in the four: a fresh session launched by Foreman, its model and effort the user's choice, each
   finding verified against the diff.
@@ -75,7 +83,8 @@ session that did not write the code, the Hermes plugin untouched until one subst
 - Names and distribution (marketplace, npm): the owner, when the first adapter works.
 
 ## Tasks
-- [ ] T1 The neutral half and the Claude Code adapter with the gate and the person's commands; real session.
+- [x] T1 The neutral half and the Claude Code adapter with the gate and the person's commands; real session
+  (pull request #61, reviewed by an agent that did not write it: nothing blocking, its findings fixed).
 - [ ] T2 Codex adapter (the same command hook, its dialect); real session, `codex exec` and no-approval modes.
 - [ ] T3 pi extension with the gate; real session.
 - [ ] T4 OpenCode v2 plugin with the gate; real session.
@@ -84,4 +93,7 @@ session that did not write the code, the Hermes plugin untouched until one subst
 - [ ] T7 READMEs, names and publication (owner's yes); the one Hermes catalog update with what the core needed.
 
 ## Next step
-T1 is being built on the branch `claude/agnostico`.
+T2, T3 and T4, one agent each, in parallel: each adds a dialect next to `foreman_hosts/claude_code.py` (pi and
+OpenCode: a thin TypeScript extension that calls `adapters/hook.py` with a neutral JSON, plus that dialect in
+Python), its tests, and its own real-session run. `core.py` is shared: a change to it is one pull request of its
+own, before the three.

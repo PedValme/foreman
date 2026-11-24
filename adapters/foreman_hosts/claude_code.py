@@ -25,39 +25,58 @@ NAME = "claude-code"
 SHELL_TOOLS = {"Bash", "PowerShell"}
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # the installed plugin
 
-_CLAUDE = re.compile(r"(?i)\bclaude(?:\.exe)?\b")
 _PLUGIN_OFF = re.compile(r"(?i)\bplugins?\s+(?:disable|uninstall|remove|rm)\b")
 _FOREMAN = re.compile(r"(?i)\bforeman\b")
 _SETTINGS = re.compile(r"(?i)\.claude[/\\](?:managed-)?settings(?:\.local)?\.json")
-_HOOKS_OFF = re.compile(r"(?i)disableAllHooks")
+_PLUGINS_DIR = re.compile(r"(?i)\.claude[/\\]plugins\b")
+_HOOKS_WORD = re.compile(r"(?i)disableAllHooks")
+_HOOKS_OFF = re.compile(r"(?i)[\"']disableAllHooks[\"']\s*:\s*true")
 _PLUGIN_FALSE = re.compile(r"(?i)foreman[^\"'\n]*[\"']\s*:\s*false")
 
 
 def _switches_off(command: str) -> bool:
-    """`claude plugin disable foreman`, or a command that rewrites Claude Code's settings to switch hooks or this
-    plugin off. Each part of the line on its own."""
-    for part in re.split(r"[;&|\n]+", command or ""):
-        if _CLAUDE.search(part) and _PLUGIN_OFF.search(part) and _FOREMAN.search(part):
+    """`claude plugin disable foreman`, or a command that rewrites Claude Code's settings or its plugins folder to
+    switch hooks or this plugin off. Each simple command on its own; one that only reads (`cat`, `grep`) is not
+    one."""
+    for prog, words in core.programs(command):
+        text = " ".join(words)
+        if prog == "claude" and _PLUGIN_OFF.search(text) and _FOREMAN.search(text):
             return True
-        if _SETTINGS.search(part) and (_HOOKS_OFF.search(part) or _FOREMAN.search(part)):
+        if core.only_reads(prog, words):
+            continue
+        if _SETTINGS.search(text) and (_HOOKS_WORD.search(text) or _FOREMAN.search(text)):
+            return True
+        if _PLUGINS_DIR.search(text) and _FOREMAN.search(text):
             return True
     return False
 
 
-def _config_off(path: str, text: str) -> bool:
-    """A write to one of Claude Code's settings files that disables every hook or this plugin."""
-    if not _SETTINGS.search(path.replace("\\", "/") + ""):
-        return False
-    return bool(_HOOKS_OFF.search(text or "") or _PLUGIN_FALSE.search(text or ""))
+def _is_config(path: str) -> bool:
+    return bool(_SETTINGS.search(path.replace("\\", "/")))
+
+
+def _config_off(before: str, after: str) -> bool:
+    """A settings file that, once written, disables every hook or this plugin, and did not before."""
+    return any(rule.search(after or "") and not rule.search(before or "") for rule in (_HOOKS_OFF, _PLUGIN_FALSE))
+
+
+def _program_dirs(roots) -> tuple:
+    """Where the plugin's code is. A copy Claude Code installed (under its plugins folder) is Foreman's whole; in a
+    clone loaded with --plugin-dir only the folders with code are, so the rest of that repository stays workable."""
+    out = []
+    for root in roots:
+        if _PLUGINS_DIR.search(root.replace("\\", "/")):
+            out.append(root)
+        out += [os.path.join(root, d) for d in ("adapters", ".claude-plugin", "plugin")]
+    return tuple(out)
 
 
 def host(env=None) -> core.Host:
     env = os.environ if env is None else env
     roots = dict.fromkeys(r for r in (ROOT, env.get("CLAUDE_PLUGIN_ROOT")) if r)
-    program = tuple(os.path.join(r, d) for r in roots for d in ("adapters", ".claude-plugin", "plugin"))
     return core.Host(
-        name=NAME, label="Claude Code", person=lambda sub: "/foreman:" + sub, program_dirs=program,
-        cli=("claude",), switches_off=_switches_off, config_off=_config_off,
+        name=NAME, label="Claude Code", person=lambda sub: "/foreman:" + sub, program_dirs=_program_dirs(roots),
+        cli=("claude",), switches_off=_switches_off, is_config=_is_config, config_off=_config_off,
         # Claude Code sets it for its hooks: "1" in an interactive session, "0" with -p or the SDK.
         attended=lambda: env.get("CLAUDE_CODE_SESSION_ATTENDED") == "1",
     )
@@ -73,7 +92,7 @@ def _pre_tool(h: core.Host, data: dict) -> Optional[dict]:
         return None
     cwd, session, turn = _text(data.get("cwd")), _text(data.get("session_id")), _text(data.get("prompt_id"))
     if tool in SHELL_TOOLS:
-        return core.pre_shell(h, args.get("command"), cwd, session)
+        return core.pre_shell(h, args.get("command"), cwd, session, turn)
     if tool == "Write":
         return core.pre_write(h, args.get("file_path"), cwd, session, turn, content=_text(args.get("content")))
     if tool == "Edit":

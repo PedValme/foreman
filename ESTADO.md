@@ -13,10 +13,15 @@
 - Tried: `/foreman` as a bare command does not work in Claude Code's interactive prompt (it rejects an unknown
   command before any hook), so the person's commands are the plugin's own (`/foreman:status`), which the
   `UserPromptSubmit` hook answers before the model sees them.
-- Next action: #61 waits for the review by an agent that did not write it (launched 2026-11-24) and for CI, which
-  now also runs Python 3.9. Fix what blocks, mark it ready, merge it by squash. Then T2 to T4 (Codex, pi and
-  OpenCode with the gate; independent, one agent each), T5 (the reviewer as a fresh session) and T6 (`/foreman`
-  complete on pi and OpenCode). Each harness is published only after its own real-session test.
+- Reviewed by an agent that did not write it (2026-11-24): nothing blocking; its findings were fixed in #61 (a turn
+  that only talked is never sent back, a prompt costs no git call, the guards no longer catch a grep or a commit
+  message, a damaged installation fails open instead of denying every call) and the real sessions repeated.
+- Next action: merge #61 by squash when CI is green (it now also runs Python 3.9 on macOS and Windows). Then T2 to
+  T4 (Codex, pi and OpenCode with the gate; independent, one agent each), T5 (the reviewer as a fresh session) and
+  T6 (`/foreman` complete on pi and OpenCode). Each harness is published only after its own real-session test.
+- For the owner to try, his call (it goes into his own Claude Code): the plugin installs from this repository's
+  marketplace file. Installed for every project it would also stop his agents' own `gh pr merge`, which his other
+  repositories rely on, so per project or `claude --plugin-dir <a clone>` first.
 - External PR #57 (`***REDACTED***` as a placeholder in the detector): read in full, nothing malicious seen, not run.
   Changes asked on 2026-11-23: git-filter-repo's default marker is `***REMOVED***`, which it leaves blocked. Next:
   when the author pushes the fix, re-read the whole diff, approve its held CI run (the owner chose to wait for the
