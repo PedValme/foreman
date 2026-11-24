@@ -26,6 +26,8 @@ from typing import Callable, Optional
 from foreman import detector, gate, grants
 from foreman.detector import GitError, Repo
 
+from .hosts import MODULES
+
 logger = logging.getLogger(__name__)
 
 BLOCK, ASK, CONTINUE = "block", "ask", "continue"
@@ -56,7 +58,7 @@ class Host:
     attended: Callable[[], bool] = _never
 
 
-HOSTS = ("claude-code",)  # what `adapters/hook.py <host>` accepts
+HOSTS = tuple(MODULES)  # what `adapters/hook.py <host>` accepts
 
 
 # ─── Words ───────────────────────────────────────────────────────────────────
@@ -233,15 +235,39 @@ def _person_only(host: Host, command: str) -> bool:
 _PYTHON = re.compile(r"^(?:python[\d.]*|pypy[\d.]*|py|hook\.py)$")
 
 
+def _without_redirections(words: list) -> list:
+    """The words the program really receives: output redirections (the gate's own reading) and input ones
+    (`< file`, `<file`, `<<< text`) removed with their targets."""
+    words = [w for i, w in enumerate(words)  # the descriptor number of `2>file` is its own word to the tokenizer
+             if not (w.isdigit() and i + 1 < len(words) and isinstance(words[i + 1], gate._Redir))]
+    words, _writes = gate._strip_redirs(words)
+    out, i = [], 0
+    while i < len(words):
+        word = words[i]
+        if not isinstance(word, gate._Op) and re.match(r"^\d*<{1,3}$", word):
+            i += 2
+            continue
+        if re.match(r"^\d*<{1,3}[^<]", word) and len(out) > 0:
+            i += 1
+            continue
+        out.append(word)
+        i += 1
+    return out
+
+
 def _runs_entry(command: str) -> bool:
     """The adapters' entry point run by hand, wherever it is named from (`cd <plugin> && python3 adapters/hook.py
     claude-code`): the way to hand Foreman a made-up "the person typed this". Naming the file (`git add
     adapters/hook.py`) is not running it."""
     for prog, words in programs(command):
-        text = " ".join(words)
-        if _PYTHON.match(prog) and re.search(r"\bhook\.py\b", text) and any(
-                re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(h), text) for h in HOSTS):
-            return True
+        if not _PYTHON.match(prog):
+            continue
+        words = _without_redirections(words)  # `hook.py < forged.json pi` still runs `hook.py pi`
+        for i, word in enumerate(words[:-1]):
+            # the entry point takes the harness's name as its one argument: `…/hook.py pi`, not a `hook.py` that
+            # merely lives under a folder called `pi` or is given some other word
+            if gate._prog(word) == "hook.py" and words[i + 1] in HOSTS:
+                return True
     return False
 
 
@@ -336,6 +362,105 @@ def pre_write(host: Host, path, cwd: str = "", session: str = "", turn: str = ""
     decision = _decision(host, out)
     if decision is None or decision["action"] != BLOCK:
         _touch(host, session, turn, full)
+    return decision
+
+
+_PATCH_PATHS = re.compile(r"(?m)^\*\*\* (?:(?:Update|Add|Delete) File|Move to):\s*(.+?)\s*$")
+_PATCH_HEADER = re.compile(r"^\*\*\* (Update File|Add File|Delete File|Move to):\s*(.+?)\s*$")
+
+
+def _read_config(path: str) -> str:
+    try:
+        if os.path.getsize(path) <= _MAX_CONFIG_BYTES:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                return fh.read()
+    except OSError:
+        pass
+    return ""
+
+
+def _patch_switches_off(host: Host, patch: str, full: Callable[[str], str]) -> bool:
+    """A patch that leaves one of the harness's settings files switching Foreman off: by changing it, by deleting
+    it, or by moving another file over it."""
+    try:
+        sides = {full(path): (old, new) for path, old, new, _is_new in gate._v4a_files(patch)}
+    except Exception:
+        logger.warning("foreman: cannot read the patch's files", exc_info=True)
+        return False
+    source = None
+    for line in patch.splitlines():
+        m = _PATCH_HEADER.match(line)
+        if not m:
+            continue
+        try:  # one file's failed check never skips the next file's
+            kind, path = m.group(1), full(m.group(2))
+            if kind == "Move to":
+                if source is None:
+                    continue
+                # The gate files a moved file's lines under the name it had. Where it lands it is the file on
+                # disk plus what the patch adds; where it leaves from, it is gone.
+                landed = _read_config(source) + "\n" + sides.get(source, ("", ""))[1]
+                if host.is_config(path) and host.config_off(_read_config(path), landed):
+                    return True
+                if host.is_config(source) and host.config_off(_read_config(source), ""):
+                    return True
+                continue
+            source = path
+            if not host.is_config(path):
+                continue
+            if kind == "Delete File":
+                if host.config_off(_read_config(path), ""):
+                    return True
+            elif host.config_off(*sides.get(path, ("", ""))):
+                return True
+        except Exception:
+            logger.warning("foreman: the host's config check failed", exc_info=True)
+    return False
+
+
+def pre_patch(host: Host, patch, cwd: str = "", session: str = "", turn: str = "") -> Optional[dict]:
+    """Before the agent applies a patch in the ``*** Begin Patch`` format (the one the gate already reads for
+    Hermes's patch tool, and the one Codex's ``apply_patch`` sends): every file it names meets the guards, then
+    the gate reads the patch."""
+    if not isinstance(patch, str) or not patch.strip():
+        return None
+    base = cwd if isinstance(cwd, str) and cwd and os.path.isabs(cwd) else os.getcwd()
+
+    def full(path: str) -> str:
+        path = os.path.expanduser(path)
+        return os.path.normpath(path if os.path.isabs(path) else os.path.join(base, path))
+
+    paths = list(dict.fromkeys(full(p) for p in _PATCH_PATHS.findall(patch)))
+    if any(_is_own_path(host, p) for p in paths):
+        return {"action": BLOCK, "message": _OWN}
+    if not os.path.isdir(base):
+        return {"action": ASK, "message": "Foreman could not inspect this patch: the working directory %s does not "
+                                          "exist on this machine. Approve only if you have checked the change "
+                                          "yourself." % base}
+    if _patch_switches_off(host, patch, full):
+        return {"action": BLOCK, "message": _OFF}
+    # The gate resolves a patch's relative paths against the session's directory, which outside Hermes it takes
+    # from the process: stand in it while the gate reads.
+    here = None
+    try:
+        here = os.getcwd()
+    except OSError:
+        pass
+    try:
+        if os.path.isdir(base):
+            os.chdir(base)
+        out = gate.on_pre_tool_call("patch", {"mode": "patch", "patch": patch},
+                                    task_id=session or "", session_id=session or "")
+    finally:
+        if here:
+            try:
+                os.chdir(here)
+            except OSError:
+                pass
+    decision = _decision(host, out)
+    if decision is None or decision["action"] != BLOCK:
+        for path in paths:
+            _touch(host, session, turn, path)
     return decision
 
 
@@ -579,6 +704,15 @@ def person_command(host: Host, text, cwd: str = "", session: str = "") -> Option
     spaced = not re.match(r"^\s*/foreman:", text, re.I)
     if spaced and parts and name not in PERSON_SUBCOMMANDS and name not in _hermes_subcommands():
         return None  # "/foreman is blocking my commit, why?" is a question for the model, not a command
+    return person_reply(host, m.group(1) or "", cwd)
+
+
+def person_reply(host: Host, args, cwd: str = "") -> str:
+    """Foreman's answer to its command with these arguments (``"status src"``, ``"allow 3f2a"``, ``""`` for the
+    verdict), for a harness whose own command mechanism already established that the person typed ``/foreman``."""
+    parts = (args if isinstance(args, str) else "").strip().split(None, 1)
+    name = parts[0].lower() if parts else "status"
+    rest = parts[1].strip() if len(parts) > 1 else ""
     try:
         return reword(host, _run_person(host, name, rest, cwd))
     except Exception as e:  # the person asked: always an answer, never a stack trace

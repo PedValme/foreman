@@ -18,9 +18,14 @@
   fixed in #61 (a turn that only talked is never sent back, a prompt costs no git call, the guards read the program
   that runs, `npx` and the like included, and no longer catch a grep or a commit message, a damaged installation
   fails open instead of denying every call) and the real sessions repeated after the first round.
-- Next action: T2 to T4 (Codex, pi and OpenCode with the gate; independent, one agent each; CI now also runs
-  Python 3.9 on macOS and Windows), then T5 (the reviewer as a fresh session) and T6 (`/foreman` complete on pi and
-  OpenCode). Each harness is published only after its own real-session test.
+- Next action: T2 to T4 are being built in parallel since 2026-11-24, the owner's ask («sigue con codex, pi y
+  opencode en paralelo»). Their shared base is pull request #62 (one entry point for every harness,
+  `foreman_hosts/neutral.py` for a harness whose extension is code, `core.pre_patch`); each adapter is its own
+  branch and draft pull request (`claude/adapter-codex`, `claude/adapter-pi`, `claude/adapter-opencode`), built by an
+  agent in its own worktree with a real-session run as its acceptance. For each: read its report, have an agent
+  that did not write it review it, fix, merge #62 first and then the adapter. Then T5 (the reviewer as a fresh
+  session) and T6 (`/foreman` complete on pi and OpenCode). Each harness is published only after its own
+  real-session test; real sessions leave state in `~/.foreman` on this machine: remove it when the three are done.
 - For the owner to try, his call (it goes into his own Claude Code): the plugin installs from this repository's
   marketplace file. Installed for every project it would also stop his agents' own `gh pr merge`, which his other
   repositories rely on, so per project or `claude --plugin-dir <a clone>` first.
