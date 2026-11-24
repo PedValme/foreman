@@ -85,7 +85,7 @@ class Host:
 
 
 HOSTS = tuple(MODULES)  # what `adapters/hook.py <host>` accepts
-REVIEWER_ENV = "FOREMAN_REVIEWER"  # set to "1" in the reviewer's own session: Foreman stands down inside it
+REVIEWER_ENV = "FOREMAN_REVIEWER"  # in the reviewer's own session: the token of the review running (reviewer_session)
 
 
 # ─── Words ───────────────────────────────────────────────────────────────────
@@ -574,14 +574,56 @@ def noted(host: Host, session: str, key: str) -> str:
         return ""
 
 
-def run_session(argv: list, prompt: str, seconds: float, env=None, cwd: Optional[str] = None) -> tuple:
+REVIEWER_DIR = "reviewer"            # in the state directory: one file per review running now, named by its token
+REVIEWER_TOKEN_SECONDS = 3600
+_TOKEN = re.compile(r"^[0-9a-f]{32}$")
+
+
+def _reviewer_tokens() -> Optional[str]:
+    state = _state_dir()
+    return os.path.join(state, REVIEWER_DIR) if state else None
+
+
+def reviewer_session(env) -> bool:
+    """True inside a session Foreman itself started to review a change: ``REVIEWER_ENV`` holds the token of a
+    review that is running now. The variable alone is not enough: a repository's settings can set a variable for
+    every session opened in it, and that must not be a way to switch the gate off. The token is random, lives only
+    while its review runs, and its file is in Foreman's state directory, which the agent's shell is kept out of."""
+    token = (env or {}).get(REVIEWER_ENV)
+    directory = _reviewer_tokens()
+    if not isinstance(token, str) or not _TOKEN.match(token) or not directory:
+        return False
+    try:
+        return time.time() - os.path.getmtime(os.path.join(directory, token)) < REVIEWER_TOKEN_SECONDS
+    except OSError:
+        return False
+
+
+def run_session(argv: list, prompt: str, seconds: float, env=None, cwd: Optional[str] = None,
+                drop: tuple = ()) -> tuple:
     """Run a harness's own headless command for the reviewer: (exit code, standard output, standard error). The
     prompt goes in on standard input, never on the command line (a diff is too long for one, and it is written by
-    the author under review). The child is told it is Foreman's reviewer (``REVIEWER_ENV``), so Foreman's own hooks
-    stand down inside it. Raises RuntimeError when it cannot start or does not finish in time."""
+    the author under review). The child carries the token of this review in ``REVIEWER_ENV``, so Foreman's own hooks
+    stand down inside it (``reviewer_session``); ``drop`` names variables of the asking session it must not inherit.
+    Raises RuntimeError when it cannot start or does not finish in time."""
+    import secrets
     import subprocess
-    child = dict(os.environ if env is None else env)
-    child[REVIEWER_ENV] = "1"
+    child = {k: v for k, v in dict(os.environ if env is None else env).items() if k not in drop}
+    token, marker = secrets.token_hex(16), None
+    directory = _reviewer_tokens()
+    try:
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+            for name in os.listdir(directory):  # what an interrupted review left behind
+                stale = os.path.join(directory, name)
+                if time.time() - os.path.getmtime(stale) > REVIEWER_TOKEN_SECONDS:
+                    os.unlink(stale)
+            marker = os.path.join(directory, token)
+            with open(marker, "w", encoding="utf-8") as fh:
+                fh.write(str(int(time.time())))
+    except OSError:
+        marker = None  # without it the child's own Foreman hooks run as in any session: slower, not wrong
+    child[REVIEWER_ENV] = token
     kwargs = {}
     if os.name == "nt":
         kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -592,6 +634,12 @@ def run_session(argv: list, prompt: str, seconds: float, env=None, cwd: Optional
         raise RuntimeError("the reviewer's session did not answer within %d seconds" % int(seconds))
     except OSError as e:
         raise RuntimeError("cannot start the reviewer's session (%s): %s" % (argv[0] if argv else "?", e))
+    finally:
+        if marker:
+            try:
+                os.unlink(marker)
+            except OSError:
+                pass
     return r.returncode, r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace")
 
 

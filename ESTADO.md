@@ -11,9 +11,15 @@
   on macOS and reviewed twice by agents that did not write it, with nothing blocking in any pass. Nothing under
   `plugin/` changed. `adapters/README.md` compares the four; each harness's README says what was seen, what was only
   read and its limits.
-- Next action: T5, the reviewer as a fresh session launched by Foreman, in the four (`trabajo/agnostico.md`, "Next
-  step" says where to start); then T6 (`/foreman` complete on pi and OpenCode) and T7 (READMEs, names, publication
-  and the one Hermes catalog update, with the owner).
+- Next action: T5, the reviewer as a fresh session launched by Foreman, is under way since 2026-11-24 (the owner:
+  «sigue con el revisor en los cuatro»). Pull request #67 has the host-neutral half (`foreman_hosts/reviewer.py`:
+  the plugin's `review.py` unchanged, its model call replaced by a session of the harness itself) and Claude Code
+  (`/foreman:review`, `/foreman:reviewer`), seen in a real session: a loosened assertion the gate calls CLEAN came
+  back BLOCKED with the line quoted. Codex, pi and OpenCode get theirs on branches `claude/revisor-codex`, `-pi`
+  and `-opencode`, each built by an agent in its own worktree: read each report, have an agent that did not write
+  it review it, fix, merge #67 first. Not in T5: the review when someone asks to merge and on every turn (there is
+  no `/foreman merge` outside Hermes until T6). Then T6 (`/foreman` complete on pi and OpenCode) and T7 (READMEs,
+  names, publication and the one Hermes catalog update, with the owner).
 - For the owner, his call: trying an adapter in his own harness. It goes into his own setup, and installed for
   every project the gate also refuses his agents' own `gh pr merge`, which his other repositories rely on: per
   project, or loaded for one session (`claude --plugin-dir`, `pi -e`, `codex -c hooks.…`, a link in one project's
