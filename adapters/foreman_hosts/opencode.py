@@ -268,7 +268,7 @@ def host(request=None) -> core.Host:
         # No effort levels: OpenCode names reasoning levels per model (a ``#variant``), so the person names it as
         # part of the model: ``/foreman reviewer provider/model#variant``.
         fresh_session=_fresh_session(), efforts=(), session=lambda: neutral.session(request),
-        reviewer_caveat=CAVEAT,
+        reviewer_caveat=CAVEAT, board=core.BOARD_READS,
     )
 
 

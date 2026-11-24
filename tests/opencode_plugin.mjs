@@ -137,6 +137,11 @@ if (scenario === "gate") {
   out.allowed = await command("allow " + out.id)
   out.asked = seen.asked.length
   out.after = await tool("shell", { command: "git commit -m green" })
+  // the board and its read commands: `/foreman` alone, a pin kept for this conversation, nothing asked
+  out.board = await command("")
+  out.use = await command("use")
+  out.pin = await command("use .")
+  out.askedAfterBoard = seen.asked.length
 } else if (scenario === "review") {
   // The review's own command: a longer time, and the session's model as OpenCode's record states it.
   out.shellDelays = delays.length

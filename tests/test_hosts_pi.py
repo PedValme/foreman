@@ -129,8 +129,12 @@ class TheGate(PiCase):
         self.assertIn("In pi:", help_text)
         self.assertIn("/foreman status", help_text)
         self.assertPiWords(help_text)
-        self.assertIn("Foreman: CLEAN", self.ask("command", args="")["reply"])
-        self.assertIn("not available in pi yet", self.ask("command", args="board")["reply"])
+        self.assertIn("Foreman: CLEAN", self.ask("command", args="status")["reply"])
+        self.assertIn("Foreman board: repo", self.ask("command", args="")["reply"])  # the board is the default
+        for name in ("merge 7", "reject 7", "notify on"):  # the writes come with their own slice; notices are Hermes's
+            reply = self.ask("command", args=name)["reply"]
+            self.assertIn("not available in pi yet", reply, name)
+            self.assertIn("/foreman help", reply)
 
     def test_allow_needs_a_person_at_pis_interface(self):
         self.write("tests/test_cart.py", MARKED)

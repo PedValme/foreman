@@ -257,6 +257,11 @@ class _Context:
         return answer
 
 
+def context(host: core.Host, p: Plan) -> _Context:
+    """The review's context for this harness and reviewer, for whoever runs ``review.py`` (the board's merge)."""
+    return _Context(host, p)
+
+
 _HERMES_NOTES = (review.SAME_MODEL, review.UNKNOWN_MODEL, review.TASK_SAME_MODEL, review.TASK_UNSURE,
                  review.ROUTED_MODEL)
 

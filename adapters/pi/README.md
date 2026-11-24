@@ -58,8 +58,17 @@ Each of these was seen in a real session on pi 1.5.0 (macOS, the default model, 
   it says whether it is the same as the session's. It takes as long as that model takes: up to a few
   minutes with nothing shown meanwhile.
 
-What it does not do yet: the review when someone asks to merge and on every turn (it runs when you ask), the board,
-merge and reject with reasons (Foreman on Hermes Agent has them).
+- **The board**, `/foreman` alone: the branch and its verdict, open pull requests (through `gh`, with its own
+  login) and the issues they close, each change's stages. With it, `/foreman verdict [pr|branch]`, `/foreman
+  pipeline`, `/foreman prs`, `/foreman issues` and `/foreman use [path|n]`, which pins the repository for this pi
+  session (`/foreman status` and `/foreman review` then read the pinned one). `/foreman use` alone asks you which
+  repository in pi's own selector; with nobody at the interface it prints the list and what to type. Seen on pi
+  1.5.0 with `-p` and no model turn, on a repository without a GitHub remote: the board, `verdict`, `pipeline`,
+  `prs` ("GitHub is not available here"), `use` and `use .`. The selector was run in the tests and not yet seen in
+  a session; the board with pull requests is tested in the Hermes plugin's own tests, not through pi.
+
+What it does not do yet: the review when someone asks to merge and on every turn (it runs when you ask), merge and
+reject with reasons (Foreman on Hermes Agent has them).
 
 ## Limits to know
 

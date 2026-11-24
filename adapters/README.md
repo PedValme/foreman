@@ -12,6 +12,7 @@ understands. It adds no rule and loosens none (PRODUCTO.md, rules 22 to 26).
 | `foreman_hosts/claude_code.py`, `codex.py` | The dialects of the harnesses that run a command hook with JSON |
 | `foreman_hosts/neutral.py` | The request and answer for a harness whose extension is code (pi, OpenCode) |
 | `foreman_hosts/reviewer.py` | The review outside Hermes: a fresh session of the harness, and who it is |
+| `foreman_hosts/standin.py` | The board outside Hermes: `plugin/foreman/board.py` on a stand-in for Hermes's context |
 | `foreman_hosts/pi.py`, `opencode.py` | The dialects of those two: their guards and their words |
 | `claude-code/` | Claude Code's hooks and commands, named by `.claude-plugin/plugin.json` at the repository root |
 | `codex/` | Codex's `hooks.json` and its [README](codex/README.md) |
@@ -36,6 +37,7 @@ OpenCode 2.3.2); each harness's own README says exactly what was seen, what was 
 | A write that switches off a test | `Write`, `Edit` | `apply_patch` | `write`, `edit` | `write`, `edit`, `patch` |
 | A turn that left one behind is sent back once | `Stop` | `Stop` | `agent_before_settle` | `experimental.idle` |
 | Your commands, no model turn | `/foreman:status` | `foreman status` as a prompt | `/foreman status` | `/foreman status` (TUI, apps) |
+| The board (`/foreman`, `verdict`, `pipeline`, `prs`, `issues`, `use`) | no | no | yes | yes, as an error notice |
 | Allowing a marked finding | typed in an interactive session | not available yet | at pi's interface | approved in OpenCode's permission prompt |
 | When Foreman must ask you | the permission prompt | refused with the reason | pi's dialog | the permission prompt |
 | With nobody attending | refused | refused | refused | refused |
@@ -43,8 +45,21 @@ OpenCode 2.3.2); each harness's own README says exactly what was seen, what was 
 
 The same everywhere: the gate is the Hermes plugin's, on the agent's own machine, so the independent control stays
 the required check in CI (`examples/foreman-check.yml`); Foreman's hooks and state are files, guarded against the
-plain attempt and not a disguised one; the board and merge or reject with reasons are only in Foreman on Hermes
-Agent so far.
+plain attempt and not a disguised one.
+
+## The board, on pi and OpenCode
+
+`/foreman` alone is the board there, as in Hermes: the branch and its verdict, the open pull requests and the
+issues they close, each change's stages. With it come `verdict [pr|branch]`, `pipeline`, `prs`, `issues` and `use`
+(pin the repository for the conversation). It is `plugin/foreman/board.py` as it is, run on a stand-in for Hermes's
+context (`foreman_hosts/standin.py`). When a command needs you to choose (which repository), Foreman's program
+cannot ask, because it answers one request and ends: it answers with the question, the harness's extension shows it
+in its own dialog and sends the command again with your pick (`neutral.py`, "question"). pi has that dialog;
+OpenCode's plugin does not yet, so there the command prints the list and what to type. Seen on pi 1.5.0 in a real
+session without a model turn (`pi -p "/foreman"`, `verdict`, `pipeline`, `use`, on a repository without a GitHub
+remote); pi's selector was run in the tests and not yet seen in a session, and the board with pull requests is
+tested in the Hermes plugin's own tests, not through pi or OpenCode. Merge
+and reject with reasons are only in Foreman on Hermes Agent so far; Claude Code and Codex have no board.
 
 ## The review in the four
 

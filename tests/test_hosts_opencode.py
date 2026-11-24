@@ -317,6 +317,10 @@ class Plugin(OpenCodeCase):
         self.assertIn("allowed " + out["id"], out["allowed"]["error"])
         self.assertEqual(out["asked"], 2)  # only `allow <id>` asks, once each time
         self.assertTrue(out["after"]["ok"])
+        self.assertIn("Foreman board: repo", out["board"]["error"])  # `/foreman` alone is the board
+        self.assertIn("repositories you can pin", out["use"]["error"])  # no dialog of options here: the list
+        self.assertIn("pinned", out["pin"]["error"])
+        self.assertEqual(out["askedAfterBoard"], 2)  # none of them asks through the permission prompt
 
     def test_the_review_command_waits_ten_minutes_and_carries_the_sessions_model(self):
         out = self.drive("review")

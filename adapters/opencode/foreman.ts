@@ -309,7 +309,8 @@ export default {
     await ctx.command.transform((editor: any) => {
       editor.add({
         name: "foreman",
-        description: "Foreman: status [path] | allow [id] | review [target] [--fresh] | reviewer [model] | help",
+        description: "Foreman: the board | verdict [pr|branch] | pipeline | prs | issues | use [path|n] | status [path] | "
+                     + "allow [id] | review [target] [--fresh] | reviewer [model] | help",
         execute: async (input: any) => {
           const args = commandArgs(input?.prompt)
           let attended = false
@@ -329,8 +330,11 @@ export default {
           } catch {}
           let answer: Answer
           try {
-            answer = await ask({ event: "command", args, cwd: base, attended, ...(model ? { model } : {}) },
-                               HOOK, "python3", COMMAND_MS)
+            // `session`: the repository pinned with `/foreman use` is kept per conversation. This plugin has no
+            // dialog of several options, so `attended` stays false for every command but `allow`, and a command
+            // that would ask (which repository) answers with the list and what to type instead.
+            answer = await ask({ event: "command", args, cwd: base, session: String(input.sessionID ?? ""), attended,
+                                 ...(model ? { model } : {}) }, HOOK, "python3", COMMAND_MS)
           } catch (e) {
             throw new Error(`Foreman could not run (${(e as Error).message}).`)
           }
