@@ -147,7 +147,7 @@ def _fresh_session(env):
             with open(system_file, "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(system)
             argv = [program, "--mode", "json", "--no-tools", "--no-extensions", "--no-session", "--no-context-files",
-                    "--no-skills", "--no-prompt-templates", "--no-themes"]
+                    "--no-skills", "--no-prompt-templates", "--no-themes", "--no-mcp"]
             if model:
                 argv += ["--model", model]
             if effort:

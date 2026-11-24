@@ -70,8 +70,11 @@ merge and reject with reasons (Foreman on Hermes Agent has them).
   pi as a file, so it survives `pi.cmd` on Windows. Any model pi offers can be chosen, and a
   small one may miss a rigged line or quote one wrongly (the quote is checked against the diff, a miss is not).
   A model that does not support the thinking level you chose gets the nearest one it does (pi clamps it). The
-  review needs `pi` on the PATH and uses whatever login pi has for the model. The reviewer's session is started
-  with `--no-extensions`, so Foreman's extension is not loaded in it; Foreman's own hook also stands down for the
+  review needs `pi` on the PATH and uses whatever login pi has for the model. The reviewer's session starts no MCP
+  server (`--no-mcp`: pi would otherwise connect every enabled one, `--no-tools` or not). The repository's
+  instructions are not read, but pi's documentation does not say whether a global `APPEND_SYSTEM.md` is still
+  appended when `--system-prompt` is given: that is not known, so your own appended system text may reach the
+  reviewer. The session is started with `--no-extensions`, so Foreman's extension is not loaded in it; Foreman's own hook also stands down for the
   token of a review that is running, and `FOREMAN_REVIEWER` set by anything else switches nothing off.
 
 - The gate runs on the agent's own machine. The independent control is still the required check in CI

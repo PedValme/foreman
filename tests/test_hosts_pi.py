@@ -270,7 +270,7 @@ class PisFreshSession(PiCase):
         answer = self.run_it(env, "vendor/big", "high")
         self.assertEqual((answer.parsed, answer.model, answer.provider), (PASS, "big", "vendor"))
         argv = self.read("argv").split("\n")
-        for flag in ("--no-tools", "--no-extensions", "--no-session", "--no-context-files", "--no-skills"):
+        for flag in ("--no-tools", "--no-extensions", "--no-session", "--no-context-files", "--no-skills", "--no-mcp"):
             self.assertIn(flag, argv)
         self.assertEqual(argv[argv.index("--mode") + 1], "json")
         self.assertEqual(argv[argv.index("--model") + 1], "vendor/big")
