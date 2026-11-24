@@ -3,7 +3,9 @@
 **Promise:** a green check the agent did not rig. Other plugins prove the check ran; Foreman proves the agent did
 not skip, delete or weaken the tests, change what the check runs, or commit a secret to get there.
 
-**User:** a developer who lets Hermes Agent write code in a git repository.
+**User:** a developer who lets a coding agent write code in a git repository. Hermes Agent has the whole line (the
+plugin in `plugin/`, listed in its catalog); Claude Code, Codex, pi and OpenCode get it through adapters (rules 22
+to 25; ESTADO.md says which ones exist today). Rules 1 to 21 are written for Hermes and hold there as they are.
 
 ## Rules
 1. **Deterministic first.** The blockers come from a detector with no model: skipped or isolated tests, deleted
@@ -56,6 +58,22 @@ not skip, delete or weaken the tests, change what the check runs, or commit a se
     same `/foreman` commands a person would type; it never calls `gh` or merges.
 21. **Only the plugin is installed.** The plugin lives in `plugin/`; the method documents, tests and examples
     stay in the repository and never reach a user's machine.
+22. **One core, an adapter per harness.** The detector and the gate live in `plugin/foreman/`, the single source.
+    An adapter (`adapters/`) only translates: what its harness sends becomes the gate's own calls, and the gate's
+    answer becomes what that harness understands. An adapter adds no rule and loosens none; `plugin/` never reads
+    outside itself.
+23. **The Hermes plugin changes only with a catalog update.** Changes to the core land on `main` with the tests
+    green and reach Hermes users together, in one substantial update tried first in the `foremandev` profile.
+24. **What a person decides stays out of the agent's reach, in every harness.** `allow` and `merge` exist only where
+    the model cannot type them (a command the person types; never a tool, never the agent's shell), an agent that
+    runs them is blocked, and with nobody attending they do nothing.
+25. **Outside Hermes the reviewer is a fresh session that did not write the code.** Foreman launches it (never the
+    writing agent), without tools, with the diff, and verifies its answer as rule 8's review does. The user picks
+    its model and effort; with nothing picked, the same model one effort level up, and the verdict says so. It
+    reviews when someone asks to merge; on every turn only if the user turns it on.
+26. **Full where the harness allows it.** pi and OpenCode (its v2 plugin API) get the gate, `/foreman` and the
+    reviewer; Claude Code and Codex get the gate, the person's commands and the reviewer. Phone notifications and
+    the Desktop panel are Hermes's.
 
 ## Out of this delivery
 Publishing GitHub checks from the agent, the owner's decisions and pending items, rework metrics. Buttons on the
