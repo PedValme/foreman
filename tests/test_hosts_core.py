@@ -417,8 +417,11 @@ class PersonCommand(HostCase):
 
     def test_help_lists_this_harness_commands_only(self):
         out = self.ask("/foreman:help")
-        for name in core.PERSON_SUBCOMMANDS:
+        for name in core.person_subcommands(self.host):
             self.assertIn("/foreman:" + name, out)
+        for name in core.REVIEW_SUBCOMMANDS:  # this test's harness has no reviewer: it does not offer one
+            self.assertNotIn("/foreman:" + name, out)
+            self.assertIn("not available in Test Host yet", self.ask("/foreman:" + name))
         self.assertNotIn("/foreman merge", out)
         self.assertNotIn("Hermes", out)
 

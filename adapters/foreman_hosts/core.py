@@ -43,6 +43,26 @@ def _never(*_args) -> bool:
 
 
 @dataclass(frozen=True)
+class Session:
+    """What a harness says about the session that asked for a review; "" where it does not say."""
+    model: str = ""    # the model writing the code
+    effort: str = ""   # its effort level, one of the harness's own names
+
+
+@dataclass(frozen=True)
+class Answer:
+    """What a fresh session of the harness gave back: the object the schema asked for, when it gave one."""
+    parsed: Optional[dict] = None
+    text: str = ""
+    model: str = ""      # the model that answered, as the harness names it
+    provider: str = ""
+
+
+def _no_session() -> Session:
+    return Session()
+
+
+@dataclass(frozen=True)
 class Host:
     """What differs from one harness to the next."""
     name: str                                    # "claude-code"
@@ -56,15 +76,25 @@ class Host:
     # An interactive session, as opposed to an unattended one. It tells the two apart and no more: the agent's own
     # shell inherits it, so what keeps the agent from the person's commands is the guard below, not this.
     attended: Callable[[], bool] = _never
+    # The reviewer (reviewer.py): a fresh session of this same harness, started without tools.
+    # fresh_session(system prompt, prompt, JSON schema, model, effort, seconds) -> Answer; it raises RuntimeError
+    # with the reason when the session could not answer. None: this harness has no reviewer yet.
+    fresh_session: Optional[Callable[..., "Answer"]] = None
+    efforts: tuple = ()                              # the harness's effort levels, lowest first; () when it has none
+    session: Callable[[], Session] = _no_session     # the model and effort of the session that asked
+    # One sentence every review in this harness carries under its "Reviewer:" line: what its reviewer's session can
+    # still do or see that the others' cannot (a limit the harness leaves no way to close). "" when there is none.
+    reviewer_caveat: str = ""
 
 
 HOSTS = tuple(MODULES)  # what `adapters/hook.py <host>` accepts
+REVIEWER_ENV = "FOREMAN_REVIEWER"  # in the reviewer's own session: the token of the review running (reviewer_session)
 
 
 # ─── Words ───────────────────────────────────────────────────────────────────
 
 _MERGE_HINT = re.compile(r"Ask them to run `/foreman merge ?([^`]*)`\.")
-_SUBCOMMAND = re.compile(r"/foreman (allow|status|help)\b")
+_SUBCOMMAND = re.compile(r"/foreman (allow|status|help|reviewer|review)\b")
 _PLAIN = (
     ("Re-run it with `workdir` set to the repository, or as", "Re-run it from the repository's directory, or as"),
     ("does not exist on the Hermes host (a remote terminal backend?)", "does not exist on this machine"),
@@ -271,9 +301,14 @@ def _runs_entry(command: str) -> bool:
     return False
 
 
+_SETS_REVIEWER = re.compile(r"\b%s\s*=" % REVIEWER_ENV)
+
+
 def _guard_command(host: Host, command: str) -> Optional[dict]:
     if _names_own(host, command) or _runs_entry(command):
         return {"action": BLOCK, "message": _OWN}
+    if _SETS_REVIEWER.search(command or ""):  # a harness started as "the reviewer" runs without the gate
+        return {"action": BLOCK, "message": _OFF}
     try:
         if host.switches_off(command):
             return {"action": BLOCK, "message": _OFF}
@@ -507,6 +542,118 @@ def _save(host: Host, session: str, data: dict) -> None:
             pass
 
 
+def note(host: Host, session: str, key: str, value: str) -> None:
+    """Remember one thing about a session that outlives its turns (its effort level, as the harness last said
+    it): a small file of its own, so a turn's start does not wipe it."""
+    path = _session_file(host, session, ".meta.json")
+    if not path or not isinstance(value, str):
+        return
+    try:
+        data = {}
+        try:
+            with open(path, encoding="utf-8") as fh:
+                loaded = json.load(fh)
+            data = loaded if isinstance(loaded, dict) else {}
+        except (OSError, ValueError):
+            pass
+        if data.get(key) == value:
+            return
+        data[key] = value
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".tmp-")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        os.replace(tmp, path)
+    except OSError:
+        logger.warning("foreman: cannot note the session's %s", key, exc_info=True)
+
+
+def noted(host: Host, session: str, key: str) -> str:
+    path = _session_file(host, session, ".meta.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            value = json.load(fh).get(key)
+        return value if isinstance(value, str) else ""
+    except (OSError, ValueError, TypeError, AttributeError):
+        return ""
+
+
+REVIEWER_DIR = "reviewer"            # in the state directory: one file per review running now, named by its token
+REVIEWER_TOKEN_SECONDS = 3600
+_TOKEN = re.compile(r"^[0-9a-f]{32}$")
+
+
+def _reviewer_tokens() -> Optional[str]:
+    state = _state_dir()
+    return os.path.join(state, REVIEWER_DIR) if state else None
+
+
+def reviewer_session(env) -> bool:
+    """True inside a session Foreman itself started to review a change: ``REVIEWER_ENV`` holds the token of a
+    review that is running now. The variable alone is not enough: a repository's settings can set a variable for
+    every session opened in it, and that must not be a way to switch the gate off. The token is random, lives only
+    while its review runs, and its file is in Foreman's state directory, which the agent's shell is kept out of."""
+    token = (env or {}).get(REVIEWER_ENV)
+    directory = _reviewer_tokens()
+    if not isinstance(token, str) or not _TOKEN.match(token) or not directory:
+        return False
+    try:
+        return _token_is_live(os.path.join(directory, token))
+    except OSError:
+        return False
+
+
+def _token_is_live(path: str) -> bool:
+    """A token file written within the last hour. One dated in the future is not live either: nothing of
+    Foreman's writes such a file, and it would otherwise never expire."""
+    return 0 <= time.time() - os.path.getmtime(path) < REVIEWER_TOKEN_SECONDS
+
+
+def run_session(argv: list, prompt: str, seconds: float, env=None, cwd: Optional[str] = None,
+                drop: tuple = ()) -> tuple:
+    """Run a harness's own headless command for the reviewer: (exit code, standard output, standard error). The
+    prompt goes in on standard input, never on the command line (a diff is too long for one, and it is written by
+    the author under review). The child carries the token of this review in ``REVIEWER_ENV``, so Foreman's own hooks
+    stand down inside it (``reviewer_session``); ``drop`` names variables of the asking session it must not inherit.
+    Raises RuntimeError when it cannot start or does not finish in time."""
+    import secrets
+    import subprocess
+    child = {k: v for k, v in dict(os.environ if env is None else env).items() if k not in drop}
+    token, marker = secrets.token_hex(16), None
+    directory = _reviewer_tokens()
+    try:
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+            for name in os.listdir(directory):  # what an interrupted review left behind
+                try:  # each on its own: another review ending now removes its file under this loop
+                    if not _token_is_live(os.path.join(directory, name)):
+                        os.unlink(os.path.join(directory, name))
+                except OSError:
+                    pass
+            marker = os.path.join(directory, token)
+            with open(marker, "w", encoding="utf-8") as fh:
+                fh.write(str(int(time.time())))
+    except OSError:
+        marker = None  # without it the child's own Foreman hooks run as in any session: slower, not wrong
+    child[REVIEWER_ENV] = token
+    kwargs = {}
+    if os.name == "nt":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        r = subprocess.run([str(a) for a in argv], input=(prompt or "").encode("utf-8"), capture_output=True,
+                           timeout=max(1.0, float(seconds)), env=child, cwd=cwd, **kwargs)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("the reviewer's session did not answer within %d seconds" % int(seconds))
+    except OSError as e:
+        raise RuntimeError("cannot start the reviewer's session (%s): %s" % (argv[0] if argv else "?", e))
+    finally:
+        if marker:
+            try:
+                os.unlink(marker)
+            except OSError:
+                pass
+    return r.returncode, r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace")
+
+
 def _touch(host: Host, session: str, turn: str, path: str) -> None:
     """Remember that this turn wrote ``path``: one appended line, so parallel tool calls cannot lose each other's."""
     target = _session_file(host, session, ".touched")
@@ -687,8 +834,17 @@ _PERSON_COMMAND = re.compile(r"^\s*/foreman(?:[:\s]\s*(.*))?$", re.S | re.I)
 PERSON_SUBCOMMANDS = {
     "status": "[path]  this repository's verdict (CLEAN, BLOCKED, INCOMPLETE, NEEDS YOUR OK)",
     "allow": "[id]  list findings the agent marked, or allow one of them (you only)",
+    "review": "[pr|branch] [--fresh]  a fresh session that did not write the code reviews the change (advisory)",
+    "reviewer": "[model] [effort]  who reviews: show it, set it, or `default`",
     "help": "this help",
 }
+REVIEW_SUBCOMMANDS = ("review", "reviewer")  # listed and answered only where the harness has a reviewer
+
+
+def person_subcommands(host: Host) -> dict:
+    """The subcommands this harness answers."""
+    return {name: doc for name, doc in PERSON_SUBCOMMANDS.items()
+            if host.fresh_session is not None or name not in REVIEW_SUBCOMMANDS}
 
 
 def person_command(host: Host, text, cwd: str = "", session: str = "") -> Optional[str]:
@@ -744,7 +900,10 @@ def _run_person(host: Host, name: str, rest: str, cwd: str) -> str:
         return commands.cmd_allow(rest)
     if name == "help":
         return _help(host)
-    if name in commands.SUBCOMMANDS:
+    if name in REVIEW_SUBCOMMANDS and host.fresh_session is not None:
+        from . import reviewer  # late: it loads the review
+        return reviewer.run(host, rest, cwd) if name == "review" else reviewer.configure(host, rest)
+    if name in commands.SUBCOMMANDS or name in REVIEW_SUBCOMMANDS:
         return ("Foreman: `%s` is not available in %s yet. Here Foreman is the gate (it blocks a rigged commit, "
                 "push or pull request, and an agent-run merge) plus `%s` and `%s`."
                 % (name, host.label, host.person("status"), host.person("allow")))
@@ -755,7 +914,7 @@ def _help(host: Host) -> str:
     from foreman import verdicts
     from foreman.detector import MARKER
     lines = ["Foreman: a green check the agent did not rig.", "", "In %s:" % host.label]
-    lines += ["  %-18s %s" % (host.person(name), doc) for name, doc in PERSON_SUBCOMMANDS.items()]
+    lines += ["  %-18s %s" % (host.person(name), doc) for name, doc in person_subcommands(host).items()]
     lines += ["", "Verdicts:", verdicts.table(), "",
               "Foreman blocks git commit, git push and gh pr create when the change skips, deletes or moves tests, "
               "edits or weakens what the check runs, bypasses hooks or carries a secret; an agent-run gh pr merge is "

@@ -14,7 +14,8 @@ Request (a JSON object; ``event`` decides which other keys are read)::
     {"event": "patch",      "patch": "*** Begin Patch ...", ...}
     {"event": "turn_start", "cwd": "...", "session": "...", "turn": "..."}
     {"event": "turn_end",   "cwd": "...", "session": "...", "turn": "..."}
-    {"event": "command",    "args": "allow 3f2a", "cwd": "...", "attended": true}
+    {"event": "command",    "args": "allow 3f2a", "cwd": "...", "attended": true,
+                            "model": "...", "effort": "..."}       the session's own, when the harness knows them
 
 Answer (always one JSON object)::
 
@@ -49,6 +50,13 @@ What every extension must get right, so the harnesses behave alike:
   the person once per session.
 - **Where Foreman is**: the extension runs ``hook.py`` by the absolute path of its own installation (next to the
   extension's file), never a path taken from the agent's working directory.
+- **The review** (``command`` with ``review`` or ``reviewer``) starts a session of the harness and waits for it:
+  the extension gives a ``command`` request ten minutes, not thirty seconds. It sends the session's ``model`` and
+  ``effort`` as the harness names them, or leaves them out when it does not know them (``session()`` below): they
+  only decide what the review says about its own reviewer and its default effort. Inside the reviewer's own
+  session the extension behaves as in any other and every request is answered ``{}``: this program knows that
+  session by the token of the review that is running. The extension never reads ``FOREMAN_REVIEWER`` itself: the
+  variable alone proves nothing, because a project's configuration can set one for every session.
 """
 from __future__ import annotations
 
@@ -68,6 +76,13 @@ def _text(value) -> str:
 def attended(request: dict) -> bool:
     """A person is at the harness's interface: the request says so with the JSON value ``true`` and nothing else."""
     return isinstance(request, dict) and request.get("attended") is True
+
+
+def session(request: dict) -> core.Session:
+    """The model and effort of the session that sent the request, as the extension stated them; "" for what it did
+    not state or stated as something other than a string."""
+    request = request if isinstance(request, dict) else {}
+    return core.Session(model=_text(request.get("model")).strip(), effort=_text(request.get("effort")).strip())
 
 
 def _required(request: dict, key: str) -> str:
