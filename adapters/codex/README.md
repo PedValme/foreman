@@ -46,7 +46,7 @@ in `-s workspace-write`:
   sent back once with what to undo. A turn that only talked is never sent back.
 - **Your commands**, typed as a prompt and answered by the hook with no model turn: `foreman`,
   `foreman status [path]`, `foreman allow`, `foreman help`, and the review's (below): `foreman review [target]
-  [--fresh]`, `foreman reviewer [model] [effort]`. A prompt that is exactly one of these lines (a leading
+  [--fresh]`, `foreman reviewer` (shows who reviews). A prompt that is exactly one of these lines (a leading
   `/` is accepted) is taken as a command; any other prompt, `foreman status looks wrong, why?` included, goes to the
   model. They are plain words, not `/foreman`, because Codex's interactive prompt refuses a slash command it does not
   know before any hook runs (read in Codex's program, not seen).
@@ -69,18 +69,32 @@ that every finding quotes a line of the diff, prints a verdict (PASS, CONCERNS o
 same diff by the same reviewer is never sent twice (`--fresh` asks again). It is advice: it grants, merges and
 unblocks nothing, and Foreman's own gate decides what it decides without it.
 
-The session is `codex exec --ephemeral --ignore-user-config --sandbox read-only`, started by Foreman in an empty
-temporary directory, with the diff on standard input. The agent that wrote the code does not start it: `foreman review` is
-answered only from your own prompt. Codex's login is the one you already have.
+The session is `codex exec --ephemeral --ignore-user-config --sandbox read-only` with the shell, command and image
+tools switched off (`--disable shell_tool --disable unified_exec --disable view_image`), started by Foreman in an empty
+temporary directory, with the diff on standard input and Foreman's fixed rules as its instructions
+(`-c model_instructions_file=<file>`; the diff never goes in that file). The switch-off matters: Codex's read-only
+sandbox blocks writes and the network, not reads, so a session with a shell can read any file of yours. Measured: with the
+shell on, a session asked to read a file outside its directory did; with those three switches off, it answered that it
+had no tool to do so. Codex's login is the one you already have.
 
-**Who reviews is yours**, `foreman reviewer [model] [effort]` (`foreman reviewer default` goes back). With nothing
-chosen it is the model this session runs on (the hook input names it), in a clean context and no more:
-not another model, and the review says so in plain words. For an independent look,
-choose another: `foreman reviewer gpt-6-luna medium`. A lone word is taken as a model name only if it has a dash,
-dot or digit in it (`foreman reviewer please` goes to the model). Effort levels, lowest first, are the ones in Codex
-0.171.0's own model catalog (`codex debug models --bundled`): `low`, `medium`, `high`, `xhigh`, `max`, `ultra`. Not
-every model takes every level (the catalog gives `gpt-5.5` up to `xhigh`); Codex refuses one the model lacks and
-the review says why.
+Who started it is not fully known. `foreman review` is a prompt, and nothing Codex tells its hooks was shown to
+separate your own prompt from one the agent writes for a subagent, so a review the agent asked for in that way
+cannot be told from yours. What it can do is small: it costs a model call and shows a verdict, which is advice.
+
+**Who reviews** is shown by `foreman reviewer`. Setting it is not available from a Codex prompt, for the reason
+`foreman allow <id>` is not: a choice saved by an agent's prompt would be reported by every later review as yours.
+You set it yourself in `config.json` in Foreman's state directory (`~/.foreman/config.json`), in this shape (either
+field may be left out):
+
+```
+{"reviewer": {"codex": {"model": "gpt-6-luna", "effort": "medium"}}}
+```
+
+With nothing chosen it is the model this session runs on (the hook input names it), in a clean context and no more:
+not another model, and the review says so in plain words. For an independent look, choose another. Effort levels,
+lowest first, are the ones in Codex 0.171.0's own model catalog (`codex debug models --bundled`): `low`, `medium`,
+`high`, `xhigh`, `max`, `ultra`. Not every model takes every level (the catalog gives `gpt-5.5` up to `xhigh`);
+Codex refuses one the model lacks and the review says why.
 
 Seen on Codex CLI 0.171.0 (macOS) with `gpt-6-luna` at `low`, in a throwaway repository: an `assertEqual` loosened to
 `assertTrue` came back as BLOCKED, with the new line quoted as evidence. The second `foreman review` printed the
@@ -95,8 +109,9 @@ Limits in Codex:
   default reviewer is not raised a level above the session as it is in Claude Code, and the review says so.
 - **Codex does not say which model answered**, so the review names the one you chose, or none.
 - **The reviewer is not fully clean.** `--ignore-user-config` skips your `config.toml`, but Codex still loads your
-  global instructions file from its home, and the reviewer sees them (Codex warned of 39 KB of them in the runs
-  here). `-c project_doc_max_bytes=0` only silenced Codex's size warning: the input was the same 30186 tokens. They are not Foreman's and cannot widen what it may do: it has a read-only sandbox in an empty directory.
+  global instructions file from its home, and the reviewer sees it (Codex warned of 39 KB of them in the runs here).
+  Neither `-c project_doc_max_bytes=0` (it only silenced the warning) nor `-c model_instructions_file=` (the warning
+  and the global file stayed) removed it. The file is not Foreman's, and the session has no tool to act on it.
 - **It takes as long as the model takes**, up to 7 minutes (retries included) with nothing shown meanwhile; the hook's
   timeout above is 600 seconds for that. A rate limit (429) or a server error (5xx) is retried by the review.
 

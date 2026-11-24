@@ -133,7 +133,7 @@ def _strict(schema):
 
 
 def _fresh_session(env):
-    """Codex's own headless mode as the reviewer: one prompt, a read-only sandbox, no session kept, the JSON the
+    """Codex's own headless mode as the reviewer: one prompt, no shell or command tool, a read-only sandbox, no session kept, the JSON the
     schema asks for. It starts in an empty directory (so it reads neither the repository under review nor its
     instructions), without the user's config.toml (their hooks, servers and model settings), and uses the login
     Codex already has. Its events come back as JSON lines: the answer is the last agent message."""
@@ -145,17 +145,23 @@ def _fresh_session(env):
                 json.dump(_strict(schema or {}), fh)
             work = os.path.join(empty, "work")
             os.mkdir(work)
+            # The shell, command and image tools are switched off: the read-only sandbox stops writes and the
+            # network, not reads, so a session with a shell could read any file of the person's (seen).
             argv = [shutil.which("codex", path=env.get("PATH")) or "codex", "exec", "--ephemeral", "--ignore-user-config",
                     "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", "--json",
+                    "--disable", "shell_tool", "--disable", "unified_exec", "--disable", "view_image",
                     "--output-schema", schema_file]
+            if system:  # Foreman's fixed rules (never the diff) as the session's own instructions
+                rules = os.path.join(empty, "instructions.md")
+                with open(rules, "w", encoding="utf-8") as fh:
+                    fh.write(system)
+                argv += ["-c", "model_instructions_file=%s" % json.dumps(rules)]  # a TOML string, also on Windows
             if model:
                 argv += ["--model", model]
             if effort:
                 argv += ["-c", "model_reasoning_effort=%s" % effort]
             argv.append("-")  # the prompt comes from standard input
-            # `codex exec` has no system prompt of its own: the reviewer's rules go first in the one prompt.
-            full = "%s\n\n%s" % (system, prompt) if system else prompt
-            code, out, err = core.run_session(argv, full, seconds, env, cwd=work)
+            code, out, err = core.run_session(argv, prompt, seconds, env, cwd=work)
         text, failure = "", ""
         for line in out.splitlines():
             try:
@@ -301,6 +307,12 @@ def codex_words(text: str) -> str:
     """The gate's text as it applies in Codex: no advice to run `foreman allow <id>`, which Codex refuses."""
     for pattern, new in _NO_ALLOW_WORDS:
         text = pattern.sub(new, text)
+    # The reviewer cannot be set from a Codex prompt: no advice to run `foreman reviewer <model> [effort]` or `default`.
+    elsewhere = "in Foreman's config.json (`foreman reviewer <model>` says how)"
+    for old, new in ((" `foreman reviewer default` goes back to the default.", ""),
+                     ("Choose another with `foreman reviewer <model> [effort]`.", "Choose another " + elsewhere + "."),
+                     ("Choose a reviewer with `foreman reviewer <model> [effort]`.", "Choose a reviewer " + elsewhere + ".")):
+        text = text.replace(old, new)
     return text
 
 
@@ -333,15 +345,31 @@ NO_ALLOW = ("Foreman: allowing a finding is not available in Codex yet. Nothing 
             "fix it instead, or commit the change yourself in your own terminal.")
 
 
+_SET_REVIEWER = re.compile(r"[ \t]*/?foreman[ \t]+reviewer[ \t]+\S.*", re.I)
+
+
+def no_set_reviewer() -> str:
+    from foreman import grants
+    return ("Foreman: the reviewer cannot be set from a Codex prompt. Nothing Codex tells its hooks was shown to tell "
+            "your own prompt from one the agent writes for a subagent, and a choice saved here is reported by every "
+            "later review as yours. Set it yourself in %s, as {\"reviewer\": {\"codex\": {\"model\": \"<model>\", "
+            "\"effort\": \"<%s>\"}}} (either may be left out or empty), or delete the file's `codex` entry to go "
+            "back to the default. `foreman reviewer` shows who reviews." % (
+                os.path.join(grants.store_dir(), "config.json"), "|".join(EFFORTS)))
+
+
 def person_reply(h: core.Host, prompt, cwd: str = "") -> Optional[str]:
     """Foreman's answer when ``prompt`` is exactly one of its commands, else None (the prompt goes to the model)."""
     if not isinstance(prompt, str) or not _PERSON_COMMAND.fullmatch(prompt):
         return None
     if _ALLOW_ID.fullmatch(prompt):
         return NO_ALLOW
+    if _SET_REVIEWER.fullmatch(prompt):
+        return no_set_reviewer()
     words = prompt.strip().lstrip("/").split(None, 1)
     args = words[1] if len(words) > 1 else ""
-    reply = codex_words(core.person_reply(h, args, cwd))
+    reply = codex_words(core.person_reply(h, args, cwd)).replace(
+        "who reviews: show it, set it, or `default`", "who reviews: show it (setting it is not available in Codex)")
     if args.lower() in ("allow", "help"):
         reply += "\n\n" + NO_ALLOW
     return reply

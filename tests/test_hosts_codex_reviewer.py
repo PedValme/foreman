@@ -37,8 +37,10 @@ class CodexCase(GitRepoCase):
                      "for last; do :; done\n"
                      "i=0; for a; do i=$((i+1)); if [ \"$a\" = --output-schema ]; then n=$((i+1)); fi; done\n"
                      "eval \"s=\\${$n}\"; cp \"$s\" '%s/schema' 2>/dev/null\n"
+                     "for a; do case \"$a\" in model_instructions_file=*) f=${a#model_instructions_file=}; f=${f#\\\"}; "
+                     "f=${f%%\\\"}; cp \"$f\" '%s/rules';; esac; done\n"
                      "cat <<'EOF'\n%s\nEOF\ncat >&2 <<'EOF'\n%s\nEOF\nexit %d\n"
-                     % (self.tmp, self.tmp, self.tmp, self.tmp, self.tmp, stdout, stderr, code))
+                     % (self.tmp, self.tmp, self.tmp, self.tmp, self.tmp, self.tmp, stdout, stderr, code))
         os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR)
         return {"PATH": directory + os.pathsep + os.environ.get("PATH", "")}
 
@@ -66,11 +68,16 @@ class CodexFreshSession(CodexCase):
             self.assertIn(flag, argv)
         self.assertEqual(argv[argv.index("--sandbox") + 1], "read-only")
         self.assertEqual(argv[argv.index("--model") + 1], "model-b")
-        self.assertEqual(argv[argv.index("-c") + 1], "model_reasoning_effort=high")
+        configs = [argv[i + 1] for i, a in enumerate(argv) if a == "-c"]
+        self.assertIn("model_reasoning_effort=high", configs)
+        self.assertTrue(any(c.startswith("model_instructions_file=\"") for c in configs))
+        for tool in ("shell_tool", "unified_exec", "view_image"):  # no shell or command tool at all
+            self.assertEqual(argv[argv.index(tool) - 1], "--disable")
         self.assertEqual(argv[-2], "-")  # the prompt is read from standard input
         self.assertNotIn("THE PROMPT", argv)
         self.assertNotIn("SYSTEM", argv)
-        self.assertEqual(self.read("stdin"), "SYSTEM\n\nTHE PROMPT")
+        self.assertEqual(self.read("stdin"), "THE PROMPT")  # only the diff's prompt; the rules are the instructions
+        self.assertEqual(self.read("rules"), "SYSTEM")
         self.assertRegex(self.read("env"), r"^[0-9a-f]{32}$")  # this review's own token
         self.assertNotEqual(os.path.realpath(self.read("cwd").strip()), os.path.realpath(self.root))
         sent = json.loads(self.read("schema"))  # every object closed and every property required, as the API wants
@@ -81,13 +88,14 @@ class CodexFreshSession(CodexCase):
         self.assertNotIn("additionalProperties", schema)  # the caller's schema is not touched
 
     def test_no_model_and_no_effort_means_no_such_flags(self):
-        answer = codex._fresh_session(self.program(said(json.dumps(PASS))))("S", "P", {}, "", "", 30)
+        answer = codex._fresh_session(self.program(said(json.dumps(PASS))))("", "P", {}, "", "", 30)
         self.assertEqual(answer.parsed, PASS)
         argv = self.read("argv").split("\n")
         self.assertNotIn("--model", argv)
         self.assertNotIn("-m", argv)
         self.assertNotIn("-c", argv)
-        self.assertEqual(self.read("stdin"), "S\n\nP")
+        self.assertEqual(self.read("stdin"), "P")
+        self.assertFalse(any("model_instructions_file" in a for a in argv))  # no rules, no file
 
     def test_the_model_that_answered_is_not_invented(self):
         answer = codex._fresh_session(self.program(said(json.dumps(PASS))))("S", "P", {}, "asked-for", "low", 30)
@@ -138,11 +146,18 @@ class CodexReviewer(CodexCase):
         return codex.answer(data, env or {})
 
     def test_the_efforts_are_codexs_own_levels(self):
-        self.assertEqual(codex.EFFORTS, ("low", "medium", "high", "xhigh", "max", "ultra"))
         h = codex.host({})
-        self.assertEqual(h.efforts, codex.EFFORTS)
+        for level in ("low", "medium", "high", "xhigh", "max", "ultra"):  # what a review can really be given
+            self.set_reviewer("m-1", level)
+            self.assertEqual(reviewer.setting(h), ("m-1", level))
+            self.assertIn("effort %s" % level, reviewer.configure(h, "m-1 " + level))
+        self.assertIn("is not an effort level of Codex", reviewer.configure(h, "m-1 turbo"))
+        self.assertIn("is not an effort level of Codex", reviewer.configure(h, "m-1 minimal"))
         self.assertIsNotNone(h.fresh_session)
         self.assertEqual(core.person_subcommands(h).keys() >= {"review", "reviewer"}, True)
+
+    def set_reviewer(self, model, effort):
+        reviewer._save_setting(codex.host({}), model, effort)
 
     def test_the_session_names_its_model_and_not_its_effort(self):
         self.assertEqual(codex.host({}, {"model": "gpt-x"}).session(), core.Session(model="gpt-x", effort=""))
@@ -171,23 +186,29 @@ class CodexReviewer(CodexCase):
         self.assertIn("foreman reviewer ", reason)
         self.assertNotIn("/foreman", reason)
 
-    def test_choosing_a_reviewer_is_answered_and_kept(self):
+    def test_the_reviewer_can_be_shown_but_not_set_from_a_codex_prompt(self):
         self.assertIn("author-model, the model this session runs on", self.hook("foreman reviewer")["reason"])
-        out = self.hook("foreman reviewer gpt-6-luna low")
-        self.assertEqual(out["decision"], "block")
-        self.assertIn("Foreman: reviewer set.", out["reason"])
-        self.assertIn("Reviewer: gpt-6-luna at effort low", out["reason"])
-        self.assertEqual(reviewer.setting(codex.host({})), ("gpt-6-luna", "low"))
-        self.assertIn("Effort levels: low, medium, high, xhigh, max, ultra", self.hook("foreman reviewer")["reason"])
-        self.assertIn("back to the default", self.hook("foreman reviewer default")["reason"])
-        self.assertEqual(reviewer.setting(codex.host({})), ("", ""))
-        self.assertIn("is not an effort level of Codex", core.person_reply(codex.host({}), "reviewer gpt-6-luna turbo"))
+        for text in ("foreman reviewer gpt-6-luna low", "foreman reviewer high", "foreman reviewer default",
+                     "/foreman reviewer o3"):
+            out = self.hook(text)
+            self.assertEqual(out["decision"], "block", text)
+            self.assertIn("cannot be set from a Codex prompt", out["reason"])
+            self.assertIn('{"reviewer": {"codex": {"model": "<model>", "effort": "<low|medium', out["reason"])
+            self.assertIn("config.json", out["reason"])
+            self.assertEqual(reviewer.setting(codex.host({})), ("", ""), text)  # nothing was saved
+        self.set_reviewer("gpt-6-luna", "low")  # what the person writes in the file is what the review reports
+        shown = self.hook("foreman reviewer")["reason"]
+        self.assertIn("reviewer in Codex: gpt-6-luna at effort low", shown)
+        self.assertNotIn("reviewer <model> [effort]", shown)  # no advice Codex refuses
+        self.assertNotIn("goes back to the default", shown)
+        self.assertIn("setting it is not available in Codex", self.hook("foreman help")["reason"])
+        self.assertNotIn("set it, or", self.hook("foreman help")["reason"])
 
     def test_when_codex_names_the_sessions_model_the_review_says_so(self):
-        self.hook("foreman reviewer author-model low")
+        self.set_reviewer("author-model", "low")
         shown = self.hook("foreman reviewer")["reason"]
         self.assertIn("It is the same model that wrote the code", shown)
-        self.hook("foreman reviewer default")
+        self.set_reviewer("", "")
         nameless = self.hook("foreman reviewer", model="")["reason"]
         self.assertIn("Codex's default model at its default effort", nameless)
         self.assertIn("Codex has not told Foreman this session's effort", nameless)
@@ -211,11 +232,11 @@ class CodexReviewer(CodexCase):
         self.assertIn("this is the stored result", again)
         self.assertFalse(os.path.exists(os.path.join(self.tmp, "argv")))  # no second session
         self.assertIn("`foreman review --fresh` runs it again", again)
-        self.hook("foreman reviewer gpt-6-luna low", env)
+        self.set_reviewer("gpt-6-luna", "low")
         self.hook("foreman review", env)
         argv = self.read("argv").split("\n")
         self.assertEqual(argv[argv.index("--model") + 1], "gpt-6-luna")
-        self.assertEqual(argv[argv.index("-c") + 1], "model_reasoning_effort=low")
+        self.assertIn("model_reasoning_effort=low", [argv[i + 1] for i, a in enumerate(argv) if a == "-c"])
 
     @POSIX
     def test_a_failed_session_is_a_review_that_could_not_run(self):
