@@ -106,6 +106,8 @@ class Asking(BaseException):
 HOSTS = tuple(MODULES)  # what `adapters/hook.py <host>` accepts
 # The board's subcommands that write nothing outside Foreman's own record (`use` keeps the pinned repository).
 BOARD_READS = ("board", "verdict", "pipeline", "prs", "issues", "use")
+# The two that write to GitHub, as the person: only with someone attending, and never typed by the agent.
+BOARD_WRITES = ("merge", "reject")
 REVIEWER_ENV = "FOREMAN_REVIEWER"  # in the reviewer's own session: the token of the review running (reviewer_session)
 
 
@@ -118,6 +120,7 @@ _PLAIN = (
     ("does not exist on the Hermes host (a remote terminal backend?)", "does not exist on this machine"),
     ("Foreman blocked this write_file:", "Foreman blocked this write:"),
     ("Foreman blocked this patch:", "Foreman blocked this edit:"),
+    ("Foreman: Hermes's approval denied", "Foreman did not run"),  # the board, when its own gh was not started
 )
 
 
@@ -157,10 +160,13 @@ _OFF = ("Foreman blocked this call: turning Foreman off or changing its hooks is
         "in the way, tell the user why.")
 _PERSON_ONLY = ("Foreman blocked this command: allowing a finding is the user's decision, typed by them (%s). "
                 "Ask them to review it.")
+_PERSON_WRITES = ("Foreman blocked this command: merging or rejecting a pull request with Foreman is the user's "
+                  "decision, typed by them (%s). Tell them it is ready.")
 
 # `.foreman` as a whole path component: the state directory outside Hermes (~/.foreman), never `.foreman.json`.
 _STATE_DIR = re.compile(r"(?:^|[\s\"'=:/\\~])\.foreman(?=$|[/\\\s\"'])")
 _ALLOW_WORDS = re.compile(r"(?i)\bforeman\W{1,3}allow\b")
+_WRITE_WORDS = re.compile(r"(?i)\bforeman\W{1,3}(?:%s)\b" % "|".join(BOARD_WRITES))
 
 
 def _spellings(path: str) -> list:
@@ -273,11 +279,11 @@ def only_reads(prog: str, words: list) -> bool:
     return not writes and not any(w.startswith("-i") or w == "--in-place" for w in words[1:])
 
 
-def _person_only(host: Host, command: str) -> bool:
+def _person_only(host: Host, command: str, words=_ALLOW_WORDS) -> bool:
     """The agent starting its own harness to type the person's command (`claude -p "/foreman:allow 3f2a"`, or the
-    words piped into it). The harness must be a program that runs in the line: a commit message or a grep that only
-    mentions the words is not one."""
-    if not host.cli or not _ALLOW_WORDS.search(command or ""):
+    words piped into it; with ``_WRITE_WORDS``, `pi "/foreman merge 7"`). The harness must be a program that runs
+    in the line: a commit message or a grep that only mentions the words is not one."""
+    if not host.cli or not words.search(command or ""):
         return False
     return any(prog in host.cli for prog, _words in programs(command))
 
@@ -336,6 +342,8 @@ def _guard_command(host: Host, command: str) -> Optional[dict]:
         logger.warning("foreman: the host's switch-off check failed", exc_info=True)
     if _person_only(host, command):
         return {"action": BLOCK, "message": _PERSON_ONLY % host.person("allow <id>")}
+    if any(name in host.board for name in BOARD_WRITES) and _person_only(host, command, _WRITE_WORDS):
+        return {"action": BLOCK, "message": _PERSON_WRITES % host.person("merge <pr>")}
     return None
 
 

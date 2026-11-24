@@ -300,7 +300,7 @@ export default function foreman(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("foreman", {
-		description: "Foreman: the board, verdict [pr|branch], pipeline, prs, issues, use, status, allow [id], review, reviewer, help",
+		description: "Foreman: the board, verdict [pr|branch], merge <pr>, reject <pr>, pipeline, prs, issues, use, status, allow [id], review, reviewer, help",
 		handler: async (args, ctx) => {
 			// the review starts a session of pi and waits for it: ten minutes, not thirty seconds
 			const request: Request = {

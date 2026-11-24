@@ -20,7 +20,8 @@ SKIP = "@pytest.mark." + "skip"
 SKIPPED = "import pytest\n\n\n" + SKIP + "\ndef test_total():\n    assert 1 + 1 == 2\n"
 MARKED = ("import pytest\n\n\n" + SKIP + "  # " + MARKER + " flaky upstream\ndef test_total():\n"
           "    assert 1 + 1 == 2\n")
-HERMES_WORDS = ("Hermes", "workdir", "write_file", "/foreman merge", "/foreman:")
+# Words that are Hermes's or another harness's. `/foreman merge` is not one of them: pi has that command.
+HERMES_WORDS = ("Hermes", "workdir", "write_file", "/foreman:")
 
 
 class PiCase(GitRepoCase):
@@ -123,6 +124,7 @@ class TheGate(PiCase):
         merge = self.ask("shell", command="gh pr merge 7")
         self.assertEqual(merge["action"], "block")
         self.assertPiWords(merge["message"])
+        self.assertIn("Ask them to run `/foreman merge 7`", merge["message"])  # the person's own command, in pi
 
     def test_the_persons_commands_in_pis_words(self):
         help_text = self.ask("command", args="help")["reply"]
@@ -131,10 +133,11 @@ class TheGate(PiCase):
         self.assertPiWords(help_text)
         self.assertIn("Foreman: CLEAN", self.ask("command", args="status")["reply"])
         self.assertIn("Foreman board: repo", self.ask("command", args="")["reply"])  # the board is the default
-        for name in ("merge 7", "reject 7", "notify on"):  # the writes come with their own slice; notices are Hermes's
-            reply = self.ask("command", args=name)["reply"]
-            self.assertIn("not available in pi yet", reply, name)
-            self.assertIn("/foreman help", reply)
+        reply = self.ask("command", args="notify on")["reply"]  # phone notices are Hermes's
+        self.assertIn("not available in pi yet", reply)
+        self.assertIn("/foreman help", reply)
+        for name in ("merge 7", "reject 7"):  # pi has them, and with nobody at its interface they do nothing
+            self.assertIn("nobody is attending", self.ask("command", args=name)["reply"], name)
 
     def test_allow_needs_a_person_at_pis_interface(self):
         self.write("tests/test_cart.py", MARKED)

@@ -262,21 +262,19 @@ def context(host: core.Host, p: Plan) -> _Context:
     return _Context(host, p)
 
 
-_HERMES_NOTES = (review.SAME_MODEL, review.UNKNOWN_MODEL, review.TASK_SAME_MODEL, review.TASK_UNSURE,
-                 review.ROUTED_MODEL)
+# What the review says about its reviewer in Hermes's terms: never printed here, where `describe` says it.
+HERMES_NOTES = (review.SAME_MODEL, review.UNKNOWN_MODEL, review.TASK_SAME_MODEL, review.TASK_UNSURE,
+                review.ROUTED_MODEL)
 
 
 def _present(text: str, host: core.Host, p: Plan, record: dict) -> str:
     """The review as ``review.py`` prints it, with Hermes's lines about its reviewer replaced by this harness's."""
-    model = record.get("model") if isinstance(record.get("model"), dict) else {}
-    ran = str(model.get("ran") or "") if not record.get("error") else ""
     out = []
     for line in text.split("\n"):
-        if line in _HERMES_NOTES:
+        if line in HERMES_NOTES:
             continue
         if line.startswith("Reviewer: "):
-            out += describe(host, p, ran)
-            out += [host.reviewer_caveat] if host.reviewer_caveat else []
+            out += who(host, p, record)
             continue
         out.append(line)
     return "\n".join(out)
@@ -298,13 +296,26 @@ def run(host: core.Host, args: str, cwd: str) -> str:
         return "Foreman review: one target at most (a pull request number or a branch); got `%s`." % " ".join(target)
     p = plan(host)
     record = review.run_review(target[0] if target else "", where=root, ctx=_Context(host, p), fresh=fresh)
-    _one_line_each(record)
-    _keep_the_reviewer(host, p, record)
+    finish(host, p, record)
     try:
         review.record_in_pipeline(record)
     except Exception:
         logger.warning("foreman: cannot record the review", exc_info=True)
     return _present(review.format_review(record, "cli"), host, p, record)
+
+
+def finish(host: core.Host, p: Plan, record: dict) -> None:
+    """What every review record gets here before anyone reads it: its findings on one line each, and who reviewed."""
+    if isinstance(record, dict):
+        _one_line_each(record)
+        _keep_the_reviewer(host, p, record)
+
+
+def who(host: core.Host, p: Plan, record: dict) -> list:
+    """The lines that say who reviewed, as every review in this harness says it (``describe`` and the caveat)."""
+    model = record.get("model") if isinstance(record.get("model"), dict) else {}
+    ran = str(model.get("ran") or "") if not record.get("error") else ""
+    return describe(host, p, ran) + ([host.reviewer_caveat] if host.reviewer_caveat else [])
 
 
 def _one_line_each(record: dict) -> None:
