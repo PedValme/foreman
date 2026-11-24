@@ -25,7 +25,7 @@ import tempfile
 
 from foreman import gate
 
-from . import core, neutral
+from . import core, neutral, reviewer
 
 NAME = "opencode"
 CLI = ("opencode", "opencode2", "opencode-ai")  # the commands the npm package installs, and its older package name
@@ -187,51 +187,44 @@ def _short(text: str, limit: int = 300) -> str:
     return text if len(text) <= limit else text[:limit - 1] + "…"
 
 
-def _object_in(text: str):
-    """The JSON object a reply holds: the whole text, a fenced block, or the first object with text around it."""
-    text = (text or "").strip()
-    candidates = [text] + re.findall(r"```(?:json|JSON)?\s*\n?(.*?)```", text, re.S)
-    for c in candidates:
-        try:
-            value = json.loads(c.strip())
-        except ValueError:
-            continue
-        if isinstance(value, dict):
-            return value
-    decoder = json.JSONDecoder()
-    for m in re.finditer(r"\{", text):
-        try:
-            value, _end = decoder.raw_decode(text, m.start())
-        except ValueError:
-            continue
-        if isinstance(value, dict):
-            return value
-    return None
+PROGRAM = "opencode"  # the command; tests replace this name (a Windows npm install is `opencode.cmd`: `which` finds it)
+
+# One sentence under every review's "Reviewer:" line: what its session still does that the others' do not.
+CAVEAT = ("OpenCode's own managed settings (an administrator's) load after Foreman's and could still override its "
+          "denial, and your global OpenCode instructions, MCP servers and plugin modules still load in that session.")
 
 
-# What the reviewer's session runs with (OpenCode 2.3.2, its v2 configuration; `OPENCODE_CONFIG_CONTENT` is read
-# after every configuration file): every permission denied, so no tool can read, write or run anything, and no
-# plugin but OpenCode's built-in ones (the person's own are not part of the review).
-REVIEW_CONFIG = {"permissions": [{"action": "*", "resource": "*", "effect": "deny"}], "plugins": ["-*", "opencode.*"]}
+def review_config(agent: str, system: str = "") -> dict:
+    """The reviewer's configuration (OpenCode 2.3.2, v2; passed as ``OPENCODE_CONFIG_CONTENT``, read after every
+    configuration file). OpenCode applies the last matching permission rule, and a person's own ``agents.build``
+    rules are appended after the top-level ones, so a top-level denial alone is not total: the session runs as an
+    agent defined here, under a name nobody else's configuration knows, whose own rules (appended last to its list)
+    deny every permission. No plugin but OpenCode's built-in ones is loaded."""
+    return {"permissions": [{"action": "*", "resource": "*", "effect": "deny"}], "plugins": ["-*", "opencode.*"],
+            "agents": {agent: {"mode": "primary", "system": system or "You review a code change. You have no tools.",
+                               "permissions": [{"action": "*", "resource": "*", "effect": "deny"}]}}}
 
 
 def _fresh_session(env=None):
     """OpenCode's own headless command as the reviewer: one prompt on standard input, JSON events out, a private
-    server (``--standalone``, so the configuration below reaches it), no ``--auto``, every permission denied. It
-    starts in an empty directory, and ``PWD`` points there too: ``opencode run`` takes its directory from ``PWD``
-    before the process's own."""
+    server (``--standalone``, so the configuration reaches it), no ``--auto``, a session kept out of the person's
+    session lists (``--archived``), every permission denied. It starts in an empty directory, and ``PWD`` points there
+    too: ``opencode run`` takes its directory from ``PWD`` before the process's own."""
     def run(system: str, prompt: str, schema: dict, model: str, effort: str, seconds: float) -> core.Answer:
+        import secrets
+        import shutil
         base = dict(os.environ if env is None else env)
-        argv = ["opencode", "run", "--standalone", "--format", "json"]
+        program = shutil.which(PROGRAM, path=base.get("PATH")) or PROGRAM
+        agent = "foreman-reviewer-" + secrets.token_hex(4)
+        argv = [program, "run", "--standalone", "--archived", "--format", "json", "--agent", agent]
         if model:
             argv += ["-m", model]
-        message = "\n\n".join(part for part in (
-            system,
-            "Answer with one JSON object and nothing else: no prose, no code fence. It must follow this JSON schema:\n"
-            + json.dumps(schema or {}),
-            prompt) if part)
+        # OpenCode has no flag that makes a model answer in a JSON schema: the schema goes in words, with a seal the
+        # change's author cannot know, and only the object that carries it is read (reviewer.read_sealed).
+        asked, seal = reviewer.sealed(schema or {})
+        message = "\n\n".join(part for part in (system, asked, prompt) if part)
         with tempfile.TemporaryDirectory(prefix="foreman-review-") as empty:
-            child = dict(base, PWD=empty, OPENCODE_CONFIG_CONTENT=json.dumps(REVIEW_CONFIG),
+            child = dict(base, PWD=empty, OPENCODE_CONFIG_CONTENT=json.dumps(review_config(agent)),
                          OPENCODE_DISABLE_CLAUDE_CODE="1")
             code, out, err = core.run_session(argv, message, seconds, child, cwd=empty)
         texts, errors = {}, []
@@ -257,8 +250,8 @@ def _fresh_session(env=None):
             raise RuntimeError("OpenCode could not answer (exit code %d): %s"
                                % (code, _short(" ".join(errors) or err or out) or "nothing"))
         final = "".join(texts[list(texts)[-1]])  # the last assistant message
-        # OpenCode's JSON events do not name the model that ran: only the one asked for, when one was.
-        return core.Answer(parsed=_object_in(final), text=final, model=model.split("#")[0])
+        # OpenCode's JSON events never name the model that ran, so none is claimed.
+        return core.Answer(parsed=reviewer.read_sealed(final, seal), text=final, model="")
     return run
 
 
@@ -273,6 +266,7 @@ def host(request=None) -> core.Host:
         # No effort levels: OpenCode names reasoning levels per model (a ``#variant``), so the person names it as
         # part of the model: ``/foreman reviewer provider/model#variant``.
         fresh_session=_fresh_session(), efforts=(), session=lambda: neutral.session(request),
+        reviewer_caveat=CAVEAT,
     )
 
 

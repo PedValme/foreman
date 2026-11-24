@@ -84,15 +84,24 @@ Who reviews is yours: `/foreman reviewer [model]` (`default` to go back), a mode
   model (its catalog entry or your `variants`), not to a fixed ladder: `#high` exists for one model and not for
   another. So Foreman has no effort levels here: name the variant in the model, `/foreman reviewer
   openai/gpt-6.1-sol#high`. An unknown variant is an error from OpenCode and the review says so.
-- **What it runs**: `opencode run --standalone --format json [-m <model>]`, the prompt on standard input (never on the
-  command line), in an empty temporary directory, so it reads neither the repository nor its settings. It is a
-  private server (`--standalone`) so that the configuration below reaches it, and it is never started with `--auto`.
-- **It cannot change anything.** Foreman passes it, in `OPENCODE_CONFIG_CONTENT` (read after your configuration
-  files), a rule denying every permission and no plugin but OpenCode's built-in ones, and
-  `OPENCODE_DISABLE_CLAUDE_CODE=1` so that your Claude Code instructions are not read; the token of this
-  review in `FOREMAN_REVIEWER` makes Foreman's own hook (`hook.py`) answer nothing inside that session, whatever
-  plugin is loaded. Seen: told to create a file and run `ls`, the session answered that it
-  has no write or shell tool, and the file did not exist.
+- **What it runs**: `opencode run --standalone --archived --format json --agent foreman-reviewer-<random> [-m
+  <model>]`, the prompt on standard input (never on the command line), in an empty temporary directory, so it reads
+  neither the repository nor its project settings. It is a private server (`--standalone`) so that the configuration
+  below reaches it, and it is never started with `--auto`. `--archived` keeps its session out of your session lists;
+  OpenCode still stores it, the diff included, in its own database.
+- **It cannot change anything.** OpenCode applies the last matching permission rule, and the rules in your own
+  `agents.build` come after the top-level ones, so a top-level "deny everything" alone would not be total. Foreman
+  passes, in `OPENCODE_CONFIG_CONTENT` (read after your configuration files), an agent of its own under a name nobody
+  else's configuration knows, whose own rules deny every permission and come last in its list, runs the session as
+  that agent, and turns off every plugin but OpenCode's built-in ones. `OPENCODE_DISABLE_CLAUDE_CODE=1` leaves your
+  Claude Code instructions out; the token of this review in `FOREMAN_REVIEWER` makes Foreman's own hook (`hook.py`)
+  answer nothing inside that session. Seen: told to create a file and run `ls`, the session answered that it has no
+  tools, and the file did not exist. What can still undo it: OpenCode's managed settings (an administrator's) load
+  after Foreman's.
+- **What of your OpenCode setup still reaches it**: your global configuration directory still applies. Its MCP
+  servers start (their tools are denied, the servers still run), its global `AGENTS.md` still reaches the model
+  (OpenCode has no setting to leave it out), and your plugin modules are imported before `-*` turns them off. Foreman
+  cannot close these from the configuration it passes; each review says so in one line under its "Reviewer:" line.
 - **Who reviews by default**: the model this session runs on, when OpenCode's record of the session names it (the
   plugin sends it), in a clean context and with nothing raised: OpenCode has no effort to raise. With no model in the
   record it is OpenCode's default model. Either way it is the model that wrote the code: choose another to get a
@@ -105,14 +114,14 @@ Who reviews is yours: `/foreman reviewer [model]` (`default` to go back), a mode
   the reply ends with `Saved: <path>`, the stored record of the review (JSON, in Foreman's state directory,
   `~/.foreman/reviews/` unless OpenCode's plugin storage says otherwise). The whole review is in that file.
 - **Limits.** It takes as long as the model takes, up to ten minutes, with nothing shown meanwhile (the plugin gives a
-  command ten minutes instead of thirty seconds). OpenCode's JSON output does not name the model that ran, so the
-  review names the one you chose; with none chosen it names none. OpenCode has no flag that makes a model answer
-  with a given JSON schema: Foreman puts the schema in what it sends and reads the object out of the answer (a
-  fenced block or text around it is fine); a reply with no object is a review that could not run. A failed run
-  (a model's usage limit, an unknown model) comes back with its reason and the HTTP status when OpenCode gives one;
-  a rate limit (429) or a server error (5xx) is retried. The reviewer sees the diff only: it has no tools and no
-  repository. A permission rule loaded after Foreman's (OpenCode's managed settings, which an administrator
-  controls) could in theory still apply.
+  command ten minutes instead of thirty seconds). OpenCode's JSON output never names the model that ran, so the
+  review does not say which one answered. OpenCode has no flag that makes a model answer with a given JSON schema:
+  Foreman puts the schema in what it sends, with a random seal that the diff's author cannot know, and reads only the
+  object that carries the seal (a fenced block or text around it is fine; an object written inside the diff is
+  never taken for the answer); a reply with no sealed object is a review that could not run. A failed run (a
+  model's usage limit, an unknown model) comes back with its reason and the HTTP status when OpenCode gives one; a
+  rate limit (429) or a server error (5xx) is retried. The reviewer sees the diff only: it has no tools and no
+  repository.
 
 ## Limits to know
 
