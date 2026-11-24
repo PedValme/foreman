@@ -120,3 +120,22 @@ the owner confirms it. An option the owner turned down is a decision too and sta
   un cambio mayor lo subimos todo», to the proposal of a bump with the notify README fix and the GIF.
 - 2026-11-23 · The owner's networks and personal profiles are worked in a separate project; this repository keeps
   Foreman and its technical side · Pedro: «tú te quedss con foreman y los aspectos tecnicos».
+- 2026-11-24 · Foreman becomes harness-agnostic: one core and an adapter per harness, for Claude Code, Codex, pi and
+  OpenCode in the same campaign, with the full line on pi and OpenCode · Pedro: «los 4 a la vez, en opencode y pi
+  casi seguro que deberia poderse hacer la version full tambien similar a hermes». Adjustments he saw and confirmed
+  («confirmo los ajustes, arranca»): each harness is published when its own end-to-end test passes, without waiting
+  for the others; OpenCode means its v2 plugin API only; "full" is the gate, `/foreman` (board, verdict, review,
+  merge, reject, allow, pipeline) and the reviewer, while the phone notifications and the Desktop panel stay
+  Hermes-only.
+- 2026-11-24 · Outside Hermes the reviewer is a session that did not write the code, on another model or with more
+  effort, as the user chooses · Pedro: «para el segundo modelo revisor lo que podemos hacer es lo que hacemos con
+  claude code por protocolo ahora, que un subagente que no escribio el codigo reciba el encargo y de preferencia con
+  un modelo diferente o con un nivel extra de esfuerzo (ejem, si escribio opus 5.5 medio el review lo hace o sonnet o
+  5.5 alto) podria ser decision del usuario dependiendo de cuanto este dispuesto a usar de su sub». Adjustments he saw
+  and confirmed («confirmo los ajustes, arranca»): Foreman launches that session, never the agent that wrote the
+  code (the verdict must not pass through the author's hands); it reviews when someone asks to merge by default, on
+  every turn only if the user turns it on; with nothing chosen, the same model one effort level up, and the record
+  says so.
+- 2026-11-24 · The Hermes plugin stays as listed: changes to the core land on `main` and reach Hermes together, in
+  one substantial catalog update · Pedro: «el plugin de hermes queda intacto salvo como dices que se haga una
+  actuwlizacion mayor acumulada que sfecte el nucleo».

@@ -11,8 +11,10 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # the repository
 PLUGIN_DIR = os.path.join(ROOT, "plugin")  # what Hermes installs: plugin.yaml, __init__.py, foreman/, desktop/...
-if PLUGIN_DIR not in sys.path:
-    sys.path.insert(0, PLUGIN_DIR)
+ADAPTERS_DIR = os.path.join(ROOT, "adapters")  # the other harnesses' adapters: the foreman_hosts package
+for _path in (ADAPTERS_DIR, PLUGIN_DIR):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 
 
 class GitRepoCase(unittest.TestCase):

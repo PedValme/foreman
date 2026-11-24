@@ -1,0 +1,27 @@
+{
+  "description": "Foreman's gate: before a shell command or a write, when the person types a prompt, and before the agent finishes a turn.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.py\" claude-code || exit 1", "timeout": 30}
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.py\" claude-code || exit 1", "timeout": 70}
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.py\" claude-code || exit 1", "timeout": 30}
+        ]
+      }
+    ]
+  }
+}

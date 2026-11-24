@@ -4,75 +4,81 @@
 
 <!-- pic-method: next-session -->
 ## Next session
-- First topic, asked by the owner on 2026-11-24: improvements, and evaluating Foreman for any harness («convertirlo en
-  un producto agnóstico, y me parece muy buena idea, que funcione en cualquier otro arnés también lo evaluamos y
-  revisamos en la sesión fresca»). Evaluate and propose with a recommendation; nothing is decided or built. Seen so far
-  (imports only, not studied): `detector.py` already runs alone in CI; Hermes is imported directly in `gate.py`,
-  `review.py` and `panel_api.py`, and the hooks, commands, notifications and panel are registered through its plugin
-  API. To answer: which harnesses, what hook each one offers to block before a command or an edit, and what that does
-  to the catalog listing.
+- Doing: Foreman for any harness (DECISIONES, 2026-11-24; the plan, the facts read about each harness and the task
+  list are in `trabajo/agnostico.md`). Its first task, the host-neutral half plus the Claude Code adapter, is merged
+  (pull request #61): 476 tests green on Python 3.9 to 3.13 across Linux, macOS and Windows, and seen in real Claude
+  Code 2.1.331 sessions with `bypassPermissions` (a rigged commit, an agent-run merge and an edit that skips a test
+  denied; a turn that left a skipped test sent back once, a turn that only talked not; `/foreman:status`,
+  `/foreman:allow` and `/foreman:help` answered with no model turn; `allow` refused with `-p` and accepted typed in
+  an interactive session). Nothing under `plugin/` changed.
+- Tried: `/foreman` as a bare command does not work in Claude Code's interactive prompt (it rejects an unknown
+  command before any hook), so the person's commands are the plugin's own (`/foreman:status`), which the
+  `UserPromptSubmit` hook answers before the model sees them.
+- Reviewed twice by agents that did not write it (2026-11-24): nothing blocking either time; the findings were
+  fixed in #61 (a turn that only talked is never sent back, a prompt costs no git call, the guards read the program
+  that runs, `npx` and the like included, and no longer catch a grep or a commit message, a damaged installation
+  fails open instead of denying every call) and the real sessions repeated after the first round.
+- Next action: T2 to T4 (Codex, pi and OpenCode with the gate; independent, one agent each; CI now also runs
+  Python 3.9 on macOS and Windows), then T5 (the reviewer as a fresh session) and T6 (`/foreman` complete on pi and
+  OpenCode). Each harness is published only after its own real-session test.
+- For the owner to try, his call (it goes into his own Claude Code): the plugin installs from this repository's
+  marketplace file. Installed for every project it would also stop his agents' own `gh pr merge`, which his other
+  repositories rely on, so per project or `claude --plugin-dir <a clone>` first.
 - External PR #57 (`***REDACTED***` as a placeholder in the detector): read in full, nothing malicious seen, not run.
   Changes asked on 2026-11-23: git-filter-repo's default marker is `***REMOVED***`, which it leaves blocked. Next:
   when the author pushes the fix, re-read the whole diff, approve its held CI run (the owner chose to wait for the
   fix), then decide the merge. Unverified by a run: by reading, `KEY=***REDACTED***#value` in a `.env` would pass.
-- Foreman won 1st place in the Hermes Agent Plugin Hackathon (nearly 1,000 entries; Nous's post:
-  https://x.com/NousResearch/status/2123882434173559007). Both READMEs say so since 2026-11-20 and open with a 9 s GIF
-  of the block (`docs/media/foreman-block.gif`, cut from the hackathon video) since 2026-11-22; the `plugin/` README
-  reaches the catalog page only with the next SHA-bump pull request. The prizes are in Nous's launch post
-  (https://x.com/NousResearch/status/2118094256438936062; read by another agent, not checked here); how they are paid
-  is unknown.
-- Promotion left this repository (DECISIONES, 2026-11-23): the owner's networks, posts and profiles are a separate
-  project's; here only Foreman and its technical side (that project may ask for facts or real cases).
-- Before: the catalog listing, now done. Foreman is in the Hermes catalog: NousResearch/hermes-agent#153851,
-  approved and merged by the maintainer on 2026-11-13 at the pin ce9b01a after both asks were fixed; its page is
-  https://hermes-agent.nousresearch.com/marketplace/foreman. The hackathon submission was complete on 2026-11-11
-  (video on X, form received); Nous posts the winners on X.
-- Tried: the seams issue NousResearch/hermes-agent#153841 was closed as "not planned" (2026-11-14) with the advice to
-  propose each seam as its own focused issue or PR against `hermes_cli/data/plugin_api.json`; until a cwd accessor
-  exists the guarded private import stays, as told to the maintainer.
-- Next action: post-hackathon work in "Next steps"; any plugin change now reaches users only through a SHA-bump pull
-  request to the catalog (rule 4), re-reviewed. The unpushed local branch `claude/minimal-child-env` can be deleted.
-- The owner's Hermes (default profile) runs ce9b01a since 2026-11-14, installed pinned from the repo (Hermes v0.23.0's
-  bundled catalog predates the listing, so `hermes plugins install foreman` by name works only after a Hermes
-  update; then reinstall by name to get catalog updates). Settings and capability grants kept, gateway restarted, a
-  direct hook call verified (`gh pr merge` blocked, child env without provider keys); backup in
-  `~/.hermes/backups/foreman-a-ce9b01a-20261114-191153`. `notify` is the string `on` since the owner typed
-  `/foreman notify on` (2026-11-14; `hermes config set` stores either a boolean or the quotes, never the string).
-- What waits for Pedro lives in OmniBrain: `omnibrain_esperas` with repo `foreman`, or «Te espera» in the panel
-  (none open on 2026-11-17).
+- Hermes: Foreman is in its catalog at the pin ce9b01a (NousResearch/hermes-agent#153851;
+  https://hermes-agent.nousresearch.com/marketplace/foreman) and the owner's default profile runs that pin. A plugin
+  change reaches users only through a SHA-bump pull request to the catalog, tried first in the `foremandev` profile;
+  the next one is the single substantial update (DECISIONES, 2026-11-22 and 2026-11-24). The seams issue #153841 was
+  closed as "not planned": propose each seam on its own.
+- Foreman won 1st place in the Hermes Agent Plugin Hackathon (Nous's post:
+  https://x.com/NousResearch/status/2123882434173559007); how the prizes are paid is unknown. Promotion is another
+  project's (DECISIONES, 2026-11-23).
+- What waits for Pedro lives in OmniBrain: `omnibrain_esperas` with repo `foreman`, or «Te espera» in the panel.
 
 ## Delivered
-- The plugin, version 0.1.0, in `plugin/`: 376 tests, CI on Linux, macOS and Windows, `hermes plugins validate
-  plugin` passing with one guarded private-import warning; the catalog entry draft passing Hermes's validator
-  (short description, category `automation`, a real-app capture first).
-- `PedValme/foreman-demo` (public) as the demo repository; the README as one page with the real capture.
-- End-to-end verification in real sessions, the owner's sitting included (`trabajo/pruebas-punta-a-punta.md`).
+- The Hermes plugin, version 0.1.0, in `plugin/`, listed in the Hermes catalog; CI on Linux, macOS and Windows.
+- `PedValme/foreman-demo` (public) as the demo repository; the README as one page with the real capture and the GIF.
+
+- The host-neutral half of the adapters and the Claude Code adapter (`adapters/`, `.claude-plugin/`): the gate and
+  the person's commands, not announced in the README yet.
 
 ## In progress
-- Nothing: the plugin is listed in the Hermes catalog at ce9b01a.
+- Foreman for any harness: Codex, pi and OpenCode next (`trabajo/agnostico.md`).
 
 ## Next steps
-1. Propose the seams one by one (Hermes's advice on #153841): first the terminal cwd accessor, which removes
-   the guarded private import; each as its own issue or PR against `hermes_cli/data/plugin_api.json`.
-2. The native model picker in Foreman's settings (`trabajo/model-picker.md`), after the hackathon. With the next
-   plugin change: the README says to turn notifications on with `/foreman notify on`, since `hermes config set
-   …notify on` stores a boolean and Hermes then warns "should be str (got bool)" on every load (seen on the owner's
-   machine, 2026-11-12; harmless, `notify.py` reads `True` as on).
-3. Clean up the hackathon's throwaways: `~/cart`, `~/foreman-demo` and `/tmp/fm-battery*` on the owner's machine;
-   the throwaway PRs #6-#14 and branches `t/*` in `foreman-demo`. The `foremandev` profile stays: every new version
-   is tried there on the real Hermes before it is pinned in the catalog and installed in the default profile
-   (owner's yes, 2026-11-14).
-4. After the submission: whether the private voice-plugins test repository becomes a project; whether only the
-   owner merges here from then on; register `foreman-demo` in the owner's environment as outside the factory.
+1. `trabajo/agnostico.md`, T2 to T7. Names of the packages and where each adapter is published: to the owner when
+   the first adapter is merged and tried by him (T7); the root README does not mention the adapters until then.
+2. The one Hermes catalog update: what the adapters needed from the core, the native model picker
+   (`trabajo/model-picker.md`), the README's award and GIF, and `/foreman notify on` in the README (`hermes config
+   set …notify on` stores a boolean and Hermes then warns on every load).
+3. Propose the Hermes seams one by one (#153841's advice): first the terminal cwd accessor, which removes the
+   guarded private import.
+4. Clean up the hackathon's throwaways: `~/cart`, `~/foreman-demo` and `/tmp/fm-battery*` on the owner's machine;
+   the throwaway PRs #6-#14 and branches `t/*` in `foreman-demo`; the unpushed local branch
+   `claude/minimal-child-env`.
+5. Whether the private voice-plugins test repository becomes a project; whether only the owner merges here;
+   register `foreman-demo` in the owner's environment as outside the factory.
 
 ## Known issues
+- Unresolved (adapters): outside Hermes, Foreman's hooks and state are files the agent's shell can reach; the
+  adapter blocks what names them plainly, not a disguised attempt (a path built at run time, a script the agent
+  writes). The required check in CI stays the independent control.
+- Unresolved (Claude Code adapter): without `python3` on the PATH its hooks fail and Claude Code goes on without the
+  gate, showing the error; not tried on Windows in a real session (nor whether its hook shell understands `||`);
+  its answers to the person's commands carry Claude Code's own frame ("UserPromptSubmit operation blocked by hook").
+- Unresolved (adapters): at the end of a turn in which the agent changed anything in a repository, even an
+  unrelated new file, the nudge lists every blocker in that working tree, the person's own uncommitted ones
+  included, as the Hermes gate does; the message tells the agent to say so instead of undoing it.
 - Unresolved: the Desktop pane can disappear from the app's layout and not return until the app is reloaded and the
   Desktop switch is toggled; cause not proven (#22).
 - Unresolved: with a running gateway, a slash command typed first in a CLI session cannot tell the repository and
   asks for it; `/foreman use <path>` is the way around.
 - Unresolved: one guarded private import (`tools.terminal_tool.get_session_cwd`) makes `hermes plugins validate`
   warn; a pushed notification cannot carry buttons, Hermes shows no approval prompt for a plugin's command, and
-  Telegram's choice buttons show only numbers. All four were in Hermes issue #153841 (closed: to be proposed one by one).
+  Telegram's choice buttons show only numbers.
 - Unresolved (debt from the reviews): state files are plain files behind a best-effort guard; a SARIF report
   replaced by a separate command is not noticed; `include`d makefiles and a new `GNUmakefile` are not covered; a
   merge through `gh api` or a direct push to the base branch is not blocked; the real-panel behaviour test runs only
