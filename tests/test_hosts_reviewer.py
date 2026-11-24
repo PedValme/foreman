@@ -437,6 +437,11 @@ class ThroughThePersonsCommand(ReviewerCase):
         with open(path, "w") as fh:
             fh.write("x")
         self.assertTrue(core.reviewer_session({"FOREMAN_REVIEWER": token}))
+        # a file's time and the clock do not tick together: a moment ahead is still a review running now
+        import time
+        ahead = time.time() + 2
+        os.utime(path, (ahead, ahead))
+        self.assertTrue(core.reviewer_session({"FOREMAN_REVIEWER": token}))
         later = os.path.getmtime(path) + 10 * 365 * 24 * 3600
         os.utime(path, (later, later))
         self.assertFalse(core.reviewer_session({"FOREMAN_REVIEWER": token}))
