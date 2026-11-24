@@ -4,7 +4,8 @@
 # would do. Keeps the two counter-examples (#3 a skipped test, #4 loosened assertions) and issue #1.
 set -u
 R=PedValme/foreman-demo
-HOST=${FOREMAN_HERMES_HOST:-glorieto}   # the owner's Hermes machine (ssh alias in his own config)
+# The owner's Hermes machine: its ssh alias lives in his own config and is not written in this public repository.
+HOST=${FOREMAN_HERMES_HOST:?set FOREMAN_HERMES_HOST to the ssh alias of the Hermes machine}
 GO=0; [ "${1:-}" = "--go" ] && GO=1
 run() { echo "+ $*"; [ $GO = 1 ] && eval "$@"; }
 

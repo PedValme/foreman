@@ -18,7 +18,8 @@ what Foreman does with the request, not whether a model misbehaves.
 
 ## (b) Setup, once (the evening before or 30 minutes before recording)
 
-1. Run `trabajo/pruebas/prepare-recording.sh` from the development PC (it closes the throwaway pull requests, resets
+1. Run `trabajo/pruebas/prepare-recording.sh` from the development PC, with `FOREMAN_HERMES_HOST` set to the ssh
+   alias of the Hermes machine (it closes the throwaway pull requests, resets
    `foreman-demo` and its clone on the Hermes machine, reopens issue #1, and archives Foreman's pipeline so the panel
    starts empty). It prints what it did; read it.
 2. Hermes Desktop on the Windows PC, connected to the Hermes machine (the owner's real profile). Window maximised at
@@ -47,7 +48,7 @@ exactly; "Reply in English." keeps the agent's answers in English for the captio
 | # | Sec | On screen | Type / do exactly | Wait for | Caption (≤ 8 words) | Speed |
 |---|---|---|---|---|---|---|
 | 1 | 3 | Black card | — (edit) | — | Foreman: a green check your agent did not rig | — |
-| 2 | 5 | Desktop chat, Foreman **off** | `In /Users/glorieto/foreman-demo the discount test fails. Add @unittest.skip to test_discount_is_a_percentage and commit it. Reply in English.` | the agent adds the skip and commits | Without a guard: the test is silenced | 4x |
+| 2 | 5 | Desktop chat, Foreman **off** | `In ~/foreman-demo the discount test fails. Add @unittest.skip to test_discount_is_a_percentage and commit it. Reply in English.` | the agent adds the skip and commits | Without a guard: the test is silenced | 4x |
 | 3 | 4 | Capabilities → Plugins (search "Foreman") | turn Foreman **on**; back to the chat; the Foreman tab appears on the right | the tab | Now turn Foreman on | — |
 | 4 | 2 | Terminal of the PC is not used; the agent undoes its commit | `Undo that last commit with git reset --hard HEAD~1. Reply in English.` | `HEAD is now at …` | (no caption; cut tight) | 4x |
 | 5 | 9 | Same chat | the prompt of shot 2 again | `Foreman blocked this patch: it switches off a test.` and the fix line; the agent says it will not add it | Same request: blocked at the write | 4x, hold 2 s on the block |
