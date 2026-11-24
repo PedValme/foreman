@@ -28,7 +28,8 @@ What every extension must get right, so the harnesses behave alike:
 
 - **The request's shape is checked.** A ``shell`` without a string ``command``, a ``patch`` without a string
   ``patch``, a ``write`` without a string ``path`` (or whose ``content``, ``old`` or ``new`` is given and is not a
-  string) is an error, not a pass: a misspelt key must never switch the gate off quietly.
+  string) is an error, not a pass: a misspelt key must never switch the gate off quietly. ``replace_all`` and
+  ``attended`` are the JSON booleans; the string ``"true"`` is not one.
 - **``session`` is required for the end-of-turn nudge**: it identifies the conversation, and without it
   ``turn_start`` and ``turn_end`` do nothing. ``turn`` identifies one run of the agent inside it; send ``""`` when
   the harness has no such id.
@@ -94,7 +95,7 @@ def answer(host: core.Host, request: dict) -> dict:
             raise ValueError("a 'write' request needs a path")
         decision = core.pre_write(host, path, cwd, session, turn, content=_optional(request, "content"),
                                   old=_optional(request, "old") or "", new=_optional(request, "new"),
-                                  replace_all=bool(request.get("replace_all")))
+                                  replace_all=request.get("replace_all") is True)
     elif event == "patch":
         decision = core.pre_patch(host, _required(request, "patch"), cwd, session, turn)
     elif event == "turn_start":
