@@ -118,3 +118,5 @@ the owner confirms it. An option the owner turned down is a decision too and sta
 - 2026-11-22 · No catalog SHA bump for README-only changes (the hackathon award and the GIF): they reach the catalog
   page together with the next substantial plugin change, in one pull request · Pedro: «mejor todavia, cusndo hagamos
   un cambio mayor lo subimos todo», to the proposal of a bump with the notify README fix and the GIF.
+- 2026-11-23 · The owner's networks and personal profiles are worked in a separate project; this repository keeps
+  Foreman and its technical side · Pedro: «tú te quedss con foreman y los aspectos tecnicos».

@@ -13,10 +13,9 @@
   of the block (`docs/media/foreman-block.gif`, cut from the hackathon video) since 2026-11-22; the `plugin/` README
   reaches the catalog page only with the next SHA-bump pull request. How the prize is paid is unknown: Nous has not
   written yet, and no official rules were found.
-- Promotion split agreed with the owner (2026-11-22): the technical pieces about Foreman are done here (proposed, not
-  yet approved one by one: a Show HN post, an X thread with real blocked attempts, r/hermesagent); his posts, profile,
-  press in Peru and the AQP case study belong to the AQP Intelligence agent. A Foreman for other harnesses (Claude
-  Code, Codex, Cursor) is a product decision for later, not promotion.
+- Promotion left this repository (DECISIONES, 2026-11-23): the owner's networks, posts and profiles are a separate
+  project's; here only Foreman and its technical side (that project may ask for facts or real cases). A Foreman for
+  other harnesses (Claude Code, Codex, Cursor) is a product decision for later.
 - Before: the catalog listing, now done. Foreman is in the Hermes catalog: NousResearch/hermes-agent#153851,
   approved and merged by the maintainer on 2026-11-13 at the pin ce9b01a after both asks were fixed; its page is
   https://hermes-agent.nousresearch.com/marketplace/foreman. The hackathon submission was complete on 2026-11-11
