@@ -62,7 +62,9 @@ What every extension must get right, so the harnesses behave alike:
 - **Where Foreman is**: the extension runs ``hook.py`` by the absolute path of its own installation (next to the
   extension's file), never a path taken from the agent's working directory.
 - **The review** (``command`` with ``review`` or ``reviewer``) starts a session of the harness and waits for it:
-  the extension gives a ``command`` request ten minutes, not thirty seconds. It sends the session's ``model`` and
+  the extension gives a ``command`` request ten minutes, not thirty seconds, and twelve where the command can
+  merge (the review's seven and three for gh, with room: this program must never be stopped while gh may still be
+  merging, or the person reads a failure for a merge that happened). It sends the session's ``model`` and
   ``effort`` as the harness names them, or leaves them out when it does not know them (``session()`` below): they
   only decide what the review says about its own reviewer and its default effort. Inside the reviewer's own
   session the extension behaves as in any other and every request is answered ``{}``: this program knows that

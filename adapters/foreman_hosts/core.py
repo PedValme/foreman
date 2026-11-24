@@ -122,11 +122,15 @@ _PLAIN = (
     ("Foreman blocked this patch:", "Foreman blocked this edit:"),
     ("Foreman: Hermes's approval denied", "Foreman did not run"),  # the board, when its own gh was not started
 )
+# In Hermes the review is "the second-model review". Here the reviewer is a fresh session that, with nothing chosen,
+# runs on the model that wrote the code: the review never names itself a second model (rule 25). A line the core
+# folded between the two words is read too.
+_SECOND_MODEL = re.compile(r"\b([Ss])econd-model\s+review")
 
 
 def reword(host: Host, message: str) -> str:
     """The gate's message in this harness's words: the gate writes for Hermes (its ``workdir`` argument, its tool
-    names, its ``/foreman`` command)."""
+    names, its ``/foreman`` command, its second model)."""
     def merge(m):
         target = m.group(1).strip()
         if "merge" in host.board:  # this harness has the person's own merge command
@@ -136,6 +140,7 @@ def reword(host: Host, message: str) -> str:
     text = _MERGE_HINT.sub(merge, message or "")
     for old, new in _PLAIN:
         text = text.replace(old, new)
+    text = _SECOND_MODEL.sub(lambda m: "Review" if m.group(1) == "S" else "review", text)
     return _SUBCOMMAND.sub(lambda m: host.person(m.group(1)), text)
 
 
@@ -161,7 +166,7 @@ _OFF = ("Foreman blocked this call: turning Foreman off or changing its hooks is
 _PERSON_ONLY = ("Foreman blocked this command: allowing a finding is the user's decision, typed by them (%s). "
                 "Ask them to review it.")
 _PERSON_WRITES = ("Foreman blocked this command: merging or rejecting a pull request with Foreman is the user's "
-                  "decision, typed by them (%s). Tell them it is ready.")
+                  "decision, typed by them (%s). Tell them what you found instead.")
 
 # `.foreman` as a whole path component: the state directory outside Hermes (~/.foreman), never `.foreman.json`.
 _STATE_DIR = re.compile(r"(?:^|[\s\"'=:/\\~])\.foreman(?=$|[/\\\s\"'])")

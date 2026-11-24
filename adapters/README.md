@@ -74,7 +74,8 @@ be overridden); then the review, by a fresh session that did not write the code 
 so a pull request already reviewed is not sent to a model again), whose verified blocking findings refuse the
 merge; then you confirm in the harness's dialog, and GitHub merges exactly the commit Foreman inspected
 (`--match-head-commit`) or nothing. Because Foreman's program answers one request and ends, the command runs twice,
-once to ask and once with your answer: the second run computes the verdict again and reads the stored review, and
+once to ask and once with your answer: the second run computes the verdict again and reads the stored review (a
+review that failed on the first run is tried once more on the second, which can take minutes again), and
 your answer counts only if the question is still the same one (the same commit, the same CI state, the same review
 notes). So each merge leaves its gate, review and "waiting for your decision" lines twice in `/foreman pipeline`.
 

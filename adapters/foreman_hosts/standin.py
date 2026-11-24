@@ -155,14 +155,20 @@ def _merge_review(host: core.Host, p: reviewer.Plan, original):
             review.run_review = inner
         record = seen[-1] if seen else {}
         out["notes"] = [n for n in out.get("notes") or [] if n.strip() not in reviewer.HERMES_NOTES]
-        if out.get("pre"):  # the board's line naming "the second model" and how Hermes routed it
+        if out.get("pre"):  # the board's one line naming "the second model" and how Hermes routed it
             head = str(v.get("head_oid") or "")[:7]
-            if record.get("cached"):
+            verdict = record.get("verdict")
+            if record.get("error"):  # it could not run, or there was nothing to review: nobody reviewed
+                first = "The review of PR #%d at %s: %s." % (number, head, verdict)
+            elif record.get("cached"):
                 first = ("Review of PR #%d at %s: %s (the stored review of this exact diff, %s; the reviewer was not "
-                         "started again)." % (number, head, record.get("verdict"), record.get("time") or "earlier"))
+                         "started again)." % (number, head, verdict, record.get("time") or "earlier"))
             else:
-                first = "Foreman reviewed PR #%d at %s before the merge: %s." % (number, head, record.get("verdict"))
-            out["pre"] = [board.wrap(first)] + reviewer.who(host, p, record)
+                first = "Foreman reviewed PR #%d at %s before the merge: %s." % (number, head, verdict)
+            # who reviewed, only when a reviewer's session answered for this diff
+            said = reviewer.who(host, p, record) if isinstance(record.get("model"), dict) \
+                and not record.get("error") else []
+            out["pre"] = [board.wrap(first)] + said + out["pre"][1:]
         return out
     return run
 
@@ -179,16 +185,16 @@ def _bound(host: core.Host, ctx: _Context):
     """The board, the gate and the review on this harness for one command; what they had before comes back after
     it (a test process runs many, and Hermes's own binding is never this module's to keep)."""
     before = (board._CTX, gate._CTX, review._CTX, board._review_for_merge, board.reject_comment)
-    board.bind(ctx)
-    gate.bind(ctx)
-    board.reject_comment = _comment(host, before[4])
-    if host.fresh_session is not None:
-        # The review reads its reviewer from its context: the one `/foreman review` uses here, so a pull request
-        # reviewed with it is not sent to a model again at merge time.
-        p = reviewer.plan(host)
-        review.bind(reviewer.context(host, p))
-        board._review_for_merge = _merge_review(host, p, before[3])
     try:
+        board.bind(ctx)
+        gate.bind(ctx)
+        board.reject_comment = _comment(host, before[4])
+        if host.fresh_session is not None:
+            # The review reads its reviewer from its context: the one `/foreman review` uses here, so a pull
+            # request reviewed with it is not sent to a model again at merge time.
+            p = reviewer.plan(host)
+            review.bind(reviewer.context(host, p))
+            board._review_for_merge = _merge_review(host, p, before[3])
         yield
     finally:
         board._CTX, gate._CTX, review._CTX, board._review_for_merge, board.reject_comment = before

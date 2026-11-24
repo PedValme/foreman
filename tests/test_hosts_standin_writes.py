@@ -12,7 +12,8 @@ import test_board as tb  # the board's own fixtures: a fake gh, a pull request a
 from foreman import board, gate, review
 from foreman_hosts import core, neutral, opencode, pi, standin
 
-HERMES_WORDS = ("Hermes", "workdir", "write_file", "second model first", "routed")
+# Words that are Hermes's. Its "second model" is one: here the reviewer may be the model that wrote the code.
+HERMES_WORDS = ("Hermes", "workdir", "write_file", "second model", "second-model", "routed")
 PASS = {"findings": [], "summary": "Nothing rigged.", "verdict": "PASS"}
 MERGE = ["pr", "merge", "7", "--squash", "--delete-branch", "--match-head-commit", tb.OID]
 
@@ -161,7 +162,7 @@ class Merge(WritesCase):
              "why": "it changes\nwhat the test asserts", "evidence": "x = 1\n+y = 2", "fix": "undo it"}]}
         for args in ("merge 7", "merge 7 --yes"):
             reply = self.ask(args)["reply"]
-            self.assertIn("the second-model review found blocking problems", " ".join(reply.split()))
+            self.assertIn("will not merge PR #7: the review found blocking problems", " ".join(reply.split()))
             self.assertIn("BLOCKING app.py:2", reply)
             # the finding's words stay on its own lines: none of them can read as a line of Foreman's
             self.assertFalse([line for line in reply.splitlines() if line.startswith("Foreman review: PASS")])
@@ -173,8 +174,56 @@ class Merge(WritesCase):
         self.answer = RuntimeError("the reviewer's session did not answer")
         first = self.ask("merge 7 --yes")
         self.assertEqual(list(first), ["question"])
-        self.assertIn("review could not run", first["question"]["question"])
+        self.assertIn("The review could not run", first["question"]["question"])
         self.assertEqual(self.gh.writes(), [])
+
+    def test_a_failed_review_is_tried_once_more_and_the_person_answers_what_is_true_then(self):
+        self.clean_pr()
+        self.answer = RuntimeError("the reviewer's session did not answer")
+        q = self.ask("merge 7")["question"]
+        self.assertIn("The review could not run", q["question"])
+        # the second run starts the reviewer once more (a failed call is retried once); this time it answers, so
+        # the question is another one: "merge without the review" was not what the person is asked now
+        self.answer = dict(PASS)
+        again = self.ask("merge 7", answer={"id": q["id"], "value": "merge"})
+        self.assertEqual(list(again), ["question"])
+        self.assertNotIn("could not run", again["question"]["question"])
+        self.assertEqual((len(self.sessions), self.gh.writes()), (2, []))
+        done = self.ask("merge 7", answer={"id": again["question"]["id"], "value": "merge"})
+        self.assertIn("merged PR #7 (squash)", done["reply"])
+        self.assertEqual((len(self.sessions), self.gh.writes()), (2, [MERGE]))
+
+    def test_a_review_that_fails_twice_merges_only_on_the_persons_yes_and_names_no_reviewer(self):
+        self.clean_pr()
+        self.answer = RuntimeError("the reviewer's session did not answer")
+        q, done = self.answered("merge 7", "merge")
+        self.assertEqual(len(self.sessions), 2)  # once to ask, once more on the second run; never a third
+        said = " ".join(done["reply"].split())
+        self.assertIn("The review of PR #7 at %s: COULD NOT RUN." % tb.OID[:7], said)
+        self.assertNotIn("Reviewer:", said)  # nobody reviewed: no line says who did
+        self.assertIn("merged PR #7 (squash)", said)
+        self.assertEqual(self.gh.writes(), [MERGE])
+
+    def test_a_pull_request_reviewed_with_the_review_command_is_not_reviewed_again_to_merge(self):
+        self.clean_pr()
+        self.assertIn("Foreman review: PASS", self.ask("review 7")["reply"])
+        _q, done = self.answered("merge 7", "merge")
+        self.assertEqual(len(self.sessions), 1)
+        self.assertIn("the stored review of this exact diff", " ".join(done["reply"].split()))
+        self.assertEqual(self.gh.writes(), [MERGE])
+
+    def test_the_boards_line_about_its_reviewer_is_the_one_this_module_replaces(self):
+        # `standin._merge_review` rewrites the first line the board puts before a merge: this is that line, as
+        # the board itself writes it (if the core changes it, this fails and the rewrite is looked at again)
+        self.clean_pr()
+        host = self.host({"attended": True})
+        review.bind(standin.reviewer.context(host, standin.reviewer.plan(host)))
+        try:
+            plain = board._review_for_merge(self.root, 7, board.pr_verdict(self.root, 7), ("s-1",), None)
+        finally:
+            review._CTX = self._old[3]
+        self.assertEqual(len(plain["pre"]), 1)
+        self.assertIn("with the second model first", " ".join(plain["pre"][0].split()))
 
     def test_yes_typed_by_the_person_at_the_session_skips_the_dialog_but_not_the_review(self):
         self.clean_pr()
@@ -213,6 +262,12 @@ class Reject(WritesCase):
         self.assertEqual([o["value"] for o in q["options"]], ["close", "post", "cancel"])
         self.assertEqual([c[:2] for c in self.gh.writes()], [["pr", "comment"], ["pr", "close"]])
         self.assertIn("closed PR #7", done["reply"])
+
+    def test_yes_typed_at_the_session_closes_without_the_dialog(self):
+        self.blocked_pr()
+        reply = self.ask("reject 7 --close --yes")["reply"]
+        self.assertEqual([c[:2] for c in self.gh.writes()], [["pr", "comment"], ["pr", "close"]])
+        self.assertIn("closed PR #7", reply)
 
     def test_a_closed_dialog_posts_nothing(self):
         self.blocked_pr()

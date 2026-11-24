@@ -125,7 +125,9 @@ What it does not do yet: the review on every turn (it runs when you ask, and bef
   request and ends). The second run checks everything again and your answer counts only for the same question, so
   a pull request that got a new commit or a new CI state while the selector was open is asked again (at most
   three times). `/foreman pipeline` shows that merge's gate, review and "waiting for your decision" lines twice.
-  The review's result is shown after the merge, not in the selector; `/foreman review <pr>` shows it before.
+  A review that could not run on the first run is tried once more on the second (minutes again); if it then
+  answers, you are asked the new question. The selector shows the review's notes and "could not run"; its verdict
+  line and who reviewed come with the reply, after the merge (`/foreman review <pr>` shows them before).
 - pi gives no id for one run of the agent, so Foreman starts a run at `before_agent_start` (once per prompt; a
   continuation does not fire it) and sends the agent back at most once until the next prompt.
 - pi runs each `bash` call in the session's directory: a `cd` does not carry to the next call, and Foreman inspects
