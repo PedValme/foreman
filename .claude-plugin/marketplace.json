@@ -1,0 +1,14 @@
+{
+  "name": "foreman",
+  "owner": {"name": "PedValme", "url": "https://github.com/PedValme"},
+  "metadata": {"description": "Foreman: a green check the agent did not rig."},
+  "plugins": [
+    {
+      "name": "foreman",
+      "source": "./",
+      "description": "A deterministic gate that blocks a rigged commit, push or pull request, and an agent-run merge.",
+      "homepage": "https://github.com/PedValme/foreman",
+      "license": "MIT"
+    }
+  ]
+}
