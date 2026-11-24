@@ -316,15 +316,40 @@ class ASealedAnswer(unittest.TestCase):
         self.assertIsNone(reviewer.read_sealed(self.obj(seal) + self.obj(seal, verdict="BLOCK"), seal))
         self.assertEqual(reviewer.read_sealed(self.obj(seal) + "\n" + self.obj(seal), seal), PASS)  # said twice
 
-    def test_a_sealed_object_must_be_shaped_as_a_review(self):
+    def test_a_sealed_object_needs_a_list_of_findings_and_nothing_more(self):
         seal = self.ask()
         for wrong in ({"seal": seal}, {"seal": seal, "findings": "none", "summary": "s", "verdict": "PASS"},
-                      {"seal": seal, "findings": [], "summary": "s", "verdict": "FINE"},
-                      {"seal": seal, "findings": [], "verdict": "PASS"}):
+                      {"seal": seal, "findings": {"a": 1}}):
             self.assertIsNone(reviewer.read_sealed(json.dumps(wrong), seal), wrong)
+        # the verdict is the review's to work out from verified findings: a real answer is not thrown away for it
+        finding = {"severity": "BLOCKING", "file": "a.py", "line": 1, "title": "t", "why": "w", "evidence": "e",
+                   "fix": "f"}
+        for fine in ({"seal": seal, "findings": [finding], "verdict": "block"},
+                     {"seal": seal, "findings": [finding], "summary": "s", "verdict": "BLOCK", "extra": 1},
+                     {"findings": [finding], "seal": seal}):
+            self.assertEqual(reviewer.read_sealed(json.dumps(fine), seal)["findings"], [finding], fine)
         self.assertIsNone(reviewer.read_sealed("", seal))
         self.assertIsNone(reviewer.read_sealed(self.obj(seal), ""))
         self.assertIsNone(reviewer.read_sealed(None, seal))
+
+    def test_the_answer_is_found_inside_a_larger_object_and_after_nested_ones(self):
+        seal = self.ask()
+        self.assertEqual(reviewer.read_sealed('{"reply": %s}' % self.obj(seal), seal), PASS)
+        nested_first = json.dumps({"findings": [{"evidence": "{}"}], "summary": "s", "verdict": "PASS", "seal": seal})
+        self.assertEqual(reviewer.read_sealed("noise { { %s } }" % nested_first, seal)["summary"], "s")
+        # an object quoted inside a string is text, not the answer
+        self.assertIsNone(reviewer.read_sealed(json.dumps({"quote": self.obj(seal)}), seal))
+
+    def test_text_full_of_braces_neither_crashes_nor_stalls(self):
+        import time
+        seal = self.ask()
+        real = self.obj(seal, verdict="BLOCK")
+        started = time.monotonic()
+        self.assertEqual(reviewer.read_sealed('{"a":' * 20000 + real, seal)["verdict"], "BLOCK")   # deep nesting
+        self.assertEqual(reviewer.read_sealed("{" * 200000 + real, seal)["verdict"], "BLOCK")      # a wall of braces
+        self.assertIsNone(reviewer.read_sealed("{" * 200000, seal))                                 # and no seal at all
+        self.assertIsNone(reviewer.read_sealed('[{' * 50000 + seal, seal))                          # the seal, no object
+        self.assertLess(time.monotonic() - started, 20)
 
     def test_each_request_has_its_own_seal(self):
         self.assertNotEqual(self.ask(), self.ask())
@@ -338,6 +363,7 @@ class WhatAHarnessAdds(ReviewerCase):
         lines = self.review().split("\n")
         at = [i for i, line in enumerate(lines) if line.startswith("Reviewer: ")][0]
         self.assertIn("Its session can read any file on this machine.", lines[at + 1:at + 4])
+        self.assertEqual(lines.count("Its session can read any file on this machine."), 1)
 
     def test_a_harness_without_effort_levels_says_nothing_about_effort(self):
         self.host = self.make_host(efforts=())
