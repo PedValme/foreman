@@ -19,7 +19,9 @@ mkdir -p ~/.config/opencode/plugins
 ln -s /path/to/foreman/adapters/opencode/foreman.ts ~/.config/opencode/plugins/foreman.ts
 ```
 
-OpenCode loads every `.ts` file in the `plugins` folder of its configuration directories, the user's included. This
+With `XDG_CONFIG_HOME` set, OpenCode's user folder is `$XDG_CONFIG_HOME/opencode` instead: link it into
+`$XDG_CONFIG_HOME/opencode/plugins`. OpenCode loads every `.ts` file in the `plugins` folder of its configuration
+directories, the user's included. This
 form was read in OpenCode's documentation and source (2.3.2), not seen running: the trials below never wrote to a
 user's OpenCode configuration.
 
@@ -96,16 +98,23 @@ of `examples/cart` with the link above:
   session hook.
 - **Turns.** OpenCode gives a session id (`ses_…`) and an id to each message (`msg_…`), but none to one run of the
   agent. The plugin counts a run from your prompt to a session at rest (its message id); a message you send while
-  the agent works, and OpenCode's own input to the agent, do not start a new one.
+  the agent works, and OpenCode's own input to the agent, do not start a new one. "At rest" is OpenCode's own record
+  of the session; after an interruption it does not record (OpenCode leaves some without a reason), your next prompt
+  may be taken as mid-run for that one run, so that run keeps the earlier one's notes (read in the source, not seen).
 - **The agent's shell starts in the session's directory each time.** A `cd` in one call does not carry to the next,
   and the plugin judges each call in the directory OpenCode runs it in (the `workdir` argument against the session's
   directory).
 - The gate runs on the agent's own machine. The independent control is still the required check in CI
   (`examples/foreman-check.yml`). Foreman's plugin file and state are files: the dialect refuses the plain attempts
   to remove or rewrite them (`opencode plugin remove foreman`, `"-foreman"` or `"-*"` written to `opencode.json`,
-  deleting the plugin file or the project's `.opencode` folder, starting a nested OpenCode with
-  `OPENCODE_DISABLE_PROJECT_CONFIG` or another configuration), not a
-  disguised one.
+  deleting Foreman's plugin file, deleting, moving or emptying a plugin folder: the project's `.opencode` and its
+  `plugins`, `~/.config/opencode` or `$XDG_CONFIG_HOME/opencode` and its `plugins`; starting a nested OpenCode with
+  `OPENCODE_DISABLE_PROJECT_CONFIG` or another configuration), not a disguised one. One other named file in a
+  plugin folder (`rm .opencode/plugins/mine.ts`) stays ordinary work, and so does a plain copy over the
+  configuration (`cp mine.json opencode.json`), whose content the command does not show. Refused although harmless:
+  removing another project's `.opencode` (`rm -rf examples/app/.opencode`), and a command that deletes a `"-*"`
+  entry from `opencode.json` (the line still holds the entry): edit the file with the agent's edit tool instead, or
+  do it yourself.
 - Not seen yet: Windows; OpenCode's background service (all runs above used `--standalone`); OpenCode's desktop and
   web apps.
 

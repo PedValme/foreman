@@ -11,7 +11,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const module = await import(pathToFileURL(join(here, "..", "adapters", "opencode", "foreman.ts")).href)
 const plugin = module.default
 const { toolRequests } = module
-let running = false
+const running = new Set()
 
 const hooks = {}
 const commands = {}
@@ -24,7 +24,9 @@ const ctx = {
   session: {
     hook: async (name, fn) => { hooks["session." + name] = fn },
     synthetic: async (input) => { seen.synthetic.push(input) },
-    get: async () => ({ time: running ? { busy: 2000, idle: 1000 } : { busy: 1000, idle: 2000 } }),
+    // OpenCode's record of the session it is asked about: mid-run while its id is in `running`.
+    get: async ({ sessionID }) => ({ id: sessionID, time: running.has(sessionID) ? { busy: 2000, idle: 1000 }
+                                                                                  : { busy: 1000, idle: 2000 } }),
   },
   permission: {
     hook: async (name, fn) => { hooks["permission." + name] = fn },
@@ -73,7 +75,8 @@ if (scenario === "gate") {
 } else if (scenario === "requests") {
   out.relative = toolRequests("shell", { command: "ls", workdir: "sub/dir" }, repo, "s1", "t1")[0].cwd
   out.home = toolRequests("shell", { command: "ls", workdir: "~/work" }, repo, "s1", "t1")[0].cwd
-  out.absolute = toolRequests("shell", { command: "ls", workdir: "/srv/x" }, repo, "s1", "t1")[0].cwd
+  out.absolute = toolRequests("shell", { command: "ls", workdir: join(dirname(repo), "elsewhere") }, repo, "s1",
+                              "t1")[0].cwd
   out.none = toolRequests("shell", { command: "ls" }, repo, "s1", "t1")[0].cwd
   out.todo = toolRequests("todowrite", { path: "x" }, repo, "s1", "t1")
   out.mcp = toolRequests("mcp_writer", { filePath: "y.txt" }, repo, "s1", "t1")
@@ -81,9 +84,13 @@ if (scenario === "gate") {
   await prompt("s1", "m1")
   out.shell = await tool("shell", { command: "perl -pi -e s/x/y/ " + rest[0] })
   writeFileSync(join(repo, rest[0]), rest[1])
-  running = true                                             // OpenCode's record: the run is still going
+  running.add("s2")                                          // another session's run says nothing about this one
+  out.other = await outcome(prompt("s1", "m1b"))             // a prompt to s1 at rest: s1's run starts again
+  await tool("shell", { command: "perl -pi -e s/x/y/ " + rest[0] })
+  writeFileSync(join(repo, rest[0]), rest[1])
+  running.add("s1")                                          // OpenCode's record: s1's run is still going
   await prompt("s1", "m2")                                   // the person writes while the agent works
-  running = false
+  running.delete("s1")
   out.first = await idle()
   out.second = await idle()
   out.synthetic = seen.synthetic
@@ -95,6 +102,13 @@ if (scenario === "gate") {
   approve = async () => { await sleep(1100) }                // a person
   out.person = await tool("shell", gone)
   out.asked = seen.asked.map((a) => ({ action: a.action, message: a.metadata?.message ?? "" }))
+  out.idle = await idle()                                    // Foreman ran fine: nothing to show at the end
+} else if (scenario === "broken-git") {
+  process.env.PATH = join(repo, "no-python-here")            // no python3: the Python side cannot answer
+  out.commit = await tool("shell", { command: "git commit -m x" }) // the first failed call is a gated one
+  out.asked = seen.asked.length
+  out.first = await idle()                                   // its error still reaches the person, once
+  out.second = await idle()
 } else if (scenario === "turn") {
   await prompt()
   out.shell = await tool("shell", { command: "perl -pi -e s/x/y/ " + rest[0] })

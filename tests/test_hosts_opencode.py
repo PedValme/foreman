@@ -44,17 +44,43 @@ class Guards(OpenCodeCase):
                         "rm .opencode/plugins/foreman.ts", "rm ~/.config/opencode/plugins/foreman.ts",
                         "OPENCODE_DISABLE_PROJECT_CONFIG=1 opencode run 'commit it'",
                         "env OPENCODE_CONFIG_CONTENT='{}' opencode run x",
-                        # the project's plugin link, removed with its folder
-                        "rm -rf .opencode", "rm -rf ./.opencode/", "rm .opencode/plugins/mine.ts",
-                        "mv .opencode /tmp/x", "unlink .opencode/plugin/f.ts",
+                        # the folder a plugin link lives in, removed or emptied: the project's and the user's
+                        "rm -rf .opencode", "rm -rf ./.opencode/", "mv .opencode elsewhere", "rmdir .opencode/plugins",
+                        "rm -rf .opencode/*", "rm -rf .opencode/plugins/*", "rm .opencode/plugins/*.ts",
+                        "rm -rf ~/.config/opencode/plugins", "rm -rf ~/.config/opencode", "mv ~/.config/opencode ~/x",
+                        "rm -rf ~/.config/opencode/plugins/*", "rm -rf $HOME/.config/opencode",
+                        "rm -rf $XDG_CONFIG_HOME/opencode/plugins", "rm -rf \"${XDG_CONFIG_HOME}/opencode\"",
+                        "rm -rf ~/.config",
                         # a plugin-removing entry written to the configuration without naming Foreman
                         "echo '{\"plugins\": [\"-*\"]}' > opencode.json",
                         "jq '.plugins += [\"-*\"]' opencode.json > t && mv t opencode.json",
-                        "printf '%s' '{\"plugins\":[\"-*\"]}' | tee .opencode/opencode.jsonc"):
+                        "printf '%s' '{\"plugins\":[\"-*\"]}' | tee .opencode/opencode.jsonc",
+                        "sed -i '' 's/\"plugins\": \\[/\"plugins\": [\"-*\", /' opencode.json"):
             self.assertEqual(self.ask("shell", command=command).get("action"), "block", command)
+
+    def test_the_users_folder_by_its_absolute_path(self):
+        xdg = os.path.join(self.tmp, "xdg")
+        old = os.environ.get("XDG_CONFIG_HOME")
+        os.environ["XDG_CONFIG_HOME"] = xdg
+        try:
+            for target in (os.path.join(xdg, "opencode"), os.path.join(xdg, "opencode", "plugins")):
+                self.assertEqual(self.ask("shell", command='rm -rf "%s"' % target).get("action"), "block", target)
+            other = os.path.join(xdg, "opencode", "plugins", "mine.ts")
+            self.assertNotEqual(self.ask("shell", command='rm "%s"' % other).get("action"), "block")
+        finally:
+            if old is None:
+                del os.environ["XDG_CONFIG_HOME"]
+            else:
+                os.environ["XDG_CONFIG_HOME"] = old
 
     def test_ordinary_work_near_opencodes_files_is_not_refused(self):
         for command in ("rm -rf .opencode-cache node_modules", "rm -rf build/.opencode.bak", "ls .opencode",
+                        # one other named plugin of the project's own, removed or renamed
+                        "rm .opencode/plugins/mine.ts", "unlink .opencode/plugin/f.ts",
+                        "mv .opencode/plugins/old.ts .opencode/plugins/new.ts",
+                        "rm ~/.config/opencode/plugins/mine.ts",
+                        # the config file named in what is written elsewhere
+                        "echo 'see \"-*\" in opencode.json' >> NOTES.md",
                         "grep -n '\"-*\"' opencode.json", "jq .plugins opencode.json",
                         "git commit --allow-empty -m 'drop \"-*\" from opencode.json'",
                         "echo '{\"model\": \"a/b\"}' > opencode.json",
@@ -239,6 +265,16 @@ class Plugin(OpenCodeCase):
         self.assertTrue(out["person"]["ok"])
         self.assertEqual([a["action"] for a in out["asked"]], ["foreman"] * 3)
         self.assertIn("could not inspect", out["asked"][0]["message"])
+        self.assertTrue(out["idle"]["ok"])  # Foreman itself ran: nothing to show when the run ends
+
+    def test_python_failing_on_a_gated_command_first_is_still_shown_once(self):
+        out = self.drive("broken-git")
+        self.assertFalse(out["commit"]["ok"])  # it went to the person, and nobody was there
+        self.assertIn("Foreman could not run", out["commit"]["error"])
+        self.assertEqual(out["asked"], 1)
+        self.assertFalse(out["first"]["ok"])  # OpenCode's question does not show the text: the end of the run does
+        self.assertIn("Foreman could not run", out["first"]["error"])
+        self.assertTrue(out["second"]["ok"])
 
     def test_a_run_that_left_a_skipped_test_is_sent_back_once(self):
         out = self.drive("turn", "tests/test_cart.py", SKIPPED)
@@ -259,7 +295,7 @@ class Plugin(OpenCodeCase):
         out = self.drive("requests")
         self.assertEqual(out["relative"], os.path.join(self.root, "sub", "dir"))
         self.assertEqual(out["home"], os.path.join(self.tmp, "home", "work"))
-        self.assertEqual(out["absolute"], "/srv/x")
+        self.assertEqual(out["absolute"], os.path.join(self.tmp, "elsewhere"))
         self.assertEqual(out["none"], self.root)
         self.assertEqual(out["todo"], [])
         self.assertEqual([(r["event"], r["path"]) for r in out["mcp"]], [("write", "y.txt")])

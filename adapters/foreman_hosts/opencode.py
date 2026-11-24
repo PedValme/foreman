@@ -21,6 +21,8 @@ from __future__ import annotations
 import os
 import re
 
+from foreman import gate
+
 from . import core, neutral
 
 NAME = "opencode"
@@ -32,40 +34,122 @@ _PLUGIN_OFF = re.compile(r"(?i)\bplugins?\s+(?:remove|rm|uninstall|disable)\b")
 _FOREMAN = re.compile(r"(?i)\bforeman\b")
 _CONFIG_FILE = re.compile(r"(?i)(?:^|[/\\\s\"'=])opencode\.jsonc?\b")
 _PLUGIN_DIR = re.compile(r"(?i)(?:\.opencode|opencode)[/\\]plugins?\b")
+_OWN_PLUGIN = re.compile(r"(?i)(?:\.opencode|opencode)[/\\]plugins?[/\\][^/\\\s\"']*foreman")  # Foreman's own file
 _CONFIG_ENV = re.compile(r"\bOPENCODE_(?:DISABLE_PROJECT_CONFIG|CONFIG_PROJECT_DISABLE|CONFIG|CONFIG_DIR|CONFIG_CONTENT)\b")
 _REMOVES = re.compile(r"[\"']-(?:\*|%s)[\"']" % re.escape(PLUGIN_ID))
 _REMOVERS = {"rm", "rmdir", "unlink", "mv", "trash", "srm", "shred"}
-# The project's `.opencode` folder itself, or its plugin folder or anything in it.
-_PROJECT_PLUGINS = re.compile(r"(?i)(?:^|/)\.opencode(?:/*$|/plugins?(?:/|$))")
-_DEFINES =re.compile(r"\bid\s*:\s*[\"']%s[\"']" % re.escape(PLUGIN_ID))
+_COPIERS = {"mv", "cp", "install", "rsync"}   # their last word is where they write
+_IN_PLACE = {"sed", "perl", "ruby"}           # with -i they write the files they are given
+# Where OpenCode finds plugins, as a command names the folder: the project's `.opencode` and its plugin folder,
+# the user's configuration directory (`~/.config/opencode`, or `$XDG_CONFIG_HOME/opencode`) and its plugin folder.
+_HOME = r"(?:~|\$home|\$\{home\})"
+_XDG = r"(?:\$xdg_config_home|\$\{xdg_config_home\})"
+_PLUGIN_HOMES = re.compile(r"(?:(?:^|/)\.opencode|^%s/\.config/opencode|^%s/opencode|^%s/\.config)(?:/plugins?)?$"
+                           % (_HOME, _XDG, _HOME))
+_DEFINES = re.compile(r"\bid\s*:\s*[\"']%s[\"']" % re.escape(PLUGIN_ID))
+
+
+def _user_dirs() -> list:
+    """The user's OpenCode configuration directory as an absolute path, lower case with forward slashes."""
+    out = []
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    home = os.path.expanduser("~")
+    for base in dict.fromkeys(b for b in (xdg, os.path.join(home, ".config")) if b):
+        for p in dict.fromkeys((os.path.abspath(base), os.path.realpath(base))):
+            out.append(p.replace("\\", "/").rstrip("/").lower())
+    return out
+
+
+def _folder(word: str) -> str:
+    """The folder a removal really targets: `.opencode/*` and `.opencode/plugins/*.ts` empty the folder itself."""
+    path = word.replace("\\", "/").rstrip("/").lower()
+    while path and re.search(r"[*?\[]", path.rsplit("/", 1)[-1]):
+        path = path.rsplit("/", 1)[0] if "/" in path else ""
+        path = path.rstrip("/")
+    while path.endswith("/."):
+        path = path[:-2]
+    return path
+
+
+def _is_plugin_home(word: str) -> bool:
+    """`word` names a folder where OpenCode finds plugins (or the user's `.config` holding one), or a glob over it."""
+    path = _folder(word)
+    if not path:
+        return False
+    if _PLUGIN_HOMES.search(path):
+        return True
+    for base in _user_dirs():
+        if path in (base, base + "/opencode", base + "/opencode/plugin", base + "/opencode/plugins"):
+            return True
+    return False
+
+
+def _operands(words: list) -> list:
+    """The words after the program that are not options (all of them after `--`)."""
+    out, options = [], True
+    for w in words[1:]:
+        if isinstance(w, (gate._Redir, gate._Op)):
+            continue
+        if options and w == "--":
+            options = False
+        elif options and w.startswith("-") and w != "-":
+            continue
+        else:
+            out.append(w)
+    return out
+
+
+def _written(prog: str, words: list) -> list:
+    """The files a simple command writes, as far as its words show: a redirection's target, `tee`'s files, the
+    destination of `mv`/`cp`, the files of `sed -i`."""
+    out = [words[i + 1] for i, w in enumerate(words[:-1]) if isinstance(w, gate._Redir) and "&" not in w]
+    operands = _operands([w for w in words if not isinstance(w, gate._Redir)])
+    if prog == "tee":
+        out += operands
+    elif prog in _COPIERS and len(operands) > 1:
+        out.append(operands[-1])
+    elif prog in _IN_PLACE and any(w.startswith("-i") or w in ("--in-place", "-pi") for w in words[1:]):
+        out += operands[1:] if prog == "sed" else operands
+    return [w for w in out if isinstance(w, str)]
 
 
 def _switches_off(command: str) -> bool:
     """`opencode plugin remove foreman`, an OpenCode started with its configuration replaced or the project's
-    skipped, a command that rewrites OpenCode's configuration or its plugin folder where Foreman is named, one that
-    deletes or moves the project's `.opencode` folder or its plugin folder, or a line that writes OpenCode's
-    configuration with an entry removing plugins (`"-*"`). One that only reads (`cat`, `grep`) or git (which records
-    a path or a message) is not one.
+    skipped, a command that touches OpenCode's configuration naming Foreman or touches Foreman's own plugin file, one
+    that deletes, moves or empties (a glob) a folder where OpenCode finds plugins (the project's `.opencode` and its
+    plugin folder, the user's `~/.config/opencode` or `$XDG_CONFIG_HOME/opencode` and its plugin folder), or a
+    line whose command writes OpenCode's configuration file (redirection, `tee`, `mv`/`cp` destination, `sed -i`)
+    while the line holds an entry removing plugins (`"-*"`). One that only reads (`cat`, `grep`) or git (which
+    records a path or a message) is not one.
 
-    Not judged: a plain copy of another file over the configuration (`cp mine.json opencode.json`), whose content
-    the command does not show; refusing every such copy would block ordinary work on a project's own settings, and
-    the required check in CI stays the independent control."""
+    Not judged: one other named file in a plugin folder (a project's own plugins), and a plain copy of another file
+    over the configuration (`cp mine.json opencode.json`), whose content the command does not show; refusing every
+    such copy would block ordinary work on a project's own settings, and the required check in CI stays the
+    independent control. Refused although harmless: removing another project's `.opencode` (`rm -rf
+    examples/app/.opencode`), and a line that deletes a `"-*"` entry from the configuration."""
     programs = core.programs(command)
-    writes = False
+    writes_config = False
     for prog, words in programs:
-        text = " ".join(words)
+        text = " ".join(w for w in words if isinstance(w, str))
         if prog in CLI and _PLUGIN_OFF.search(text) and _FOREMAN.search(text):
             return True
         if prog == "git" or core.only_reads(prog, words):
             continue
-        writes = True
-        if (_CONFIG_FILE.search(text) or _PLUGIN_DIR.search(text)) and _FOREMAN.search(text):
+        # Foreman named as a word, not as part of a folder's path (a clone or a project may be called foreman).
+        named = any(_FOREMAN.search(w) for w in words[1:] if isinstance(w, str) and not re.search(r"[/\\]", w))
+        if (_CONFIG_FILE.search(text) and named) or _OWN_PLUGIN.search(text):
             return True
-        if prog in _REMOVERS and any(_PROJECT_PLUGINS.search(w.replace("\\", "/")) for w in words[1:]):
-            return True  # `rm -rf .opencode`: a plugin linked into the project goes with it
-    # A line that writes OpenCode's configuration with an entry that removes plugins, whatever program writes it
-    # and wherever the entry sits in the line (`jq '.plugins += ["-*"]' opencode.json > t && mv t opencode.json`).
-    if writes and _CONFIG_FILE.search(command or "") and _REMOVES.search(command or ""):
+        if prog in _REMOVERS:
+            operands = _operands(words)
+            targets = operands[:-1] if prog == "mv" else operands
+            # The folder itself or a glob over it, not one other named file inside it (a project's own plugins).
+            if any(_is_plugin_home(w) for w in targets):
+                return True
+        if any(_CONFIG_FILE.search("/" + w.replace("\\", "/")) for w in _written(prog, words)):
+            writes_config = True
+    # A line that writes OpenCode's configuration file with an entry that removes plugins, wherever the entry sits
+    # in the line (`jq '.plugins += ["-*"]' opencode.json > t && mv t opencode.json`).
+    if writes_config and _REMOVES.search(command or ""):
         return True
     # The variables go before the program (`OPENCODE_DISABLE_PROJECT_CONFIG=1 opencode run …`), where programs()
     # skips them, or through `env`/`export`: judge the line as a whole once it starts OpenCode.
