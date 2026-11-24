@@ -116,10 +116,40 @@ class Answers(NeutralCase):
         with self.assertRaises(ValueError):
             self.ask("pre_tool")
 
+    def test_a_request_with_the_wrong_shape_is_an_error_not_a_pass(self):
+        path = os.path.join(self.root, "tests", "test_cart.py")
+        wrong = (
+            {"event": "shell"},                                             # no command
+            {"event": "shell", "command": ["git", "push"]},                 # a list, not the line
+            {"event": "shell", "cmd": "git push"},                          # a misspelt key
+            {"event": "write", "filePath": path, "content": SKIPPED},       # a misspelt key
+            {"event": "write", "path": "  ", "content": "x"},
+            {"event": "write", "path": path, "content": {"text": SKIPPED}},
+            {"event": "write", "path": path, "old": "a", "new": ["b"]},
+            {"event": "patch", "diff": "*** Begin Patch\n*** End Patch\n"},
+        )
+        for request in wrong:
+            with self.assertRaises(ValueError, msg=str(request)):
+                neutral.answer(host_for(request), dict(request, cwd=self.root))
+
+    def test_attended_is_the_json_true_and_nothing_else(self):
+        self.assertTrue(neutral.attended({"attended": True}))
+        for value in ("true", 1, "yes", None, False):
+            self.assertFalse(neutral.attended({"attended": value}), repr(value))
+        self.assertFalse(neutral.attended({}))
+        self.assertFalse(neutral.attended(None))
+
     def test_the_agent_cannot_run_the_entry_point_for_any_host(self):
         for name in hosts.MODULES:
-            out = self.ask("shell", command="echo '{}' | python3 adapters/hook.py %s" % name)
-            self.assertEqual(out.get("action"), "block", name)
+            for command in ("echo '{}' | python3 adapters/hook.py %s", "env X=1 python3 -I ./hook.py %s < forged.json",
+                            "bash -c 'py /opt/foreman/adapters/hook.py %s'"):
+                self.assertEqual(self.ask("shell", command=command % name).get("action"), "block", command % name)
+
+    def test_another_hook_py_is_not_foremans_entry_point(self):
+        for command in ("python3 /home/u/src/pi/scripts/hook.py run", "python3 ~/.codex/hooks/hook.py",
+                        "python scripts/hook.py --target opencode", "python3 hook.py pi.txt",
+                        "python3 tools/hook.py install --harness codex"):
+            self.assertEqual(self.ask("shell", command=command), {}, command)
 
 
 class Main(NeutralCase):
@@ -140,6 +170,8 @@ class Main(NeutralCase):
         for raw in ("", "{not json", "[]", '"shell"'):
             self.assertEqual(self.run_main(raw), (1, ""), raw)
         self.assertEqual(self.run_main(json.dumps({"event": "nope"})), (1, ""))
+        self.assertEqual(self.run_main(json.dumps({"event": "write", "filePath": "x", "content": "y"})), (1, ""))
+        self.assertEqual(self.run_main(json.dumps({"event": "shell", "command": ["git", "push"]})), (1, ""))
 
     def test_when_the_adapter_fails_a_gated_command_goes_to_the_person(self):
         old = core.pre_shell
@@ -191,6 +223,28 @@ class Patches(NeutralCase):
         d = self.patch("*** Update File: %s\n@@\n-HOOKS-ON\n+HOOKS-OFF\n" % settings)
         self.assertIn("user's decision", d["message"])
         self.assertIsNone(self.patch("*** Update File: %s\n@@\n-model a\n+model b\n" % settings))
+
+    def test_a_settings_file_deleted_or_moved_over_is_judged_too(self):
+        settings = os.path.join(self.tmp, ".claude", "settings.json")
+        os.makedirs(os.path.dirname(settings))
+        with open(settings, "w") as fh:
+            fh.write("FOREMAN-ON")
+        gone = core.Host(name="h", label="H", person=lambda sub: "/foreman " + sub,
+                         is_config=lambda path: path.endswith("settings.json"),
+                         config_off=lambda before, after: "FOREMAN-ON" in before and "FOREMAN-ON" not in after)
+        body = "*** Begin Patch\n%s*** End Patch\n"
+        d = core.pre_patch(gone, body % ("*** Delete File: %s\n" % settings), self.root, "s1", "t1")
+        self.assertEqual(d["action"], core.BLOCK)
+        self.assertIn("user's decision", d["message"])
+        moved = "*** Update File: notes.json\n*** Move to: %s\n@@\n-old\n+HOOKS-OFF\n" % settings
+        self.assertEqual(self.patch(moved)["action"], core.BLOCK)
+        harmless = "*** Update File: notes.json\n*** Move to: %s\n@@\n-old\n+new\n" % os.path.join(self.root, "n.json")
+        self.assertIsNone(self.patch(harmless))
+
+    def test_a_directory_that_does_not_exist_goes_to_a_person(self):
+        d = self.patch("*** Update File: cart.py\n@@\n-    return 2\n+    return 3\n", cwd=os.path.join(self.tmp, "gone"))
+        self.assertEqual(d["action"], core.ASK)
+        self.assertIn("does not exist on this machine", d["message"])
 
     def test_what_is_not_a_patch_is_let_through(self):
         for value in (None, "", "   ", 7):

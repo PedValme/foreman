@@ -240,10 +240,13 @@ def _runs_entry(command: str) -> bool:
     claude-code`): the way to hand Foreman a made-up "the person typed this". Naming the file (`git add
     adapters/hook.py`) is not running it."""
     for prog, words in programs(command):
-        text = " ".join(words)
-        if _PYTHON.match(prog) and re.search(r"\bhook\.py\b", text) and any(
-                re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(h), text) for h in HOSTS):
-            return True
+        if not _PYTHON.match(prog):
+            continue
+        for i, word in enumerate(words[:-1]):
+            # the entry point takes the harness's name as its one argument: `…/hook.py pi`, not a `hook.py` that
+            # merely lives under a folder called `pi` or is given some other word
+            if gate._prog(word) == "hook.py" and words[i + 1] in HOSTS:
+                return True
     return False
 
 
@@ -342,6 +345,46 @@ def pre_write(host: Host, path, cwd: str = "", session: str = "", turn: str = ""
 
 
 _PATCH_PATHS = re.compile(r"(?m)^\*\*\* (?:(?:Update|Add|Delete) File|Move to):\s*(.+?)\s*$")
+_PATCH_HEADER = re.compile(r"^\*\*\* (Update File|Add File|Delete File|Move to):\s*(.+?)\s*$")
+
+
+def _read_config(path: str) -> str:
+    try:
+        if os.path.getsize(path) <= _MAX_CONFIG_BYTES:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                return fh.read()
+    except OSError:
+        pass
+    return ""
+
+
+def _patch_switches_off(host: Host, patch: str, full: Callable[[str], str]) -> bool:
+    """A patch that leaves one of the harness's settings files switching Foreman off: by changing it, by deleting
+    it, or by moving another file over it."""
+    try:
+        sides = {full(path): (old, new) for path, old, new, _is_new in gate._v4a_files(patch)}
+        source = None
+        for line in patch.splitlines():
+            m = _PATCH_HEADER.match(line)
+            if not m:
+                continue
+            kind, path = m.group(1), full(m.group(2))
+            if kind == "Move to":
+                # the gate files a moved file's content under the name it had: judge it where it lands
+                if host.is_config(path) and host.config_off(_read_config(path), sides.get(source, ("", ""))[1]):
+                    return True
+                continue
+            source = path
+            if not host.is_config(path):
+                continue
+            if kind == "Delete File":
+                if host.config_off(_read_config(path), ""):
+                    return True
+            elif host.config_off(*sides.get(path, ("", ""))):
+                return True
+    except Exception:
+        logger.warning("foreman: the host's config check failed", exc_info=True)
+    return False
 
 
 def pre_patch(host: Host, patch, cwd: str = "", session: str = "", turn: str = "") -> Optional[dict]:
@@ -359,12 +402,12 @@ def pre_patch(host: Host, patch, cwd: str = "", session: str = "", turn: str = "
     paths = list(dict.fromkeys(full(p) for p in _PATCH_PATHS.findall(patch)))
     if any(_is_own_path(host, p) for p in paths):
         return {"action": BLOCK, "message": _OWN}
-    for path, old, new, _is_new in gate._v4a_files(patch):
-        try:
-            if host.is_config(full(path)) and host.config_off(old, new):
-                return {"action": BLOCK, "message": _OFF}
-        except Exception:
-            logger.warning("foreman: the host's config check failed", exc_info=True)
+    if not os.path.isdir(base):
+        return {"action": ASK, "message": "Foreman could not inspect this patch: the working directory %s does not "
+                                          "exist on this machine. Approve only if you have checked the change "
+                                          "yourself." % base}
+    if _patch_switches_off(host, patch, full):
+        return {"action": BLOCK, "message": _OFF}
     # The gate resolves a patch's relative paths against the session's directory, which outside Hermes it takes
     # from the process: stand in it while the gate reads.
     here = None
