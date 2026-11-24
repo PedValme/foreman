@@ -121,17 +121,35 @@ def _command(args: dict):
     return command
 
 
-def _where(cwd: str, args: dict) -> str:
+def _where(cwd: str, args: dict) -> Optional[str]:
     """Where the shell command runs: the call's own ``workdir`` when it gives one (resolved against the session's
-    directory), else the hook's ``cwd``."""
+    directory), else the hook's ``cwd``. None when the workdir is relative and there is no directory to resolve it
+    against: then nobody knows where the command runs."""
     workdir = args.get("workdir")
     if isinstance(workdir, str) and workdir.strip():
         workdir = os.path.expanduser(workdir.strip())
         if os.path.isabs(workdir):
             return os.path.normpath(workdir)
-        if cwd:
+        if cwd and os.path.isabs(cwd):
             return os.path.normpath(os.path.join(cwd, workdir))
+        return None
     return cwd
+
+
+def _shell(h: core.Host, args: dict, cwd: str, session: str, turn: str) -> Optional[dict]:
+    command, where = _command(args), _where(cwd, args)
+    if where is None:
+        if core.looks_gated(command):
+            return {"action": core.ASK, "message": "Foreman could not inspect this command: its working directory "
+                                                   "%r is relative and Codex gave no directory to resolve it "
+                                                   "against." % args.get("workdir")}
+        where = ""  # the guards still run; the gate has nothing to inspect here
+    return core.pre_shell(h, command, where, session, turn)
+
+
+def _string(args: dict, *keys):
+    """The first of ``keys`` whose value is a string, else None ("not given")."""
+    return next((args[k] for k in keys if isinstance(args.get(k), str)), None)
 
 
 def _pre_tool(h: core.Host, data: dict) -> Optional[dict]:
@@ -140,12 +158,15 @@ def _pre_tool(h: core.Host, data: dict) -> Optional[dict]:
         return None
     cwd, session, turn = _text(data.get("cwd")), _text(data.get("session_id")), _text(data.get("turn_id"))
     if tool in SHELL_TOOLS:
-        return core.pre_shell(h, _command(args), _where(cwd, args), session, turn)
+        return _shell(h, args, cwd, session, turn)
     if tool in PATCH_TOOLS:
-        patch = next((args[k] for k in ("command", "patch", "input") if isinstance(args.get(k), str)), None)
-        if tool != "apply_patch" and not (patch or "").lstrip().startswith("*** Begin Patch"):
-            return None  # an `Edit` or `Write` whose input is not a patch this adapter can read
-        return core.pre_patch(h, patch, cwd, session, turn)
+        patch = _string(args, "command", "patch", "input")
+        if tool == "apply_patch" or (patch or "").lstrip().startswith("*** Begin Patch"):
+            return core.pre_patch(h, patch, cwd, session, turn)
+        # An `Edit` or `Write` that carries a file and its change instead of a patch: the write's own checks.
+        return core.pre_write(h, _string(args, "file_path", "path"), cwd, session, turn,
+                              content=_string(args, "content"), old=_string(args, "old_string", "old"),
+                              new=_string(args, "new_string", "new"), replace_all=args.get("replace_all") is True)
     return None
 
 
@@ -153,10 +174,41 @@ _NEEDS_PERSON = ("Foreman refused this call because it needs a person to decide,
                  "If the user has checked the change, they can run it themselves.\n\n")
 
 
+# The gate's sentences that point at allowing a finding by id, after core.reword, and what to do in Codex instead,
+# where allowing is not available (NO_ALLOW below).
+_YOURSELF = "fix them, or commit the change yourself in your own terminal; allowing is not available in Codex"
+_NO_ALLOW_WORDS = (
+    (re.compile(r"ask them to review each one and run `foreman allow <id>` if they agree\."),
+     "ask them to review each one: allowing is not available in Codex, so they fix the finding or commit the change "
+     "themselves in their own terminal."),
+    (re.compile(r"waiting for you \(`foreman allow <id>` if you agree\):"), "waiting for you (%s):" % _YOURSELF),
+    (re.compile(r"`foreman allow <id>` if you agree with each one\."), _YOURSELF + "."),
+    (re.compile(r"Review each one; `foreman allow <id>` lets that exact finding through for 24 hours:"),
+     "Review each one, then %s:" % _YOURSELF),
+    (re.compile(r"it waits until you run `foreman allow <id>`\."), "it waits for you: " + _YOURSELF + "."),
+    (re.compile(r"waiting for `foreman allow <id>`"), "waiting for you: " + _YOURSELF),
+    (re.compile(r"(foreman allow\s+)\[id\](\s+)list findings the agent marked, or allow one of them \(you only\)"),
+     r"\1    \2list the findings the agent marked"),
+    (re.compile(r"is the user's decision, typed by them \(foreman allow <id>\)\. Ask them to review it\."),
+     "is the user's decision, and not available in Codex: ask them to review it, then fix the finding or commit "
+     "the change themselves."),
+    # anything else that still names it
+    (re.compile(r"`?foreman allow <id>`?"), "a fix, or a commit the user makes themselves (allowing is not "
+                                             "available in Codex)"),
+)
+
+
+def codex_words(text: str) -> str:
+    """The gate's text as it applies in Codex: no advice to run `foreman allow <id>`, which Codex refuses."""
+    for pattern, new in _NO_ALLOW_WORDS:
+        text = pattern.sub(new, text)
+    return text
+
+
 def _pre_tool_answer(decision: Optional[dict]) -> Optional[dict]:
     if not decision:
         return None
-    message = decision["message"]
+    message = codex_words(decision["message"])
     if decision["action"] != core.BLOCK:  # `ask`: Codex would let the call through; refuse it with the reason
         message = _NEEDS_PERSON + message
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
@@ -181,7 +233,7 @@ def person_reply(h: core.Host, prompt, cwd: str = "") -> Optional[str]:
         return NO_ALLOW
     words = prompt.strip().lstrip("/").split(None, 1)
     args = words[1] if len(words) > 1 else ""
-    reply = core.person_reply(h, args, cwd)
+    reply = codex_words(core.person_reply(h, args, cwd))
     if args.lower() in ("allow", "help"):
         reply += "\n\n" + NO_ALLOW
     return reply
@@ -203,7 +255,7 @@ def answer(data: dict, env=None) -> Optional[dict]:
     if event == "Stop":
         decision = core.end_of_turn(h, cwd, session, turn)
         if decision and decision["action"] == core.CONTINUE:
-            return {"decision": "block", "reason": decision["message"]}
+            return {"decision": "block", "reason": codex_words(decision["message"])}
     return None
 
 

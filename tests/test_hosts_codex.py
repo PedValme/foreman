@@ -127,7 +127,34 @@ class PreToolUse(CodexCase):
         for name in ("Edit", "Write"):
             self.assertEqual(self.decision(self.tool(name, command=SKIP_PATCH))[0], "deny", name)
             self.assertIsNone(self.tool(name, command=PLAIN_PATCH), name)
-            self.assertIsNone(self.tool(name, file_path="tests/test_cart.py", content="x"), name)
+            self.assertIsNone(self.tool(name, file_path="tests/test_cart.py", content="x = 1\n"), name)
+
+    def test_edit_and_write_without_a_patch_get_the_writes_own_checks(self):
+        hook = os.path.join(ROOT, "adapters", "hook.py")
+        for name in ("Write", "Edit"):
+            verdict, reason = self.decision(self.tool(name, file_path=hook, content="x"))
+            self.assertEqual(verdict, "deny", name)
+            self.assertIn("Foreman's own program", reason)
+        self.assertEqual(self.decision(self.tool("Write", path=hook))[0], "deny")  # nothing readable: guards only
+        self.assertEqual(self.decision(self.tool("Write", file_path="tests/test_cart.py", content=SKIPPED))[0],
+                         "deny")
+        self.assertEqual(self.decision(self.tool("Edit", file_path="tests/test_cart.py", old_string="def test_total():",
+                                                 new_string=SKIP + "\ndef test_total():"))[0], "deny")
+        self.assertEqual(self.decision(self.tool("Write", file_path=".codex/config.toml",
+                                                 content="[features]\nhooks = false\n"))[0], "deny")
+        # a value that is not a string is "not given", never a crash
+        self.assertIsNone(self.tool("Edit", file_path="cart.py", old_string=3, new_string=None))
+        self.assertIsNone(self.tool("Write", file_path=7, content="x"))
+
+    def test_a_relative_workdir_with_no_cwd_is_not_inspected_blind(self):
+        out = codex.answer(self.payload("PreToolUse", tool_name="Bash", cwd="",
+                                        tool_input={"command": "git commit -m x", "workdir": "repo"}), {})
+        verdict, reason = self.decision(out)
+        self.assertEqual(verdict, "deny")
+        self.assertIn("could not inspect", reason)
+        self.assertIsNone(codex._where("", {"workdir": "repo"}))
+        self.assertIsNone(codex.answer(self.payload("PreToolUse", tool_name="Bash", cwd="",
+                                                    tool_input={"command": "ls", "workdir": "repo"}), {}))
 
     def test_a_patch_in_a_directory_that_does_not_exist_is_refused(self):
         out = codex.answer(self.payload("PreToolUse", tool_name="apply_patch", cwd=os.path.join(self.tmp, "gone"),
@@ -243,7 +270,7 @@ class PersonCommands(CodexCase):
         self.assertIn("not available in Codex yet", reason)
         self.assertCodexWords(reason)
 
-    def test_a_hermes_only_subcommand_as_an_exact_command_says_it_is_not_here(self):
+    def test_a_hermes_only_subcommand_goes_to_the_model(self):
         self.assertIsNone(self.prompt("foreman board"))  # not one of Codex's forms: the model gets it
         self.assertIsNone(self.prompt("foreman merge"))
 
@@ -261,6 +288,27 @@ class PersonCommands(CodexCase):
         listing = self.prompt("foreman allow")["reason"]  # listing what waits stays
         self.assertIn(short_id, listing)
         self.assertIn("not available in Codex yet", listing)
+
+    def test_no_codex_answer_advises_allowing_by_id(self):
+        self.prompt("make the tests pass")
+        self.assertIsNone(self.tool("Bash", command="python3 ../mark.py"))
+        self.write("tests/test_cart.py", MARKED)  # what that command did
+        self.git("add", "-A")
+        texts = [self.decision(self.tool("Bash", command="git commit -m green"))[1],
+                 self.decision(self.tool("Bash", command="codex exec 'foreman allow 3f2a'"))[1],
+                 self.prompt("foreman status")["reason"], self.prompt("foreman help")["reason"],
+                 self.prompt("foreman allow")["reason"], self.prompt("foreman allow 3f2a")["reason"]]
+        self.prompt("go on")
+        self.assertIsNone(self.tool("Bash", command="python3 ../mark.py"))
+        self.write("tests/test_cart.py", MARKED + "\n")
+        stop = self.stop(turn="turn-1")
+        if stop:
+            texts.append(stop["reason"])
+        texts.append(codex.codex_words(core.reword(codex.host(), core._PERSON_ONLY % "/foreman allow <id>")))
+        self.assertTrue(any("NEEDS YOUR OK" in t or "Marked" in t for t in texts))
+        for text in texts:
+            self.assertNotRegex(text, r"allow\s*<id>|allow \[id\]", text)
+            self.assertCodexWords(text)
 
     def test_listing_with_nothing_waiting(self):
         self.assertIn("nothing is waiting", self.prompt("foreman allow")["reason"])
