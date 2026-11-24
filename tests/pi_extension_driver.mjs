@@ -104,6 +104,16 @@ if (scenario === "gate") {
 	process.env.FOREMAN_PYTHON = process.env.FAKE_PYTHON;
 	const answer = await mod.ask({ event: "turn_start", cwd: repo, session: "s", turn: "" }, repo, 300);
 	out.timeout = answer instanceof Error ? answer.message : answer;
+} else if (scenario === "paths") {
+	const r = mod.resolvePiPath;
+	out.win_drive = r("/c/Users/me/repo/tests/test_a.py", "C:\\elsewhere", "win32");
+	out.win_mnt = r("/mnt/c/Users/me/repo/tests/test_a.py", "C:\\elsewhere", "win32");
+	out.win_cygdrive = r("/cygdrive/c/Users/me/repo/tests/test_a.py", "C:\\elsewhere", "win32");
+	out.win_at_drive = r("@/c/Users/me/repo", "C:\\elsewhere", "win32");
+	out.posix_drive_like = r("/c/Users/me/repo", "/elsewhere", "linux"); // only Windows reads it as a drive
+	out.unicode_spaces = r("tests/test\u00A0a\u2003b\u3000c.py", "/repo", "linux");
+	out.bad_url = r("file://host/x", "/repo", "linux");
+	out.bad_url_request = mod.toolRequests("my_tool", { path: "file://host/x" }, { cwd: "/repo", session: "s", turn: "" });
 } else if (scenario === "quick") {
 	out.gated = JSON.parse(process.env.QUICK_COMMANDS).map((c) => mod.looksGated(c));
 } else if (scenario === "ask") {

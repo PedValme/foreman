@@ -225,6 +225,17 @@ class TheExtension(PiCase):
         self.assertEqual(dict(zip(QUICK_COMMANDS, out["gated"])),
                          {c: core.looks_gated(c) for c in QUICK_COMMANDS})
 
+    def test_paths_are_read_as_pis_own_tools_read_them(self):
+        out = self.drive("paths")
+        for key in ("win_drive", "win_mnt", "win_cygdrive"):
+            self.assertEqual(out[key], "C:\\Users\\me\\repo\\tests\\test_a.py", key)
+        self.assertEqual(out["win_at_drive"], "C:\\Users\\me\\repo")
+        self.assertEqual(out["posix_drive_like"], "/c/Users/me/repo")
+        self.assertEqual(out["unicode_spaces"], "/repo/tests/test a b c.py")
+        self.assertEqual(out["bad_url"], "file://host/x")  # pi cannot resolve it either: sent as given
+        self.assertEqual(out["bad_url_request"], [{"cwd": "/repo", "session": "s", "turn": "", "event": "write",
+                                                   "path": "file://host/x"}])
+
     @unittest.skipIf(os.name == "nt", "the stand-in interpreter is a POSIX shell script")
     def test_the_extension_sends_the_agent_back_at_most_once_per_run_on_its_own(self):
         out = self.drive("always-continue",

@@ -18,7 +18,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, join, posix, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -83,21 +83,49 @@ export function looksGated(command: string): boolean {
 	return /\b(?:git|gh)(?:\.exe)?\b/i.test(command) && /\b(?:commit|push|pr|config)\b/i.test(command);
 }
 
-/** The file a pi tool will touch, resolved as pi's own tools do (`resolveToCwd`): a leading `@` dropped, `~` and
- * `~/` expanded, a `file://` URL read as a path, the rest resolved against the session's directory. */
-export function resolvePiPath(path: string, cwd: string): string {
-	let p = path.startsWith("@") ? path.slice(1) : path;
-	if (p === "~") {
-		p = homedir();
-	} else if (p.startsWith("~/") || (process.platform === "win32" && p.startsWith("~\\"))) {
-		p = join(homedir(), p.slice(2));
-	} else if (/^file:\/\//.test(p)) {
-		p = fileURLToPath(p);
+const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
+
+/** pi's `normalizeWindowsShellPath`: `/c/x`, `/mnt/c/x` and `/cygdrive/c/x` are `C:\x` on Windows. */
+function windowsShellPath(p: string): string {
+	if (!p.startsWith("/") || p.startsWith("//") || p.includes("\\")) {
+		return p;
 	}
-	if (!p) {
-		return "";
+	const match = p.match(/^\/(?:mnt\/|cygdrive\/)?([a-z])(?:\/(.*))?$/i);
+	if (!match) {
+		return p;
 	}
-	return isAbsolute(p) ? resolve(p) : resolve(cwd || process.cwd(), p);
+	return `${match[1].toUpperCase()}:\\${(match[2] ?? "").split("/").join("\\")}`;
+}
+
+/** The file a pi tool will touch, resolved as pi's own tools do (`resolveToCwd`, `normalizePath`): Unicode spaces
+ * made plain, a leading `@` dropped, on Windows a shell-style `/c/…` read as `C:\…`, `~` and `~/` expanded, a
+ * `file://` URL read as a path, the rest resolved against the session's directory. A path pi itself could not
+ * resolve is sent as it was given, never an error. */
+export function resolvePiPath(path: string, cwd: string, platform: string = process.platform): string {
+	const win = platform === "win32";
+	const paths = win ? win32 : posix;
+	try {
+		let p = path.replace(UNICODE_SPACES, " ");
+		if (p.startsWith("@")) {
+			p = p.slice(1);
+		}
+		if (win) {
+			p = windowsShellPath(p);
+		}
+		if (p === "~") {
+			p = homedir();
+		} else if (p.startsWith("~/") || (win && p.startsWith("~\\"))) {
+			p = paths.join(homedir(), p.slice(2));
+		} else if (/^file:\/\//.test(p)) {
+			p = fileURLToPath(p, { windows: win });
+		}
+		if (!p) {
+			return "";
+		}
+		return paths.isAbsolute(p) ? paths.resolve(p) : paths.resolve(cwd || process.cwd(), p);
+	} catch {
+		return path;
+	}
 }
 
 function text(value: unknown): string {
