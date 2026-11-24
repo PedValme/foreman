@@ -82,7 +82,7 @@ if (scenario === "gate") {
 	out.status = await command("status", false);
 	out.help_json = await command("help", false, "json"); // --mode json: standard output is pi's event stream
 } else if (scenario === "stood-down") {
-	// inside the reviewer's own session (FOREMAN_REVIEWER=1) the extension registers nothing: only `registered` is read
+	// whatever FOREMAN_REVIEWER holds, the extension registers as usual: only `registered` is read
 } else if (scenario === "review") {
 	// the person's command carries the session's model and thinking level when pi states them; FAKE_PYTHON records it
 	process.env.FOREMAN_PYTHON = process.env.FAKE_PYTHON;

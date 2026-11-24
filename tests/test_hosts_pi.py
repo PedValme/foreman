@@ -222,11 +222,13 @@ class TheReviewersHost(PiCase):
 
     def test_the_review_is_one_level_above_the_sessions_exact_thinking_level(self):
         reply = self.ask("command", args="reviewer", model="p/m-1", effort="medium")["reply"]
-        self.assertIn("pi's default model at effort high, one level above this session's medium", reply)
+        self.assertIn("p/m-1, the model this session runs on, at effort high, one level above this session's medium",
+                      reply)
+        self.assertIn("That is the model that wrote the code: more effort and a clean context", reply)
         self.assertIn("Effort levels: off, minimal, low, medium, high, xhigh, max", reply)
         top = self.ask("command", args="reviewer", effort="max")["reply"]
         self.assertIn("the highest there is and the same as this session's", top)
-        self.assertIn("does not tell Foreman this session's effort", self.ask("command", args="reviewer")["reply"])
+        self.assertIn("pi has not told Foreman this session's effort", self.ask("command", args="reviewer")["reply"])
         self.assertPiWords(reply)
 
     def test_choosing_a_reviewer_is_kept_and_checked_against_pis_levels(self):
@@ -253,7 +255,13 @@ class PisFreshSession(PiCase):
                      "printf '%%s' \"$FOREMAN_REVIEWER\" > '%s/env'\ncat '%s'\nprintf '%%s' '%s' >&2\nexit %d\n"
                      % (self.tmp, self.tmp, self.tmp, self.tmp, out, stderr, code))
         os.chmod(path, 0o755)
-        return {"FOREMAN_PI": path, "PATH": os.environ.get("PATH", "")}
+        self.use(path)
+        return {"PATH": os.environ.get("PATH", "")}
+
+    def use(self, path):
+        old = pi.PROGRAM
+        pi.PROGRAM = path
+        self.addCleanup(setattr, pi, "PROGRAM", old)
 
     def read(self, name):
         with open(os.path.join(self.tmp, name), encoding="utf-8") as fh:
@@ -280,7 +288,7 @@ class PisFreshSession(PiCase):
         self.assertIn("one JSON object", stdin)
         self.assertIn('"type": "object"', stdin)  # pi has no schema flag: the schema rides in what is sent
         self.assertFalse(any("THE PROMPT" in a for a in argv))  # the diff never rides on the command line
-        self.assertEqual(self.read("env"), "1")
+        self.assertRegex(self.read("env"), r"^[0-9a-f]{32}$")  # the live review's own token, not a fixed word
         self.assertNotEqual(os.path.realpath(self.read("cwd").strip()), os.path.realpath(self.root))
 
     @unittest.skipIf(os.name == "nt", POSIX_ONLY)
@@ -314,7 +322,8 @@ class PisFreshSession(PiCase):
             self.assertIn("pi gave no result (exit code %d)" % code, str(caught.exception))
         self.assertIn("not found", str(caught.exception))
         with self.assertRaises(RuntimeError):
-            self.run_it({"FOREMAN_PI": os.path.join(self.tmp, "missing"), "PATH": ""})
+            self.use(os.path.join(self.tmp, "missing"))
+            self.run_it({"PATH": ""})
 
     @unittest.skipIf(os.name == "nt", POSIX_ONLY)
     def test_a_whole_review_through_the_stand_in(self):
@@ -328,7 +337,7 @@ class PisFreshSession(PiCase):
         self.assertIn("answered by big", out)
         argv = self.read("argv").split("\n")
         self.assertEqual(argv[argv.index("--thinking") + 1], "medium")
-        self.assertNotIn("--model", argv)
+        self.assertEqual(argv[argv.index("--model") + 1], "vendor/other")  # the session's own model, named
         self.assertNotIn("Hermes", out)
 
 
@@ -442,10 +451,12 @@ class TheExtension(PiCase):
             self.assertNotIn(key, requests[1])  # left out when pi does not state them
         self.assertTrue(all(r["event"] == "command" for r in requests))
 
-    def test_inside_the_reviewers_own_session_the_extension_does_nothing(self):
-        out = self.drive("stood-down", FOREMAN_REVIEWER="1")
-        self.assertEqual(out["registered"], {"events": [], "commands": []})
-        self.assertEqual(self.drive("stood-down")["registered"]["commands"], ["foreman"])
+    def test_the_variable_alone_switches_nothing_off(self):
+        # a project's settings can set it for every session: standing down is hook.py's, for a live token only
+        for value in ("1", "0" * 32, ""):
+            out = self.drive("stood-down", FOREMAN_REVIEWER=value)
+            self.assertEqual(out["registered"]["commands"], ["foreman"], value)
+            self.assertEqual(out["registered"]["events"], ["agent_before_settle", "before_agent_start", "tool_call"])
 
     def test_a_turn_is_sent_back_once_and_a_turn_that_talked_is_not(self):
         out = self.drive("turn")

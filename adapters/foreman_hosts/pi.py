@@ -106,6 +106,7 @@ def _program_dirs(roots) -> tuple:
 
 
 # pi's thinking levels, lowest first (`pi --help`: --thinking; docs/cli.md); a model clamps one it does not support.
+PROGRAM = "pi"  # what the reviewer runs; a module name so that tests can replace it, never an environment variable
 EFFORTS = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
 
 _FENCE = re.compile(r"```[A-Za-z0-9_-]*[ \t]*\n(.*?)```", re.S)
@@ -163,8 +164,7 @@ def _fresh_session(env):
     def run(system: str, prompt: str, schema: dict, model: str, effort: str, seconds: float) -> core.Answer:
         import shutil
         import tempfile
-        program = env.get("FOREMAN_PI") or "pi"
-        program = shutil.which(program, path=env.get("PATH")) or program  # Windows: `pi` is `pi.cmd`
+        program = shutil.which(PROGRAM, path=env.get("PATH")) or PROGRAM  # Windows: `pi` is `pi.cmd`
         argv = [program, "--mode", "json", "--no-tools", "--no-extensions", "--no-session",
                 "--no-context-files", "--no-skills", "--no-prompt-templates", "--no-themes",
                 "--system-prompt", system]

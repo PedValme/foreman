@@ -51,11 +51,11 @@ Each of these was seen in a real session on pi 1.5.0 (macOS, the default model, 
   same review again answered from the stored result without calling the model.
 - **Who reviews is yours**, `/foreman reviewer [model] [effort]` (`default` to go back): any model pi knows
   (`pi --list-models`; `provider/id` when two providers offer it) and any of pi's thinking levels: off, minimal,
-  low, medium, high, xhigh, max. With nothing chosen it is pi's default model one thinking level above the
-  session's. pi tells Foreman both the session's model and its thinking level, so the review states exactly what
-  that is, for example "at effort high, one level above this session's medium", and says plainly that it is the
-  model that wrote the code, with more thinking and a clean context, unless you chose another. When you choose a
-  model, it says whether it is the same as the session's. It takes as long as that model takes: up to a few
+  low, medium, high, xhigh, max. With nothing chosen it is the session's own model one thinking level above
+  the session's. pi tells Foreman both, so the review states exactly what that is, for example "Reviewer: <model>,
+  the model this session runs on, at effort high, one level above this session's medium", and says plainly that it
+  is the model that wrote the code: more effort and a clean context, not another model. When you choose a model,
+  it says whether it is the same as the session's. It takes as long as that model takes: up to a few
   minutes with nothing shown meanwhile.
 
 What it does not do yet: the review when someone asks to merge and on every turn (it runs when you ask), the board,
@@ -68,9 +68,9 @@ merge and reject with reasons (Foreman on Hermes Agent has them).
   with no object leaves the review without a verdict, and Foreman says so. Any model pi offers can be chosen, and a
   small one may miss a rigged line or quote one wrongly (the quote is checked against the diff, a miss is not).
   A model that does not support the thinking level you chose gets the nearest one it does (pi clamps it). The
-  review needs `pi` on the PATH (`FOREMAN_PI` names another), it uses whatever login pi has for the model, and it
-  is skipped inside its own session: `FOREMAN_REVIEWER=1` makes the extension do nothing there, so the reviewer
-  cannot call Foreman.
+  review needs `pi` on the PATH and uses whatever login pi has for the model. The reviewer's session is started
+  with `--no-extensions`, so Foreman's extension is not loaded in it; Foreman's own hook also stands down for the
+  token of a review that is running, and `FOREMAN_REVIEWER` set by anything else switches nothing off.
 
 - The gate runs on the agent's own machine. The independent control is still the required check in CI
   (`examples/foreman-check.yml`).

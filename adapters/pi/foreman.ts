@@ -204,11 +204,6 @@ export function sessionOf(ctx: ExtensionContext): Request {
 }
 
 export default function foreman(pi: ExtensionAPI) {
-	// Inside the reviewer's own session (Foreman started it: `core.run_session` sets this) Foreman does nothing at all.
-	if (process.env.FOREMAN_REVIEWER === "1") {
-		return;
-	}
-
 	// pi starts a fresh copy of the extension for each session (startup, /new, /resume, /fork, /reload).
 	let errorShown = false;
 	let continued = false; // this run was already sent back once
