@@ -71,7 +71,7 @@ class CodexFreshSession(CodexCase):
         self.assertNotIn("THE PROMPT", argv)
         self.assertNotIn("SYSTEM", argv)
         self.assertEqual(self.read("stdin"), "SYSTEM\n\nTHE PROMPT")
-        self.assertEqual(self.read("env"), "1")
+        self.assertRegex(self.read("env"), r"^[0-9a-f]{32}$")  # this review's own token
         self.assertNotEqual(os.path.realpath(self.read("cwd").strip()), os.path.realpath(self.root))
         sent = json.loads(self.read("schema"))  # every object closed and every property required, as the API wants
         self.assertEqual(sent["additionalProperties"], False)
@@ -172,7 +172,7 @@ class CodexReviewer(CodexCase):
         self.assertNotIn("/foreman", reason)
 
     def test_choosing_a_reviewer_is_answered_and_kept(self):
-        self.assertIn("Codex's default model", self.hook("foreman reviewer")["reason"])
+        self.assertIn("author-model, the model this session runs on", self.hook("foreman reviewer")["reason"])
         out = self.hook("foreman reviewer gpt-6-luna low")
         self.assertEqual(out["decision"], "block")
         self.assertIn("Foreman: reviewer set.", out["reason"])
@@ -189,7 +189,8 @@ class CodexReviewer(CodexCase):
         self.assertIn("It is the same model that wrote the code", shown)
         self.hook("foreman reviewer default")
         nameless = self.hook("foreman reviewer", model="")["reason"]
-        self.assertIn("does not tell Foreman this session's effort", nameless)
+        self.assertIn("Codex's default model at its default effort", nameless)
+        self.assertIn("Codex has not told Foreman this session's effort", nameless)
         self.assertNotIn("one level above", nameless)
 
     @POSIX
@@ -198,11 +199,13 @@ class CodexReviewer(CodexCase):
         out = self.hook("foreman review", env)
         self.assertEqual(out["decision"], "block")
         self.assertIn("Foreman review: PASS", out["reason"])
-        self.assertIn("Codex's default model at its default effort", out["reason"])
+        self.assertIn("Reviewer: author-model, the model this session runs on, at its default effort", out["reason"])
+        self.assertIn("Codex has not told Foreman this session's effort", out["reason"])
+        self.assertEqual(self.read("argv").split("\n")[self.read("argv").split("\n").index("--model") + 1],
+                         "author-model")
         self.assertNotIn("`/foreman", out["reason"])
         self.assertIn("-    assert total() == 2", self.read("stdin"))
         self.assertIn("FOREMAN-UNTRUSTED-", self.read("stdin"))
-        self.assertNotIn("--model", self.read("argv").split("\n"))
         os.unlink(os.path.join(self.tmp, "argv"))
         again = self.hook("foreman review", env)["reason"]
         self.assertIn("this is the stored result", again)

@@ -74,8 +74,8 @@ temporary directory, with the diff on standard input. The agent that wrote the c
 answered only from your own prompt. Codex's login is the one you already have.
 
 **Who reviews is yours**, `foreman reviewer [model] [effort]` (`foreman reviewer default` goes back). With nothing
-chosen it is Codex's default model, and the review says in plain words that this is the model that wrote the code
-unless you switched model in this session, with a clean context but not another model. For an independent look,
+chosen it is the model this session runs on (the hook input names it), in a clean context and no more:
+not another model, and the review says so in plain words. For an independent look,
 choose another: `foreman reviewer gpt-6-luna medium`. A lone word is taken as a model name only if it has a dash,
 dot or digit in it (`foreman reviewer please` goes to the model). Effort levels, lowest first, are the ones in Codex
 0.171.0's own model catalog (`codex debug models --bundled`): `low`, `medium`, `high`, `xhigh`, `max`, `ultra`. Not
@@ -96,7 +96,7 @@ Limits in Codex:
 - **Codex does not say which model answered**, so the review names the one you chose, or none.
 - **The reviewer is not fully clean.** `--ignore-user-config` skips your `config.toml`, but Codex still loads your
   global instructions file from its home, and the reviewer sees them (Codex warned of 39 KB of them in the runs
-  here). They are not Foreman's and cannot widen what it may do: it has a read-only sandbox in an empty directory.
+  here). `-c project_doc_max_bytes=0` only silenced Codex's size warning: the input was the same 30186 tokens. They are not Foreman's and cannot widen what it may do: it has a read-only sandbox in an empty directory.
 - **It takes as long as the model takes**, up to 7 minutes (retries included) with nothing shown meanwhile; the hook's
   timeout above is 600 seconds for that. A rate limit (429) or a server error (5xx) is retried by the review.
 
