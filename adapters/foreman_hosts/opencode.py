@@ -18,8 +18,10 @@ How OpenCode turns a plugin off (its source, 2.3.2: ``config/plugin/source.ts`` 
 """
 from __future__ import annotations
 
+import json
 import os
 import re
+import tempfile
 
 from foreman import gate
 
@@ -180,6 +182,86 @@ def _program_dirs() -> tuple:
     return tuple(os.path.join(ROOT, d) for d in ("adapters", "plugin"))
 
 
+def _short(text: str, limit: int = 300) -> str:
+    text = " ".join((text or "").split())
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def _object_in(text: str):
+    """The JSON object a reply holds: the whole text, a fenced block, or the first object with text around it."""
+    text = (text or "").strip()
+    candidates = [text] + re.findall(r"```(?:json|JSON)?\s*\n?(.*?)```", text, re.S)
+    for c in candidates:
+        try:
+            value = json.loads(c.strip())
+        except ValueError:
+            continue
+        if isinstance(value, dict):
+            return value
+    decoder = json.JSONDecoder()
+    for m in re.finditer(r"\{", text):
+        try:
+            value, _end = decoder.raw_decode(text, m.start())
+        except ValueError:
+            continue
+        if isinstance(value, dict):
+            return value
+    return None
+
+
+# What the reviewer's session runs with (OpenCode 2.3.2, its v2 configuration; `OPENCODE_CONFIG_CONTENT` is read
+# after every configuration file): every permission denied, so no tool can read, write or run anything, and no
+# plugin but OpenCode's built-in ones (the person's own are not part of the review).
+REVIEW_CONFIG = {"permissions": [{"action": "*", "resource": "*", "effect": "deny"}], "plugins": ["-*", "opencode.*"]}
+
+
+def _fresh_session(env=None):
+    """OpenCode's own headless command as the reviewer: one prompt on standard input, JSON events out, a private
+    server (``--standalone``, so the configuration below reaches it), no ``--auto``, every permission denied. It
+    starts in an empty directory, and ``PWD`` points there too: ``opencode run`` takes its directory from ``PWD``
+    before the process's own."""
+    def run(system: str, prompt: str, schema: dict, model: str, effort: str, seconds: float) -> core.Answer:
+        base = dict(os.environ if env is None else env)
+        argv = ["opencode", "run", "--standalone", "--format", "json"]
+        if model:
+            argv += ["-m", model]
+        message = "\n\n".join(part for part in (
+            system,
+            "Answer with one JSON object and nothing else: no prose, no code fence. It must follow this JSON schema:\n"
+            + json.dumps(schema or {}),
+            prompt) if part)
+        with tempfile.TemporaryDirectory(prefix="foreman-review-") as empty:
+            child = dict(base, PWD=empty, OPENCODE_CONFIG_CONTENT=json.dumps(REVIEW_CONFIG),
+                         OPENCODE_DISABLE_CLAUDE_CODE="1")
+            code, out, err = core.run_session(argv, message, seconds, child, cwd=empty)
+        texts, errors = {}, []
+        for line in out.splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            if event.get("type") == "text" and isinstance(event.get("part"), dict):
+                part = event["part"]
+                texts.setdefault(str(part.get("messageID") or ""), []).append(str(part.get("text") or ""))
+            elif event.get("type") == "error":
+                detail = event.get("error")
+                if isinstance(detail, dict):
+                    status = detail.get("status")
+                    errors.append("%s%s" % ("(HTTP %s) " % status if isinstance(status, int) else "",
+                                            detail.get("message") or detail.get("type") or ""))
+                else:
+                    errors.append(str(detail))
+        if errors or code != 0 or not texts:
+            raise RuntimeError("OpenCode could not answer (exit code %d): %s"
+                               % (code, _short(" ".join(errors) or err or out) or "nothing"))
+        final = "".join(texts[list(texts)[-1]])  # the last assistant message
+        # OpenCode's JSON events do not name the model that ran: only the one asked for, when one was.
+        return core.Answer(parsed=_object_in(final), text=final, model=model.split("#")[0])
+    return run
+
+
 def host(request=None) -> core.Host:
     request = request if isinstance(request, dict) else {}
     return core.Host(
@@ -188,6 +270,9 @@ def host(request=None) -> core.Host:
         # The plugin says true only from the /foreman command's own handler, after the person answered OpenCode's
         # own question in its interface.
         attended=lambda: neutral.attended(request),
+        # No effort levels: OpenCode names reasoning levels per model (a ``#variant``), so the person names it as
+        # part of the model: ``/foreman reviewer provider/model#variant``.
+        fresh_session=_fresh_session(), efforts=(), session=lambda: neutral.session(request),
     )
 
 

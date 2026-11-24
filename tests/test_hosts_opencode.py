@@ -4,6 +4,7 @@ import io
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import unittest
@@ -199,6 +200,143 @@ class EntryPoint(OpenCodeCase):
         self.assertEqual((code, json.loads(stdout.getvalue())["action"]), (0, "block"))
 
 
+PASS = {"findings": [], "summary": "Nothing rigged.", "verdict": "PASS"}
+
+
+def _events(*texts, message="msg_1"):
+    """What `opencode run --format json` prints for an assistant message with these text parts (seen on 2.3.2)."""
+    lines = [{"type": "step_start", "part": {"messageID": message, "type": "step-start"}}]
+    lines += [{"type": "text", "part": {"messageID": message, "type": "text", "text": t}} for t in texts]
+    lines.append({"type": "step_finish", "part": {"messageID": message, "type": "step-finish", "reason": "stop"}})
+    return "\n".join(json.dumps(line) for line in lines)
+
+
+@unittest.skipIf(os.name == "nt", "the stand-in for `opencode` is a POSIX shell script")
+class FreshSession(OpenCodeCase):
+    """``opencode._fresh_session`` against a stand-in program: what it runs, and how it reads what comes back."""
+
+    def program(self, stdout, code=0, stderr=""):
+        bin_dir = os.path.join(self.tmp, "bin")
+        os.makedirs(bin_dir, exist_ok=True)
+        path = os.path.join(bin_dir, "opencode")
+        with open(path, "w") as fh:
+            fh.write("#!/bin/sh\nprintf '%%s\\n' \"$@\" > '%(t)s/argv'\ncat > '%(t)s/stdin'\npwd > '%(t)s/cwd'\n"
+                     "printf '%%s' \"$PWD\" > '%(t)s/pwd'\nprintf '%%s' \"$FOREMAN_REVIEWER\" > '%(t)s/env'\n"
+                     "printf '%%s' \"$OPENCODE_CONFIG_CONTENT\" > '%(t)s/config'\n"
+                     "printf '%%s' \"$OPENCODE_DISABLE_CLAUDE_CODE\" > '%(t)s/claude'\n"
+                     "cat <<'EOF'\n%(out)s\nEOF\ncat >&2 <<'EOF'\n%(err)s\nEOF\nexit %(code)d\n"
+                     % {"t": self.tmp, "out": stdout, "err": stderr, "code": code})
+        os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR)
+        return {"PATH": bin_dir + os.pathsep + os.environ.get("PATH", ""), "PWD": self.root,
+                "OPENCODE_CONFIG_CONTENT": '{"permissions": [{"action": "*", "resource": "*", "effect": "allow"}]}'}
+
+    def read(self, name):
+        with open(os.path.join(self.tmp, name)) as fh:
+            return fh.read()
+
+    def run_it(self, env, model="p/m#high", effort="high"):
+        return opencode._fresh_session(env)("SYSTEM", "THE PROMPT", {"type": "object"}, model, effort, 30)
+
+    def test_it_runs_opencode_headless_with_nothing_it_can_change(self):
+        answer = self.run_it(self.program(_events(json.dumps(PASS))))
+        self.assertEqual((answer.parsed, answer.model), (PASS, "p/m"))
+        argv = self.read("argv").split("\n")
+        self.assertEqual(argv[:4], ["run", "--standalone", "--format", "json"])
+        self.assertEqual(argv[argv.index("-m") + 1], "p/m#high")   # the variant is part of the model
+        self.assertNotIn("--auto", argv)                           # never approve anything by itself
+        self.assertNotIn("--effort", argv)                         # OpenCode has none: the variant says it
+        for word in ("THE PROMPT", "SYSTEM"):
+            self.assertFalse(any(word in a for a in argv), word)   # nothing the author wrote rides on the line
+        stdin = self.read("stdin")
+        self.assertTrue(stdin.startswith("SYSTEM"))
+        self.assertTrue(stdin.endswith("THE PROMPT"))
+        self.assertIn('"type": "object"', stdin)                   # the schema, in words OpenCode has no flag for
+        self.assertIn("one JSON object and nothing else", stdin)
+        # unable to change anything: every permission denied (read last, over what the person configured) and no
+        # plugin of the person's; the person's Claude Code instructions are left out
+        config = json.loads(self.read("config"))
+        self.assertEqual(config["permissions"], [{"action": "*", "resource": "*", "effect": "deny"}])
+        self.assertEqual(config["plugins"], ["-*", "opencode.*"])
+        self.assertEqual(self.read("claude"), "1")
+        self.assertEqual(self.read("env"), "1")                    # Foreman's own plugin stands down inside it
+        # an empty directory of its own, and OpenCode takes its directory from PWD: both point there
+        cwd = os.path.realpath(self.read("cwd").strip())
+        self.assertNotEqual(cwd, os.path.realpath(self.root))
+        self.assertEqual(os.path.realpath(self.read("pwd")), cwd)
+
+    def test_no_model_chosen_means_no_model_flag(self):
+        answer = self.run_it(self.program(_events(json.dumps(PASS))), model="", effort="")
+        self.assertEqual((answer.parsed, answer.model), (PASS, ""))
+        self.assertNotIn("-m", self.read("argv").split("\n"))
+
+    def test_the_object_is_read_out_of_plain_text_a_fence_and_text_around_it(self):
+        text = json.dumps(PASS)
+        for reply in (text, "```json\n" + text + "\n```", "Here is my review:\n```\n" + text + "\n```\nDone.",
+                      "Sure. " + text + " That is all.", "{not json} then " + text):
+            answer = self.run_it(self.program(_events(reply)))
+            self.assertEqual(answer.parsed, PASS, reply)
+            self.assertEqual(answer.text, reply)
+
+    def test_text_in_several_parts_is_one_reply_and_only_the_last_message_counts(self):
+        text = json.dumps(PASS)
+        out = _events("thinking about it", message="msg_1") + "\n" + _events(text[:10], text[10:], message="msg_2")
+        self.assertEqual(self.run_it(self.program(out)).parsed, PASS)
+
+    def test_no_object_is_an_answer_without_one(self):
+        for reply in ("I would rather not.", "[1, 2]", "{broken"):
+            answer = self.run_it(self.program(_events(reply)))
+            self.assertIsNone(answer.parsed, reply)
+            self.assertEqual(answer.text, reply)
+
+    def test_an_error_names_its_reason_and_its_http_status(self):
+        out = "\n".join([_events(), json.dumps({"type": "error", "error": {
+            "type": "provider.free-limit", "message": "Free usage limit reached", "status": 429}})])
+        with self.assertRaises(RuntimeError) as caught:
+            self.run_it(self.program(out, 1))
+        self.assertIn("429", str(caught.exception))
+        self.assertIn("Free usage limit reached", str(caught.exception))
+        for stdout, code, stderr in (("not json at all", 3, "boom"), ("", 0, ""), (_events(), 0, "")):
+            with self.assertRaises(RuntimeError):
+                self.run_it(self.program(stdout, code, stderr))
+        with self.assertRaises(RuntimeError) as caught:
+            self.run_it(self.program("", 2, "no such model"))
+        self.assertIn("no such model", str(caught.exception))
+        with self.assertRaises(RuntimeError):
+            self.run_it({"PATH": os.path.join(self.tmp, "nowhere")})  # no opencode to start
+
+    def test_the_review_works_end_to_end_through_the_dialect(self):
+        env = self.program(_events(json.dumps(PASS)))
+        self.write("cart.py", "def total():\n    return 3\n")
+        old = {k: os.environ.get(k) for k in env}
+        os.environ.update(env)
+        try:
+            request = {"event": "command", "args": "reviewer p/m", "cwd": self.root}
+            self.assertIn("reviewer set", neutral.answer(opencode.host(request), request)["reply"].lower())
+            request = {"event": "command", "args": "review", "cwd": self.root, "model": "p/m"}
+            reply = neutral.answer(opencode.host(request), request)["reply"]
+        finally:
+            for k, v in old.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+        self.assertIn("Foreman review: PASS", reply)
+        self.assertIn("same model that wrote the code", reply)
+        self.assertIn("-m\np/m\n", self.read("argv"))
+
+    def test_the_hosts_review_has_no_effort_levels_and_help_lists_it(self):
+        h = opencode.host({"model": "p/m"})
+        self.assertIsNotNone(h.fresh_session)
+        self.assertEqual(h.efforts, ())
+        self.assertEqual(h.session().model, "p/m")
+        reply = self.ask("command", args="help")["reply"]
+        self.assertIn("/foreman review", reply)
+        self.assertIn("/foreman reviewer", reply)
+        shown = self.ask("command", args="reviewer")["reply"]
+        self.assertIn("Effort levels: none in OpenCode", shown)
+        self.assertIn("effort", self.ask("command", args="reviewer p/m high")["reply"])  # not an OpenCode level
+
+
 def _runtime():
     """[program, flags…] that runs the plugin's TypeScript as it is, or None: bun, or a node that strips types."""
     if shutil.which("bun"):
@@ -317,6 +455,30 @@ class Plugin(OpenCodeCase):
         self.assertIn("allowed " + out["id"], out["allowed"]["error"])
         self.assertEqual(out["asked"], 2)  # only `allow <id>` asks, once each time
         self.assertTrue(out["after"]["ok"])
+
+    def test_the_review_command_waits_ten_minutes_and_carries_the_sessions_model(self):
+        out = self.drive("review")
+        self.assertEqual(out["shellDelay"], 30_000)      # every other request keeps the protocol's limit
+        self.assertEqual(out["unknownDelay"], 600_000)   # a command may start a session of OpenCode and wait for it
+        self.assertIn("does not tell Foreman which model wrote the code", out["unknownShown"])  # no model stated
+        self.assertIn("It is the same model that wrote the code", out["sameShown"])             # `p/m` stated
+        self.assertNotIn("only the effort differs", out["sameShown"])
+        # a variant is part of the model name: `p/m#high` as the session's own and as the person's choice agree
+        self.assertIn("same model", out["variantAgain"])
+        self.assertEqual(out["modelOf"], ["a/b#max", "a/b", None, None, None])
+
+    def test_inside_the_reviewers_own_session_the_plugin_does_nothing(self):
+        home = os.path.join(self.tmp, "home")
+        os.makedirs(home, exist_ok=True)
+        env = dict(os.environ, HOME=home, USERPROFILE=home, FOREMAN_REVIEWER="1")
+        r = subprocess.run(RUNTIME + [os.path.join(ROOT, "tests", "opencode_plugin.mjs"), self.root, "reviewer-env"],
+                           capture_output=True, env=env, timeout=120)
+        self.assertEqual(r.returncode, 0, r.stderr.decode())
+        self.assertEqual(json.loads(r.stdout.decode()), {"registered": [], "commands": [], "asked": 0})
+        env["FOREMAN_REVIEWER"] = "0"                    # anything but "1" is an ordinary session
+        r = subprocess.run(RUNTIME + [os.path.join(ROOT, "tests", "opencode_plugin.mjs"), self.root, "reviewer-env"],
+                           capture_output=True, env=env, timeout=120)
+        self.assertEqual(json.loads(r.stdout.decode())["commands"], ["foreman"])
 
     def test_when_python_cannot_answer_the_agent_keeps_working_and_git_goes_to_the_person(self):
         out = self.drive("broken")
