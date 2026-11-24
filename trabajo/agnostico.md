@@ -108,13 +108,28 @@ session that did not write the code, the Hermes plugin untouched until one subst
 - [x] T4 OpenCode v2 plugin (#65).
 - [x] T5 The reviewer as a fresh session, in the four, when the person asks (#67 the neutral half and Claude Code,
   #68 Codex, #69 pi, #70 OpenCode).
-- [ ] T6 `/foreman` complete on pi and OpenCode, and with `/foreman merge` the review at merge time; then the
-  per-turn loop where the user turns it on.
+- [ ] T6 `/foreman` complete on pi and OpenCode, and with `/foreman merge` the review at merge time (the plan the
+  owner agreed to on 2026-11-24, «ok»; before the Hermes catalog update, so that there is only one):
+  - [ ] T6.1 The shared base, one pull request: a stand-in for Hermes's context so `plugin/foreman/board.py` runs
+    unchanged, and the commands that only read (`board`, `verdict`, `pipeline`, `prs`, `issues`) on pi and OpenCode.
+  - [ ] T6.2 pi: `merge` and `reject`, asked through pi's own confirmation dialog, with the review before the merge.
+  - [ ] T6.3 OpenCode: measure first whether a plugin can ask the person something the model cannot answer. With
+    no sound sign of a person, rule 24 applies: `board`, `verdict` and `reject`, and `merge` runs nothing and prints
+    the command for the person.
+  - [ ] T6.4 Each piece reviewed by an agent that did not write it before it merges (a merge is a permission).
+  - [ ] T6.5 Seen in a real session: a throwaway pull request in `foreman-demo` merged by Foreman from pi; few and
+    short sessions. Then the documents.
+- [ ] T6b The review on every turn, where the user turns it on (after T6).
 - [ ] T7 READMEs, names and publication (owner's yes); the one Hermes catalog update with what the core needed.
 
 ## Next step
-T6. `plugin/foreman/board.py` holds the board, merge and reject over `gh`; it asks the person and runs the merge
-through Hermes's context (`ask_choice`, `dispatch_tool`). As with the review, give it a stand-in for that context in
-`adapters/foreman_hosts/` and let pi and OpenCode ask through their own interface (`neutral.py` needs a way for the
-Python side to ask a question and get the answer back: a second request, not a callback). Start with `board` and
-`verdict`, which only read; `merge` last, with the review before it.
+T6.1. Read in `plugin/foreman/board.py` on 2026-11-24, not run outside Hermes yet: it keeps the context with
+`bind(ctx)` and asks it for two things, `ask_choice` (in `_confirm`, for `merge` and `reject --close`, and in
+`cmd_use`) and `dispatch_tool("terminal", …)` (in `_terminal`, which runs `gh pr merge`, the comment and the close);
+its commands take `(args, keys, platform)` and return text; `pipeline.py` reads `get_config`. As with the review
+(`foreman_hosts/reviewer.py`), give it a stand-in in `adapters/foreman_hosts/`: `ask_choice` becomes a question the
+harness's own extension shows the person (`neutral.py` needs it: the Python side answers "ask this", the extension
+asks and sends a second request with the answer; never a callback), and the terminal becomes Foreman's own `gh`
+process, started only after that answer. The agent's own `gh pr merge` stays refused by the gate. Start with the
+commands that only read; `merge` last, with the review before it (rule 16, `auto_review: merge`). If the board
+needs anything changed in `plugin/`, it is noted here for the catalog update and not edited for the adapter.

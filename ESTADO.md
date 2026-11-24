@@ -17,10 +17,11 @@
   Each seen in a real session: a loosened assertion the gate calls CLEAN came back BLOCKED with the line quoted,
   and asked again it returned the stored result. It runs when the person asks (`review`), on the model and effort
   the person chooses (`reviewer`); `adapters/README.md`, "The review in the four", says what differs in each.
-- Next action: T6, `/foreman` complete on pi and OpenCode (`trabajo/agnostico.md`, "Next step" says where to
-  start), and with its `/foreman merge` the review at merge time; then the per-turn loop where the user turns it on
-  (both are the owner's decision of 2026-11-24 and are not built outside Hermes yet). T7 (READMEs, names,
-  publication and the one Hermes catalog update) is with the owner.
+- Next action: T6, `/foreman` complete on pi and OpenCode, and with its `/foreman merge` the review at merge time.
+  The owner agreed to its plan on 2026-11-24 («ok»): `trabajo/agnostico.md` has the steps (T6.1 to T6.5) and "Next
+  step" says where to start (T6.1, the shared base and the commands that only read). Then the review on every turn
+  where the user turns it on. T7 (READMEs, names, publication and the one Hermes catalog update) is with the owner
+  and comes after T6, so that the catalog gets one update.
 - For the owner, his call: trying an adapter in his own harness. It goes into his own setup, and installed for
   every project the gate also refuses his agents' own `gh pr merge`, which his other repositories rely on: per
   project, or loaded for one session (`claude --plugin-dir`, `pi -e`, `codex -c hooks.…`, a link in one project's
@@ -50,7 +51,7 @@
 - Foreman for any harness: `/foreman` complete on pi and OpenCode (T6) is next.
 
 ## Next steps
-1. `trabajo/agnostico.md`, T5 to T7. Names of the packages, where each adapter is published and how Codex's hooks
+1. `trabajo/agnostico.md`, T6 to T7. Names of the packages, where each adapter is published and how Codex's hooks
    are installed: to the owner at T7; the root README does not mention the adapters until then.
 2. The one Hermes catalog update: what the adapters need from the core (nothing so far), the native model picker
    (`trabajo/model-picker.md`), the README's award and GIF, and `/foreman notify on` in the README (`hermes config
