@@ -171,5 +171,12 @@ Who reviews is yours: `/foreman reviewer [model]` (`default` to go back), a mode
 - Not seen yet: Windows; OpenCode's background service (all runs above used `--standalone`); OpenCode's desktop and
   web apps.
 
-What it does not do yet: the review when someone asks to merge and on every turn (it runs when you ask), the board,
-merge and reject with reasons (Foreman on Hermes Agent has them).
+The board is there too: `/foreman` alone (the branch and its verdict, open pull requests and the issues they close,
+each change's stages), `/foreman verdict [pr|branch]`, `/foreman pipeline`, `/foreman prs`, `/foreman issues` and
+`/foreman use [path|n]`, which pins the repository for the conversation. Like every reply here it arrives as an
+error notice, and `/foreman use` alone prints the list of repositories and what to type, because this plugin has no
+dialog of several options. Run in the tests through the plugin's own command handler; not yet seen in OpenCode's
+TUI.
+
+What it does not do yet: the review when someone asks to merge and on every turn (it runs when you ask), merge and
+reject with reasons (Foreman on Hermes Agent has them).

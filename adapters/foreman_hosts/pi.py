@@ -181,6 +181,7 @@ def host(request: Optional[dict] = None, env=None) -> core.Host:
         # The extension sends pi's ctx.hasUI. Only a real true counts.
         attended=lambda: neutral.attended(request),
         fresh_session=_fresh_session(env), efforts=EFFORTS, session=lambda: neutral.session(request),
+        board=core.BOARD_READS,
     )
 
 

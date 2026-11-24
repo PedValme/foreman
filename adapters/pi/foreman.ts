@@ -29,8 +29,12 @@ const SHELL_TOOLS =new Set(["bash", "powershell"]);
 const READ_TOOLS = new Set(["read", "grep", "find", "ls"]);
 const PATH_KEYS = ["path", "file_path", "filePath", "file"];
 
+const MAX_QUESTIONS = 3; // neutral.py: at most three questions for one command
+
 type Request = Record<string, unknown>;
-type Answer = { action?: string; message?: string; reply?: string };
+type Option = { value: string; label: string };
+type Question = { id: string; question: string; options: Option[] };
+type Answer = { action?: string; message?: string; reply?: string; question?: Question };
 
 /** Foreman's answer, or an Error saying why there is none (no Python, a failed adapter, no JSON). */
 export function ask(request: Request, cwd?: string, timeoutMs: number = TIMEOUT_MS): Promise<Answer | Error> {
@@ -203,6 +207,25 @@ export function sessionOf(ctx: ExtensionContext): Request {
 	return out;
 }
 
+/** A question as Python sent it, or undefined when it is not shaped as the protocol says. */
+export function questionOf(answer: Answer): Question | undefined {
+	const q = answer.question;
+	if (!q || typeof q !== "object" || typeof q.id !== "string" || typeof q.question !== "string" || !Array.isArray(q.options)) {
+		return undefined;
+	}
+	const options = q.options.filter((o) => o && typeof o.value === "string" && typeof o.label === "string" && o.label);
+	return options.length ? { id: q.id, question: q.question, options } : undefined;
+}
+
+/** The lines pi's selector shows, one per option and each different: two options with the same label get a number. */
+export function optionLines(options: Option[]): string[] {
+	const seen = new Map<string, number>();
+	for (const o of options) {
+		seen.set(o.label, (seen.get(o.label) ?? 0) + 1);
+	}
+	return options.map((o, i) => ((seen.get(o.label) ?? 0) > 1 ? `${i + 1}. ${o.label}` : o.label));
+}
+
 export default function foreman(pi: ExtensionAPI) {
 	// pi starts a fresh copy of the extension for each session (startup, /new, /resume, /fork, /reload).
 	let errorShown = false;
@@ -279,15 +302,39 @@ export default function foreman(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("foreman", {
-		description: "Foreman: status [path], allow [id], review [target], reviewer [model] [effort], help",
+		description: "Foreman: the board, verdict [pr|branch], pipeline, prs, issues, use, status, allow [id], review, reviewer, help",
 		handler: async (args, ctx) => {
 			// the review starts a session of pi and waits for it: ten minutes, not thirty seconds
-			const request: Request = { event: "command", args: args ?? "", cwd: ctx.cwd, attended: ctx.hasUI === true, ...sessionOf(ctx) };
-			const answer = await ask(request, ctx.cwd, COMMAND_TIMEOUT_MS);
-			if (answer instanceof Error) {
-				show(ctx, `Foreman could not run: ${answer.message}`, "error");
-			} else {
-				show(ctx, text(answer.reply), "info");
+			const request: Request = {
+				event: "command",
+				args: args ?? "",
+				cwd: ctx.cwd,
+				session: ctx.sessionManager.getSessionId() || "",
+				attended: ctx.hasUI === true,
+				...sessionOf(ctx),
+			};
+			// A command that needs the person to choose answers with a question: pi's own selector asks it, here and
+			// nowhere else, and the command runs again with what they picked (null when they closed the selector).
+			for (let asked = 0; ; asked++) {
+				const answer = await ask(request, ctx.cwd, COMMAND_TIMEOUT_MS);
+				if (answer instanceof Error) {
+					show(ctx, `Foreman could not run: ${answer.message}`, "error");
+					return;
+				}
+				const question = questionOf(answer);
+				if (!question) {
+					show(ctx, text(answer.reply), "info");
+					return;
+				}
+				if (!ctx.hasUI || asked >= MAX_QUESTIONS) {
+					const why = ctx.hasUI ? "the question kept changing" : "nobody is attending this session to answer";
+					show(ctx, `${question.question}\n\nForeman: nothing was done (${why}).`, "info");
+					return;
+				}
+				const lines = optionLines(question.options);
+				const picked = await ctx.ui.select(question.question, lines);
+				const at = picked === undefined ? -1 : lines.indexOf(picked);
+				request.answer = { id: question.id, value: at >= 0 ? question.options[at].value : null };
 			}
 		},
 	});

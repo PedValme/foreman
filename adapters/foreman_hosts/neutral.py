@@ -14,8 +14,9 @@ Request (a JSON object; ``event`` decides which other keys are read)::
     {"event": "patch",      "patch": "*** Begin Patch ...", ...}
     {"event": "turn_start", "cwd": "...", "session": "...", "turn": "..."}
     {"event": "turn_end",   "cwd": "...", "session": "...", "turn": "..."}
-    {"event": "command",    "args": "allow 3f2a", "cwd": "...", "attended": true,
-                            "model": "...", "effort": "..."}       the session's own, when the harness knows them
+    {"event": "command",    "args": "allow 3f2a", "cwd": "...", "session": "...", "attended": true,
+                            "model": "...", "effort": "...",       the session's own, when the harness knows them
+                            "answer": {"id": "...", "value": "..."}}   only when answering a question (below)
 
 Answer (always one JSON object)::
 
@@ -24,6 +25,8 @@ Answer (always one JSON object)::
     {"action": "ask", "message": "..."}           a person must decide; with nobody to ask, refuse with the message
     {"action": "continue", "message": "..."}      (turn_end) send the agent back with the message, once
     {"reply": "..."}                              (command) show it to the person
+    {"question": {"id": "...", "question": "...", "options": [{"value": "...", "label": "..."}]}}
+                                                  (command) the person picks one option; then the command again
 
 What every extension must get right, so the harnesses behave alike:
 
@@ -42,6 +45,14 @@ What every extension must get right, so the harnesses behave alike:
   key or the string ``"true"`` included, is "nobody" (``attended()`` below). Only then can a finding be allowed.
 - **``ask``**: show the message through the harness's own question to the person only when someone is attending;
   otherwise refuse the call with the message. Never let it through unanswered.
+- **``question``** (the answer to a ``command`` that needs the person to choose: which repository, confirm a merge):
+  this program answers one request and ends, so it cannot wait for a person. The extension shows the question and
+  its options' labels in the harness's own dialog, from the command's handler and nowhere else, and sends the same
+  ``command`` request again with ``answer``: the question's ``id`` and the ``value`` of the option picked, or JSON
+  ``null`` as the value when the person closed the dialog without picking. It never answers by itself, never passes
+  the question to the model, and asks at most three questions for one command (the question can change between the
+  two runs, when what it is about changed; then it is asked again). A ``question`` arrives only when the request
+  said ``attended``; an extension that gets one with nobody there shows its text and sends nothing more.
 - **When this program cannot answer** (exit code other than 0, nothing or no JSON on standard output, or no answer
   within 30 seconds; the gate's own budget is 18): Foreman's own fault must not stop the agent from working, and
   must not open the gate quietly either. A shell command that names git or gh together with commit, push or pr
@@ -99,6 +110,18 @@ def _optional(request: dict, key: str) -> Optional[str]:
     return value
 
 
+def _answer(request: dict) -> Optional[dict]:
+    """The person's answer to a question, as the extension sent it back: {"id", "value"}, where ``value`` is the
+    option picked or None for a dialog closed without picking. Anything shaped otherwise is an error."""
+    given = request.get("answer")
+    if given is None:
+        return None
+    if not isinstance(given, dict) or not isinstance(given.get("id"), str) \
+            or not (given.get("value") is None or isinstance(given.get("value"), str)):
+        raise ValueError("'answer', when given, is {\"id\": a string, \"value\": a string or null}")
+    return {"id": given["id"], "value": given.get("value")}
+
+
 def answer(host: core.Host, request: dict) -> dict:
     """The answer to one request. Raises ValueError for an event this protocol does not have and for a request
     that is not shaped as the protocol says."""
@@ -121,7 +144,10 @@ def answer(host: core.Host, request: dict) -> dict:
     elif event == "turn_end":
         decision = core.end_of_turn(host, cwd, session, turn)
     elif event == "command":
-        return {"reply": core.person_reply(host, request.get("args"), cwd)}
+        try:
+            return {"reply": core.person_reply(host, request.get("args"), cwd, session, _answer(request))}
+        except core.Asking as asking:
+            return {"question": asking.question}
     else:
         raise ValueError("unknown event %r (known: %s)" % (event, ", ".join(EVENTS)))
     return dict(decision) if decision else {}

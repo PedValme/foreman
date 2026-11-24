@@ -85,9 +85,27 @@ class Host:
     # One sentence every review in this harness carries under its "Reviewer:" line: what its reviewer's session can
     # still do or see that the others' cannot (a limit the harness leaves no way to close). "" when there is none.
     reviewer_caveat: str = ""
+    # The board's subcommands this harness answers (standin.py): "board", "verdict", "use"… () when it has none.
+    # Only a harness whose own command mechanism runs Foreman's command with no model turn lists any.
+    board: tuple = ()
+
+
+class Asking(BaseException):
+    """A command needs the person to pick one of a few options, and this program cannot ask: it answers one request
+    and ends. The harness's extension asks through its own dialog and sends the command again with the answer
+    (``neutral.py``). ``question`` is {"id", "question", "options": [{"value", "label"}]}.
+
+    Not an ``Exception``: the board reads any exception from its question as "nobody answered", and this is neither
+    a failure nor an answer."""
+
+    def __init__(self, question: dict):
+        super().__init__(question.get("question", ""))
+        self.question = question
 
 
 HOSTS = tuple(MODULES)  # what `adapters/hook.py <host>` accepts
+# The board's subcommands that write nothing outside Foreman's own record (`use` keeps the pinned repository).
+BOARD_READS = ("board", "verdict", "pipeline", "prs", "issues", "use")
 REVIEWER_ENV = "FOREMAN_REVIEWER"  # in the reviewer's own session: the token of the review running (reviewer_session)
 
 
@@ -108,6 +126,8 @@ def reword(host: Host, message: str) -> str:
     names, its ``/foreman`` command)."""
     def merge(m):
         target = m.group(1).strip()
+        if "merge" in host.board:  # this harness has the person's own merge command
+            return "Ask them to run `%s`." % host.person("merge" + (" " + target if target else ""))
         return ("Ask them to merge it themselves (for example `gh pr merge%s` in their own terminal)."
                 % (" " + target if target else ""))
     text = _MERGE_HINT.sub(merge, message or "")
@@ -844,9 +864,19 @@ REVIEW_SUBCOMMANDS = ("review", "reviewer")  # listed and answered only where th
 
 
 def person_subcommands(host: Host) -> dict:
-    """The subcommands this harness answers."""
-    return {name: doc for name, doc in PERSON_SUBCOMMANDS.items()
-            if host.fresh_session is not None or name not in REVIEW_SUBCOMMANDS}
+    """The subcommands this harness answers, the board's first where it has them."""
+    out = {}
+    if host.board:
+        from . import standin  # late: it loads the board
+        out.update({name: standin.DOCS[name] for name in standin.DOCS if name in host.board})
+    out.update({name: doc for name, doc in PERSON_SUBCOMMANDS.items()
+                if host.fresh_session is not None or name not in REVIEW_SUBCOMMANDS})
+    return out
+
+
+def default_subcommand(host: Host) -> str:
+    """What ``/foreman`` alone answers: the board where the harness has it (as in Hermes), else the verdict."""
+    return "board" if "board" in host.board else "status"
 
 
 def person_command(host: Host, text, cwd: str = "", session: str = "") -> Optional[str]:
@@ -857,22 +887,23 @@ def person_command(host: Host, text, cwd: str = "", session: str = "") -> Option
     if not m:
         return None
     parts = (m.group(1) or "").strip().split(None, 1)
-    name = parts[0].lower() if parts else "status"
-    rest = parts[1].strip() if len(parts) > 1 else ""
+    name = parts[0].lower() if parts else default_subcommand(host)
     spaced = not re.match(r"^\s*/foreman:", text, re.I)
     if spaced and parts and name not in PERSON_SUBCOMMANDS and name not in _hermes_subcommands():
         return None  # "/foreman is blocking my commit, why?" is a question for the model, not a command
-    return person_reply(host, m.group(1) or "", cwd)
+    return person_reply(host, m.group(1) or "", cwd, session)
 
 
-def person_reply(host: Host, args, cwd: str = "") -> str:
+def person_reply(host: Host, args, cwd: str = "", session: str = "", answer: Optional[dict] = None) -> str:
     """Foreman's answer to its command with these arguments (``"status src"``, ``"allow 3f2a"``, ``""`` for the
-    verdict), for a harness whose own command mechanism already established that the person typed ``/foreman``."""
+    board or the verdict), for a harness whose own command mechanism already established that the person typed
+    ``/foreman``. ``session`` is the conversation's id (a pinned repository is kept per session); ``answer`` is the
+    person's answer to the question this same command asked a moment ago (``Asking``, which it raises)."""
     parts = (args if isinstance(args, str) else "").strip().split(None, 1)
-    name = parts[0].lower() if parts else "status"
+    name = parts[0].lower() if parts else default_subcommand(host)
     rest = parts[1].strip() if len(parts) > 1 else ""
     try:
-        return reword(host, _run_person(host, name, rest, cwd))
+        return reword(host, _run_person(host, name, rest, cwd, session, answer))
     except Exception as e:  # the person asked: always an answer, never a stack trace
         logger.warning("foreman: the person's command failed", exc_info=True)
         return "Foreman failed: %s: %s" % (type(e).__name__, e)
@@ -886,8 +917,12 @@ def _hermes_subcommands() -> set:
         return set()
 
 
-def _run_person(host: Host, name: str, rest: str, cwd: str) -> str:
+def _run_person(host: Host, name: str, rest: str, cwd: str, session: str = "",
+                answer: Optional[dict] = None) -> str:
     from foreman import commands  # late: it loads the board, the review and the notifications
+    if name in host.board or (name == "status" and not rest and host.board):
+        from . import standin  # the board as it is, on a stand-in for Hermes's context; `status` for the pinned one
+        return standin.run(host, name, rest, cwd, session, answer)
     if name == "status":
         where = os.path.expanduser(rest) if rest else cwd
         if not where or not (os.path.isabs(where) or cwd):
@@ -904,7 +939,16 @@ def _run_person(host: Host, name: str, rest: str, cwd: str) -> str:
         return _help(host)
     if name in REVIEW_SUBCOMMANDS and host.fresh_session is not None:
         from . import reviewer  # late: it loads the review
-        return reviewer.run(host, rest, cwd) if name == "review" else reviewer.configure(host, rest)
+        if name == "reviewer":
+            return reviewer.configure(host, rest)
+        where = cwd
+        if host.board:  # the repository pinned with `use` comes first, as for every board subcommand
+            from . import standin
+            where = standin.pinned(session) or cwd
+        return reviewer.run(host, rest, where)
+    if (name in commands.SUBCOMMANDS or name in REVIEW_SUBCOMMANDS) and host.board:
+        return "Foreman: `%s` is not available in %s yet. `%s` lists what is." % (name, host.label,
+                                                                                host.person("help"))
     if name in commands.SUBCOMMANDS or name in REVIEW_SUBCOMMANDS:
         return ("Foreman: `%s` is not available in %s yet. Here Foreman is the gate (it blocks a rigged commit, "
                 "push or pull request, and an agent-run merge) plus `%s` and `%s`."
@@ -920,8 +964,12 @@ def _help(host: Host) -> str:
     lines += ["", "Verdicts:", verdicts.table(), "",
               "Foreman blocks git commit, git push and gh pr create when the change skips, deletes or moves tests, "
               "edits or weakens what the check runs, bypasses hooks or carries a secret; an agent-run gh pr merge is "
-              "always blocked (merging is yours).",
+              "always blocked (merging is yours%s)." % (": `%s`" % host.person("merge <pr>")
+                                                        if "merge" in host.board else ""),
               "A false positive is marked on its line with `%s` (or, for a file, a commit-message line `%s <path>: "
               "<reason>`). The mark never passes alone: it waits until you run `%s`."
               % (MARKER, MARKER, host.person("allow <id>"))]
+    if host.board:
+        lines.append("Pull requests and issues come from the GitHub CLI (`gh`) with its own login; without it the "
+                     "board shows the local branches.")
     return "\n".join(lines)

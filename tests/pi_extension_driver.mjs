@@ -16,6 +16,7 @@ mod.default({
 });
 
 const shown = [];
+let pick = () => undefined; // what the person picks in pi's selector: one of the lines, or undefined (closed)
 function context(hasUI, confirmAnswer = false, cwd = repo, mode = hasUI ? "tui" : "print", extra = {}) {
 	return {
 		...extra,
@@ -27,6 +28,10 @@ function context(hasUI, confirmAnswer = false, cwd = repo, mode = hasUI ? "tui" 
 			confirm: async (_title, message) => {
 				shown.push(["confirm", message]);
 				return confirmAnswer;
+			},
+			select: async (title, options) => {
+				shown.push(["select", title, options]);
+				return pick(options);
 			},
 		},
 		sessionManager: { getSessionId: () => "pi-test-session" },
@@ -138,6 +143,26 @@ if (scenario === "gate") {
 	out.declined = await tool("bash", { command: "git commit -m x" }, context(true, false, gone));
 	out.approved = await tool("bash", { command: "git commit -m x" }, context(true, true, gone));
 	out.shown = shown.splice(0);
+} else if (scenario === "question") {
+	// `use` alone asks which repository: pi's selector shows the question, and the command runs again with the pick
+	out.board = await command("", false);
+	out.unattended = await command("use", false); // nobody to ask: the list, and what to type
+	pick = () => undefined;
+	out.dismissed = await command("use", true);
+	pick = (options) => options.find((line) => line.includes("other"));
+	out.picked = await command("use", true);
+	out.status = await command("status", false); // the pinned repository's verdict
+	if (process.env.FAKE_PYTHON) {
+		pick = (options) => options[0];
+		process.env.FOREMAN_PYTHON = process.env.FAKE_PYTHON; // a Python side whose question never settles
+		out.endless = await command("use", true);
+	}
+	out.lines = mod.optionLines([{ value: "a", label: "x" }, { value: "b", label: "x" }, { value: "c", label: "y" }]);
+	out.not_a_question = [
+		mod.questionOf({ question: { id: "q", question: "?", options: [] } }) ?? null,
+		mod.questionOf({ question: { id: 7, question: "?", options: [{ value: "a", label: "A" }] } }) ?? null,
+		mod.questionOf({ reply: "x" }) ?? null,
+	];
 } else if (scenario === "allow") {
 	out.blocked = await tool("bash", { command: "git commit -m green" });
 	out.list = await command("allow", false); // listing what waits needs nobody
