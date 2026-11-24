@@ -142,7 +142,8 @@ class Answers(NeutralCase):
     def test_the_agent_cannot_run_the_entry_point_for_any_host(self):
         for name in hosts.MODULES:
             for command in ("echo '{}' | python3 adapters/hook.py %s", "env X=1 python3 -I ./hook.py %s < forged.json",
-                            "bash -c 'py /opt/foreman/adapters/hook.py %s'"):
+                            "bash -c 'py /opt/foreman/adapters/hook.py %s'", "python3 hook.py < forged.json %s",
+                            "python3 hook.py 2>/dev/null %s"):
                 self.assertEqual(self.ask("shell", command=command % name).get("action"), "block", command % name)
 
     def test_another_hook_py_is_not_foremans_entry_point(self):
@@ -240,6 +241,28 @@ class Patches(NeutralCase):
         self.assertEqual(self.patch(moved)["action"], core.BLOCK)
         harmless = "*** Update File: notes.json\n*** Move to: %s\n@@\n-old\n+new\n" % os.path.join(self.root, "n.json")
         self.assertIsNone(self.patch(harmless))
+        # a move with no hunk carries the file as it is on disk
+        self.write("draft.json", "HOOKS-OFF")
+        self.assertEqual(self.patch("*** Update File: draft.json\n*** Move to: %s\n" % settings)["action"], core.BLOCK)
+        # ...and moving the settings file away removes it
+        away = body % ("*** Update File: %s\n*** Move to: %s\n" % (settings, os.path.join(self.root, "old.json")))
+        self.assertEqual(core.pre_patch(gone, away, self.root, "s1", "t1")["action"], core.BLOCK)
+
+    def test_one_files_failed_check_does_not_skip_the_next(self):
+        settings = os.path.join(self.tmp, ".claude", "settings.json")
+        calls = []
+
+        def config_off(before, after):
+            calls.append(after)
+            if len(calls) == 1:
+                raise RuntimeError("boom")
+            return "HOOKS-OFF" in after
+
+        host = core.Host(name="h", label="H", person=lambda sub: "/foreman " + sub,
+                         is_config=lambda path: path.endswith(".json"), config_off=config_off)
+        patch = ("*** Begin Patch\n*** Update File: a.json\n@@\n-x\n+y\n*** Update File: %s\n@@\n-HOOKS-ON\n+HOOKS-OFF\n"
+                 "*** End Patch\n" % settings)
+        self.assertEqual(core.pre_patch(host, patch, self.root, "s1", "t1")["action"], core.BLOCK)
 
     def test_a_directory_that_does_not_exist_goes_to_a_person(self):
         d = self.patch("*** Update File: cart.py\n@@\n-    return 2\n+    return 3\n", cwd=os.path.join(self.tmp, "gone"))

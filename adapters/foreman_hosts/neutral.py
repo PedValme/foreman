@@ -28,7 +28,8 @@ What every extension must get right, so the harnesses behave alike:
 
 - **The request's shape is checked.** A ``shell`` without a string ``command``, a ``patch`` without a string
   ``patch``, a ``write`` without a string ``path`` (or whose ``content``, ``old`` or ``new`` is given and is not a
-  string) is an error, not a pass: a misspelt key must never switch the gate off quietly.
+  string) is an error, not a pass: a misspelt key must never switch the gate off quietly. ``replace_all`` and
+  ``attended`` are the JSON booleans; the string ``"true"`` is not one.
 - **``session`` is required for the end-of-turn nudge**: it identifies the conversation, and without it
   ``turn_start`` and ``turn_end`` do nothing. ``turn`` identifies one run of the agent inside it; send ``""`` when
   the harness has no such id.
@@ -41,9 +42,11 @@ What every extension must get right, so the harnesses behave alike:
 - **``ask``**: show the message through the harness's own question to the person only when someone is attending;
   otherwise refuse the call with the message. Never let it through unanswered.
 - **When this program cannot answer** (exit code other than 0, nothing or no JSON on standard output, or no answer
-  within 30 seconds; the gate's own budget is 18): the extension goes on as the harness does after any failed hook
-  and shows the error text to the person once per session. It never turns that into a silent pass of a call it
-  knows the gate inspects without the person seeing the error.
+  within 30 seconds; the gate's own budget is 18): Foreman's own fault must not stop the agent from working, and
+  must not open the gate quietly either. A shell command that names git or gh together with commit, push or pr
+  (the gate's own quick filter, ``core.looks_gated``: the one check an extension repeats on its side) goes to the
+  person as an ``ask`` would, refused with nobody attending; every other call runs. The error text is shown to
+  the person once per session.
 - **Where Foreman is**: the extension runs ``hook.py`` by the absolute path of its own installation (next to the
   extension's file), never a path taken from the agent's working directory.
 """
@@ -94,7 +97,7 @@ def answer(host: core.Host, request: dict) -> dict:
             raise ValueError("a 'write' request needs a path")
         decision = core.pre_write(host, path, cwd, session, turn, content=_optional(request, "content"),
                                   old=_optional(request, "old") or "", new=_optional(request, "new"),
-                                  replace_all=bool(request.get("replace_all")))
+                                  replace_all=request.get("replace_all") is True)
     elif event == "patch":
         decision = core.pre_patch(host, _required(request, "patch"), cwd, session, turn)
     elif event == "turn_start":
