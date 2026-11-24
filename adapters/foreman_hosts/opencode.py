@@ -222,9 +222,11 @@ def _fresh_session(env=None):
         # OpenCode has no flag that makes a model answer in a JSON schema: the schema goes in words, with a seal the
         # change's author cannot know, and only the object that carries it is read (reviewer.read_sealed).
         asked, seal = reviewer.sealed(schema or {})
-        message = "\n\n".join(part for part in (system, asked, prompt) if part)
+        # Foreman's rules are the agent's own system text (in the configuration); only the sealed instruction and the
+        # review's prompt, the untrusted diff included, go in as the message.
+        message = "\n\n".join(part for part in (asked, prompt) if part)
         with tempfile.TemporaryDirectory(prefix="foreman-review-") as empty:
-            child = dict(base, PWD=empty, OPENCODE_CONFIG_CONTENT=json.dumps(review_config(agent)),
+            child = dict(base, PWD=empty, OPENCODE_CONFIG_CONTENT=json.dumps(review_config(agent, system)),
                          OPENCODE_DISABLE_CLAUDE_CODE="1")
             code, out, err = core.run_session(argv, message, seconds, child, cwd=empty)
         texts, errors = {}, []

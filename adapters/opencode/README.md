@@ -120,8 +120,8 @@ Who reviews is yours: `/foreman reviewer [model]` (`default` to go back), a mode
   object that carries the seal (a fenced block or text around it is fine; an object written inside the diff is
   never taken for the answer); a reply with no sealed object is a review that could not run. A failed run (a
   model's usage limit, an unknown model) comes back with its reason and the HTTP status when OpenCode gives one; a
-  rate limit (429) or a server error (5xx) is retried. The reviewer sees the diff only: it has no tools and no
-  repository.
+  rate limit (429) or a server error (5xx) is retried. The reviewer sees the diff and your global instructions: it has
+  no tools and no repository. Foreman's rules for it are the agent's own system text, apart from the diff.
 
 ## Limits to know
 

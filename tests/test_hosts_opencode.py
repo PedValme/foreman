@@ -276,7 +276,7 @@ class FreshSession(OpenCodeCase):
         for word in ("THE PROMPT", "SYSTEM"):
             self.assertFalse(any(word in a for a in argv), word)   # nothing the author wrote rides on the line
         stdin = self.read("stdin")
-        self.assertTrue(stdin.startswith("SYSTEM"))
+        self.assertNotIn("SYSTEM", stdin)                          # Foreman's rules are not in the diff's message
         self.assertTrue(stdin.endswith("THE PROMPT"))
         self.assertIn('"type": "object"', stdin)                   # the schema, in words OpenCode has no flag for
         self.assertRegex(stdin, r'"seal" with the value "[0-9a-f]{16}"')
@@ -288,6 +288,7 @@ class FreshSession(OpenCodeCase):
         self.assertRegex(agent, r"^foreman-reviewer-[0-9a-f]{8}$")
         self.assertEqual(list(config["agents"]), [agent])
         self.assertEqual(config["agents"][agent]["permissions"], [{"action": "*", "resource": "*", "effect": "deny"}])
+        self.assertEqual(config["agents"][agent]["system"], "SYSTEM")  # the rules are the agent's own system text
         self.assertEqual(config["permissions"], [{"action": "*", "resource": "*", "effect": "deny"}])
         self.assertEqual(config["plugins"], ["-*", "opencode.*"])
         self.assertEqual(self.read("claude"), "1")
