@@ -4,31 +4,21 @@
 
 <!-- pic-method: next-session -->
 ## Next session
-- Doing: Foreman for any harness (DECISIONES, 2026-11-24; the plan, the facts read about each harness and the task
-  list are in `trabajo/agnostico.md`). Its first task, the host-neutral half plus the Claude Code adapter, is merged
-  (pull request #61): 476 tests green on Python 3.9 to 3.13 across Linux, macOS and Windows, and seen in real Claude
-  Code 2.1.331 sessions with `bypassPermissions` (a rigged commit, an agent-run merge and an edit that skips a test
-  denied; a turn that left a skipped test sent back once, a turn that only talked not; `/foreman:status`,
-  `/foreman:allow` and `/foreman:help` answered with no model turn; `allow` refused with `-p` and accepted typed in
-  an interactive session). Nothing under `plugin/` changed.
-- Tried: `/foreman` as a bare command does not work in Claude Code's interactive prompt (it rejects an unknown
-  command before any hook), so the person's commands are the plugin's own (`/foreman:status`), which the
-  `UserPromptSubmit` hook answers before the model sees them.
-- Reviewed twice by agents that did not write it (2026-11-24): nothing blocking either time; the findings were
-  fixed in #61 (a turn that only talked is never sent back, a prompt costs no git call, the guards read the program
-  that runs, `npx` and the like included, and no longer catch a grep or a commit message, a damaged installation
-  fails open instead of denying every call) and the real sessions repeated after the first round.
-- Next action: T2 to T4 are being built in parallel since 2026-11-24, the owner's ask («sigue con codex, pi y
-  opencode en paralelo»). Their shared base is pull request #62 (one entry point for every harness,
-  `foreman_hosts/neutral.py` for a harness whose extension is code, `core.pre_patch`); each adapter is its own
-  branch and draft pull request (`claude/adapter-codex`, `claude/adapter-pi`, `claude/adapter-opencode`), built by an
-  agent in its own worktree with a real-session run as its acceptance. For each: read its report, have an agent
-  that did not write it review it, fix, merge #62 first and then the adapter. Then T5 (the reviewer as a fresh
-  session) and T6 (`/foreman` complete on pi and OpenCode). Each harness is published only after its own
-  real-session test; real sessions leave state in `~/.foreman` on this machine: remove it when the three are done.
-- For the owner to try, his call (it goes into his own Claude Code): the plugin installs from this repository's
-  marketplace file. Installed for every project it would also stop his agents' own `gh pr merge`, which his other
-  repositories rely on, so per project or `claude --plugin-dir <a clone>` first.
+- Doing: Foreman for any harness (DECISIONES, 2026-11-24; plan, what each harness gives and the task list in
+  `trabajo/agnostico.md`). The gate now runs in Claude Code, Codex, pi and OpenCode from the same core as the Hermes
+  plugin: pull requests #61 (the host-neutral half and Claude Code), #62 (one entry point, the protocol for a
+  harness whose extension is code, patches), #63 (pi), #64 (Codex) and #65 (OpenCode), each seen in real sessions
+  on macOS and reviewed twice by agents that did not write it, with nothing blocking in any pass. Nothing under
+  `plugin/` changed. `adapters/README.md` compares the four; each harness's README says what was seen, what was only
+  read and its limits.
+- Next action: T5, the reviewer as a fresh session launched by Foreman, in the four (`trabajo/agnostico.md`, "Next
+  step" says where to start); then T6 (`/foreman` complete on pi and OpenCode) and T7 (READMEs, names, publication
+  and the one Hermes catalog update, with the owner).
+- For the owner, his call: trying an adapter in his own harness. It goes into his own setup, and installed for
+  every project the gate also refuses his agents' own `gh pr merge`, which his other repositories rely on: per
+  project, or loaded for one session (`claude --plugin-dir`, `pi -e`, `codex -c hooks.…`, a link in one project's
+  `.opencode/plugins`), first. Allowing a finding in Codex stays unavailable until someone tries its interactive
+  terminal in a folder Codex trusts, which writes to `~/.codex`.
 - External PR #57 (`***REDACTED***` as a placeholder in the detector): read in full, nothing malicious seen, not run.
   Changes asked on 2026-11-23: git-filter-repo's default marker is `***REMOVED***`, which it leaves blocked. Next:
   when the author pushes the fix, re-read the whole diff, approve its held CI run (the owner chose to wait for the
@@ -45,18 +35,17 @@
 
 ## Delivered
 - The Hermes plugin, version 0.1.0, in `plugin/`, listed in the Hermes catalog; CI on Linux, macOS and Windows.
+- The gate and the person's commands in Claude Code, Codex, pi and OpenCode (`adapters/`, `.claude-plugin/`), not
+  published and not announced in the root README yet.
 - `PedValme/foreman-demo` (public) as the demo repository; the README as one page with the real capture and the GIF.
 
-- The host-neutral half of the adapters and the Claude Code adapter (`adapters/`, `.claude-plugin/`): the gate and
-  the person's commands, not announced in the README yet.
-
 ## In progress
-- Foreman for any harness: Codex, pi and OpenCode next (`trabajo/agnostico.md`).
+- Foreman for any harness: the reviewer (T5) is next.
 
 ## Next steps
-1. `trabajo/agnostico.md`, T2 to T7. Names of the packages and where each adapter is published: to the owner when
-   the first adapter is merged and tried by him (T7); the root README does not mention the adapters until then.
-2. The one Hermes catalog update: what the adapters needed from the core, the native model picker
+1. `trabajo/agnostico.md`, T5 to T7. Names of the packages, where each adapter is published and how Codex's hooks
+   are installed: to the owner at T7; the root README does not mention the adapters until then.
+2. The one Hermes catalog update: what the adapters need from the core (nothing so far), the native model picker
    (`trabajo/model-picker.md`), the README's award and GIF, and `/foreman notify on` in the README (`hermes config
    set …notify on` stores a boolean and Hermes then warns on every load).
 3. Propose the Hermes seams one by one (#153841's advice): first the terminal cwd accessor, which removes the
@@ -68,27 +57,32 @@
    register `foreman-demo` in the owner's environment as outside the factory.
 
 ## Known issues
-- Unresolved (adapters): outside Hermes, Foreman's hooks and state are files the agent's shell can reach; the
-  adapter blocks what names them plainly, not a disguised attempt (a path built at run time, a script the agent
-  writes). The required check in CI stays the independent control.
-- Unresolved (Claude Code adapter): without `python3` on the PATH its hooks fail and Claude Code goes on without the
-  gate, showing the error; not tried on Windows in a real session (nor whether its hook shell understands `||`);
-  its answers to the person's commands carry Claude Code's own frame ("UserPromptSubmit operation blocked by hook").
-- Unresolved (adapters): at the end of a turn in which the agent changed anything in a repository, even an
-  unrelated new file, the nudge lists every blocker in that working tree, the person's own uncommitted ones
-  included, as the Hermes gate does; the message tells the agent to say so instead of undoing it.
-- Unresolved: the Desktop pane can disappear from the app's layout and not return until the app is reloaded and the
-  Desktop switch is toggled; cause not proven (#22).
-- Unresolved: with a running gateway, a slash command typed first in a CLI session cannot tell the repository and
-  asks for it; `/foreman use <path>` is the way around.
-- Unresolved: one guarded private import (`tools.terminal_tool.get_session_cwd`) makes `hermes plugins validate`
-  warn; a pushed notification cannot carry buttons, Hermes shows no approval prompt for a plugin's command, and
-  Telegram's choice buttons show only numbers.
+- Unresolved (adapters, every harness): Foreman's hooks and state are files the agent's shell can reach, guarded
+  against the plain attempt and not a disguised one; a second agent started without Foreman is outside the gate;
+  when the adapter cannot run (no `python3`) the harness goes on without the gate and shows the error. The required
+  check in CI stays the independent control. Not tried on Windows in a real session in any of the four.
+- Unresolved (adapters): at the end of a turn in which the agent changed anything in a repository, the nudge lists
+  every blocker in that working tree, the person's own uncommitted ones included, as the Hermes gate does.
+- Unresolved (Claude Code): the person's commands carry Claude Code's own frame ("UserPromptSubmit operation
+  blocked by hook"); an installation through the marketplace was not tried.
+- Unresolved (Codex): allowing a finding is not available; `codex exec` prints nothing when the hook answers the
+  person's command, and the interactive terminal was not tried; Codex's documentation says a command typed into a
+  running interactive shell skips the hook (not tried); subagents not verified; no Codex plugin yet, the hooks are
+  installed by hand.
+- Unresolved (pi): a program driving pi's RPC mode counts as a person at the interface; a tool from another
+  extension or an MCP server that runs commands is not inspected.
+- Unresolved (OpenCode): "a person approved" is a permission prompt plus time (a yes within a second is nobody), so
+  a late automatic yes passes; the end-of-turn nudge depends on a hook OpenCode marks experimental; a command's
+  answer shows as an error notice; the recommended user-level installation was read, not seen.
+- Unresolved (Hermes): the Desktop pane can disappear from the app's layout until the app is reloaded and the
+  Desktop switch is toggled, cause not proven (#22); with a running gateway, a slash command typed first in a CLI
+  session cannot tell the repository (`/foreman use <path>` is the way around); one guarded private import
+  (`tools.terminal_tool.get_session_cwd`) makes `hermes plugins validate` warn; a pushed notification cannot carry
+  buttons, Hermes shows no approval prompt for a plugin's command, and Telegram's choice buttons show only numbers.
 - Unresolved (debt from the reviews): state files are plain files behind a best-effort guard; a SARIF report
   replaced by a separate command is not noticed; `include`d makefiles and a new `GNUmakefile` are not covered; a
   merge through `gh api` or a direct push to the base branch is not blocked; the real-panel behaviour test runs only
   where node, React and jsdom are installed (CI skips it).
 - Unresolved: the deterministic detector does not see a loosened assertion or an emptied test; only the
-  second-model review does.
-- Unresolved: a change bounced by the review whose agent ends the turn without changing it stays "bounced 1/3",
-  with no notice to the owner (the notice comes only at the limit).
+  second-model review does. A change bounced by the review whose agent ends the turn without changing it stays
+  "bounced 1/3", with no notice to the owner (the notice comes only at the limit).
