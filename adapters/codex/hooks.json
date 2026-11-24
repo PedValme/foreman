@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|apply_patch)$",
+        "hooks": [
+          {"type": "command", "command": "python3 -I \"/path/to/foreman/adapters/hook.py\" codex || exit 1", "timeout": 30}
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {"type": "command", "command": "python3 -I \"/path/to/foreman/adapters/hook.py\" codex || exit 1", "timeout": 70}
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {"type": "command", "command": "python3 -I \"/path/to/foreman/adapters/hook.py\" codex || exit 1", "timeout": 30}
+        ]
+      }
+    ]
+  }
+}
