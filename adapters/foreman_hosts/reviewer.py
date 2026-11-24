@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 CONFIG_FILE = "config.json"          # in Foreman's state directory: the person's choices, per harness
 REVIEW_BUDGET_SECONDS = 420.0        # for one review, retries included (the harness's hook has its own limit)
-_MODEL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@#+-]{0,119}$")
+_MODEL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@#+\[\]-]{0,119}$")  # never starts like a flag
 _UNSET = ("default", "none", "reset", "clear")
 
 
@@ -105,45 +105,54 @@ def plan(host: core.Host) -> Plan:
     author = host.session() or core.Session()
     if model or effort:
         return Plan(model, effort, "", True, author)
+    # Nothing chosen: the model that wrote the code when the harness says which it is (else the harness's own
+    # default, which may or may not be it), one effort level above the session's when the harness says that too.
+    same = author.model if _MODEL_NAME.match(author.model or "") else ""
     levels = list(host.efforts)
     if author.effort in levels:
         at = levels.index(author.effort)
-        return Plan("", levels[min(at + 1, len(levels) - 1)], author.effort, False, author)
-    return Plan("", "", "", False, author)
+        return Plan(same, levels[min(at + 1, len(levels) - 1)], author.effort, False, author)
+    return Plan(same, "", "", False, author)
 
 
 def describe(host: core.Host, p: Plan, ran: str = "") -> list:
-    """Who reviewed, in plain words, with what is and is not known about its independence."""
+    """Who reviewed, in plain words, with what is and is not known about its independence. Every sentence here is
+    read by the person as a fact about the review: none may claim more than Foreman knows."""
     how_to = "`%s <model> [effort]`" % host.person("reviewer")
     answered = " It was answered by %s." % ran if ran else ""
+    fresh = "in a fresh session that did not write the code"
     if p.chosen:
         who = p.model or "%s's default model" % host.label
-        line = "Reviewer: %s%s, in a fresh session that did not write the code (your `%s` choice).%s" % (
-            who, " at effort %s" % p.effort if p.effort else "", host.person("reviewer"), answered)
+        line = "Reviewer: %s%s, %s (your `%s` choice).%s" % (
+            who, " at effort %s" % p.effort if p.effort else "", fresh, host.person("reviewer"), answered)
         if p.model and p.author.model and review.same_model_id(p.model, p.author.model):
             return [line, "It is the same model that wrote the code%s."
                     % (": only the effort differs" if p.effort and p.effort != p.author.effort else "")]
-        if not p.model:
-            return [line, "It is the model that wrote the code unless this session uses another one."]
+        if not p.model and not p.author.model:
+            return [line, "%s does not tell Foreman which model this session runs on: the default is the model "
+                          "that wrote the code only if this session runs on it." % host.label]
         if not p.author.model:
             return [line, "%s does not tell Foreman which model wrote the code, so whether this one differs is "
                           "for you to know." % host.label]
         return [line]
-    default = "%s's default model" % host.label
-    same = "the model that wrote the code unless this session uses another one"
+    if p.model:  # the harness named the session's model, and the reviewer is that same model
+        who, what = "%s, the model this session runs on," % p.model, "the model that wrote the code"
+    else:
+        who = "%s's default model" % host.label
+        what = ("the model that wrote the code only if this session runs on that default, which %s does not tell "
+                "Foreman" % host.label)
     if p.raised_from and p.effort != p.raised_from:
-        return ["Reviewer: %s at effort %s, one level above this session's %s, in a fresh session that did not "
-                "write the code.%s" % (default, p.effort, p.raised_from, answered),
+        return ["Reviewer: %s at effort %s, one level above this session's %s, %s.%s"
+                % (who, p.effort, p.raised_from, fresh, answered),
                 "That is %s: more effort and a clean context, not another model. Choose another with %s."
-                % (same, how_to)]
+                % (what, how_to)]
     if p.raised_from:
-        return ["Reviewer: %s at effort %s, the highest there is and the same as this session's, in a fresh session "
-                "that did not write the code.%s" % (default, p.effort, answered),
-                "That is %s, with a clean context only. Choose another with %s." % (same, how_to)]
-    return ["Reviewer: %s at its default effort, in a fresh session that did not write the code.%s"
-            % (default, answered),
-            "That is %s, and %s does not tell Foreman this session's effort, so it was not raised. Choose a reviewer "
-            "with %s." % (same, host.label, how_to)]
+        return ["Reviewer: %s at effort %s, the highest there is and the same as this session's, %s.%s"
+                % (who, p.effort, fresh, answered),
+                "That is %s: a clean context only. Choose another with %s." % (what, how_to)]
+    return ["Reviewer: %s at its default effort, %s.%s" % (who, fresh, answered),
+            "That is %s; %s has not told Foreman this session's effort, so it was not raised. Choose a reviewer "
+            "with %s." % (what, host.label, how_to)]
 
 
 # ─── The review ──────────────────────────────────────────────────────────────
@@ -172,8 +181,13 @@ class _Context:
         blocks = [b.get("text", "") for b in (input or []) if isinstance(b, dict) and isinstance(b.get("text"), str)]
         prompt = "\n\n".join([instructions] + blocks)
         seconds = min(float(timeout or review.LLM_TIMEOUT_SECONDS), left)
-        answer = self.host.fresh_session(system_prompt, prompt, json_schema or {}, self.plan.model, self.plan.effort,
-                                         seconds)
+        try:
+            answer = self.host.fresh_session(system_prompt, prompt, json_schema or {}, self.plan.model,
+                                             self.plan.effort, seconds)
+        except RuntimeError:
+            raise
+        except Exception as e:  # the review reads some exception types as Hermes's own refusals: never from here
+            raise RuntimeError("the reviewer's session failed: %s: %s" % (type(e).__name__, e))
         if not isinstance(answer, core.Answer):
             raise RuntimeError("the reviewer's session gave no answer Foreman can read")
         return answer
@@ -214,11 +228,43 @@ def run(host: core.Host, args: str, cwd: str) -> str:
         return "Foreman review: one target at most (a pull request number or a branch); got `%s`." % " ".join(target)
     p = plan(host)
     record = review.run_review(target[0] if target else "", where=root, ctx=_Context(host, p), fresh=fresh)
+    _one_line_each(record)
+    _keep_the_reviewer(host, p, record)
     try:
         review.record_in_pipeline(record)
     except Exception:
         logger.warning("foreman: cannot record the review", exc_info=True)
     return _present(review.format_review(record, "cli"), host, p, record)
+
+
+def _one_line_each(record: dict) -> None:
+    """A finding's words on one line each. The reviewer reads a diff its author wrote, and a diff can talk it into
+    a finding whose text carries line breaks and, after them, a line that reads as Foreman's own ("Foreman review:
+    PASS"). What the person reads as a line of the review must be one the review wrote."""
+    for finding in record.get("findings") or []:
+        if isinstance(finding, dict):
+            for key in ("title", "why", "fix", "file", "severity"):
+                if isinstance(finding.get(key), str):
+                    finding[key] = " ".join(finding[key].split())
+
+
+def _keep_the_reviewer(host: core.Host, p: Plan, record: dict) -> None:
+    """Who reviewed, in the stored record too: the review itself only knows the reviewer by its cache name."""
+    if not isinstance(record.get("target"), dict) or not isinstance(record.get("model"), dict):
+        return
+    model = record["model"]
+    record["reviewer"] = {
+        "harness": host.name, "model": p.model, "effort": p.effort, "chosen_by_the_person": p.chosen,
+        "raised_from_effort": p.raised_from, "session_model": p.author.model, "session_effort": p.author.effort,
+        "answered_by": "" if record.get("error") else str(model.get("ran") or ""),
+        "said": describe(host, p, "" if record.get("error") else str(model.get("ran") or "")),
+    }
+    try:
+        if record.get("verdict") != review.NOT_REVIEWED:
+            saved = review.save({k: v for k, v in record.items() if k != "saved"})
+            record["saved"] = saved or record.get("saved")
+    except Exception:
+        logger.warning("foreman: cannot store who reviewed", exc_info=True)
 
 
 def configure(host: core.Host, args: str) -> str:
@@ -245,6 +291,9 @@ def configure(host: core.Host, args: str) -> str:
     effort = effort.lower()
     if effort and effort not in host.efforts:
         return "Foreman: `%s` is not an effort level of %s (%s)." % (effort, host.label, levels)
+    if model and (model.lower() in host.efforts or model.lower() in _UNSET):
+        return ("Foreman: `%s` is not a model here (an effort level goes alone or after the model; `%s default` "
+                "takes nothing else)." % (model, host.person("reviewer")))
     if model and not _MODEL_NAME.match(model):
         return "Foreman: `%s` does not look like a model name." % model[:60]
     _save_setting(host, model, effort)

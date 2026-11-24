@@ -92,16 +92,22 @@ def _fresh_session(env):
     asks for. It starts in an empty directory and reads only that directory's local settings, so neither the
     project's instructions nor anyone's hooks or plugins are part of it; it uses the login Claude Code already has."""
     def run(system: str, prompt: str, schema: dict, model: str, effort: str, seconds: float) -> core.Answer:
+        import shutil
         import tempfile
-        argv = [env.get("CLAUDE_CODE_EXECPATH") or "claude", "-p", "--output-format", "json",
-                "--json-schema", json.dumps(schema), "--tools", "", "--no-session-persistence",
-                "--setting-sources", "local", "--system-prompt", system]
+        program = env.get("CLAUDE_CODE_EXECPATH") or shutil.which("claude", path=env.get("PATH")) or "claude"
+        argv = [program, "-p", "--output-format", "json", "--json-schema", json.dumps(schema), "--tools", "",
+                "--strict-mcp-config", "--no-session-persistence", "--setting-sources", "local",
+                "--system-prompt", system]
         if model:
             argv += ["--model", model]
         if effort:
             argv += ["--effort", effort]
-        with tempfile.TemporaryDirectory(prefix="foreman-review-") as empty:
-            code, out, err = core.run_session(argv, prompt, seconds, env, cwd=empty)
+        try:
+            with tempfile.TemporaryDirectory(prefix="foreman-review-") as empty:
+                # not the asking session's project: the reviewer belongs to no project
+                code, out, err = core.run_session(argv, prompt, seconds, env, cwd=empty, drop=("CLAUDE_PROJECT_DIR",))
+        except OSError as e:
+            raise RuntimeError("cannot make a directory for the reviewer's session: %s" % e)
         try:
             data = json.loads(out)
         except ValueError:
@@ -191,8 +197,9 @@ def answer(data: dict, env=None) -> Optional[dict]:
     h = host(env, data)
     event = data.get("hook_event_name")
     cwd, session, turn = _text(data.get("cwd")), _text(data.get("session_id")), _text(data.get("prompt_id"))
-    if _effort(data):
-        core.note(h, session, "effort", _effort(data))  # for the reviewer's default: one level above the session's
+    if _effort(data) and not data.get("agent_id"):
+        # For the reviewer's default: one level above the session's. A subagent's events are its own.
+        core.note(h, session, "effort", _effort(data))
     if event == "PreToolUse":
         return _pre_tool_answer(_pre_tool(h, data))
     if event == "UserPromptSubmit":

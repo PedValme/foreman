@@ -28,16 +28,21 @@ def main(argv=None) -> int:
         sys.stderr.write("Foreman needs Python %d.%d or newer; this is %s.\n"
                          % (MIN_PYTHON[0], MIN_PYTHON[1], sys.version.split()[0]))
         return 1
-    if os.environ.get("FOREMAN_REVIEWER") == "1":
-        # This is the session Foreman itself started to review a change (foreman_hosts/reviewer.py): it has no
-        # tools to gate, and it must not review its own review. Nothing to say: the harness goes on.
-        return 0
     from foreman_hosts import hosts
     host = argv[0] if argv else ""
     module = hosts.MODULES.get(host)
     if not module:
         sys.stderr.write("Foreman: unknown host %r. Known: %s.\n" % (host, ", ".join(sorted(hosts.MODULES))))
         return 1
+    if os.environ.get("FOREMAN_REVIEWER"):
+        from foreman_hosts import core
+        if core.reviewer_session(os.environ):
+            # The session Foreman itself started to review a change (foreman_hosts/reviewer.py): it has no tools
+            # to gate, and it must not review its own review. The variable alone proves nothing (a repository's
+            # settings can set one): it must name a review Foreman is running right now.
+            if host in hosts.NEUTRAL:
+                sys.stdout.write("{}")
+            return 0
     name = "foreman_hosts." + module
     if importlib.util.find_spec(name) is None:
         sys.stderr.write("Foreman: the adapter for %s is not part of this installation.\n" % host)
