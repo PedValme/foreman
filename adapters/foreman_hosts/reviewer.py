@@ -104,33 +104,41 @@ def sealed(schema: dict) -> tuple:
 
 
 def read_sealed(text: str, seal: str) -> Optional[dict]:
-    """The one object in ``text`` that carries ``seal`` and has the review's shape, without the seal; None when
-    there is none, when sealed objects differ, or when it is not shaped as a review. Never the first object found."""
-    if not isinstance(text, str) or not isinstance(seal, str) or not seal:
+    """The one object in ``text`` that carries ``seal`` and has a list of findings, without the seal; None when
+    there is none or when sealed objects differ. Never the first object found. The verdict is not taken from it:
+    the review works that out from the findings it can verify against the diff.
+
+    It looks only where the seal is written: for each place, the nearest enclosing object that carries it. So the
+    work is bounded whatever the text holds (a reviewer may quote a change full of braces)."""
+    if not isinstance(text, str) or not isinstance(seal, str) or not seal or seal not in text:
         return None
-    decoder, found, at = json.JSONDecoder(), {}, 0
-    while True:
-        at = text.find("{", at)
-        if at < 0:
-            break
-        try:
-            value, end = decoder.raw_decode(text, at)
-        except ValueError:
-            at += 1
-            continue
-        if isinstance(value, dict) and value.get("seal") == seal:
-            found[json.dumps(value, sort_keys=True)] = value
-            at = end
-        else:
-            at += 1  # not the answer: an object inside it still may be
+    decoder, found = json.JSONDecoder(), {}
+    at = text.find(seal)
+    try:
+        while at >= 0:
+            start = at
+            for _ in range(_MAX_OBJECT_STARTS):
+                start = text.rfind("{", 0, start)
+                if start < 0:
+                    break
+                try:
+                    value, end = decoder.raw_decode(text, start)
+                except (ValueError, RecursionError):
+                    continue
+                if end > at and isinstance(value, dict) and value.get("seal") == seal:
+                    found[json.dumps(value, sort_keys=True)] = value
+                    break
+            at = text.find(seal, at + len(seal))
+    except RecursionError:
+        return None
     if len(found) != 1:
         return None
     answer = dict(next(iter(found.values())))
     answer.pop("seal", None)
-    if not isinstance(answer.get("findings"), list) or not isinstance(answer.get("summary"), str) \
-            or answer.get("verdict") not in ("PASS", "CONCERNS", "BLOCK"):
-        return None
-    return answer
+    return answer if isinstance(answer.get("findings"), list) else None
+
+
+_MAX_OBJECT_STARTS = 400  # how many "{" before a seal are tried as the start of the object that carries it
 
 
 # ─── Who reviews ─────────────────────────────────────────────────────────────
