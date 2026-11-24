@@ -10,3 +10,6 @@ MODULES = {
     "pi": "pi",
     "opencode": "opencode",
 }
+
+# The harnesses whose own extension speaks neutral.py's protocol: they are always answered with one JSON object.
+NEUTRAL = ("pi", "opencode")
