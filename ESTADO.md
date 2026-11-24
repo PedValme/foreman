@@ -5,11 +5,12 @@
 <!-- pic-method: next-session -->
 ## Next session
 - Doing: Foreman for any harness (DECISIONES, 2026-11-24; the plan, the facts read about each harness and the task
-  list are in `trabajo/agnostico.md`). Its first task, the host-neutral half plus the Claude Code adapter, is pull
-  request #61, a draft: 460 tests green here on Python 3.9 and 3.12, and seen in real Claude Code 2.1.331 sessions
-  with `bypassPermissions` (a rigged commit, an agent-run merge and an edit that skips a test denied; a turn that left
-  a skipped test sent back once; `/foreman:status`, `/foreman:allow` and `/foreman:help` answered with no model turn;
-  `allow` refused with `-p` and accepted typed in an interactive session). Nothing under `plugin/` changed.
+  list are in `trabajo/agnostico.md`). Its first task, the host-neutral half plus the Claude Code adapter, is merged
+  (pull request #61): 476 tests green on Python 3.9 to 3.13 across Linux, macOS and Windows, and seen in real Claude
+  Code 2.1.331 sessions with `bypassPermissions` (a rigged commit, an agent-run merge and an edit that skips a test
+  denied; a turn that left a skipped test sent back once, a turn that only talked not; `/foreman:status`,
+  `/foreman:allow` and `/foreman:help` answered with no model turn; `allow` refused with `-p` and accepted typed in
+  an interactive session). Nothing under `plugin/` changed.
 - Tried: `/foreman` as a bare command does not work in Claude Code's interactive prompt (it rejects an unknown
   command before any hook), so the person's commands are the plugin's own (`/foreman:status`), which the
   `UserPromptSubmit` hook answers before the model sees them.
@@ -17,9 +18,9 @@
   fixed in #61 (a turn that only talked is never sent back, a prompt costs no git call, the guards read the program
   that runs, `npx` and the like included, and no longer catch a grep or a commit message, a damaged installation
   fails open instead of denying every call) and the real sessions repeated after the first round.
-- Next action: merge #61 by squash when CI is green (it now also runs Python 3.9 on macOS and Windows). Then T2 to
-  T4 (Codex, pi and OpenCode with the gate; independent, one agent each), T5 (the reviewer as a fresh session) and
-  T6 (`/foreman` complete on pi and OpenCode). Each harness is published only after its own real-session test.
+- Next action: T2 to T4 (Codex, pi and OpenCode with the gate; independent, one agent each; CI now also runs
+  Python 3.9 on macOS and Windows), then T5 (the reviewer as a fresh session) and T6 (`/foreman` complete on pi and
+  OpenCode). Each harness is published only after its own real-session test.
 - For the owner to try, his call (it goes into his own Claude Code): the plugin installs from this repository's
   marketplace file. Installed for every project it would also stop his agents' own `gh pr merge`, which his other
   repositories rely on, so per project or `claude --plugin-dir <a clone>` first.
@@ -41,8 +42,11 @@
 - The Hermes plugin, version 0.1.0, in `plugin/`, listed in the Hermes catalog; CI on Linux, macOS and Windows.
 - `PedValme/foreman-demo` (public) as the demo repository; the README as one page with the real capture and the GIF.
 
+- The host-neutral half of the adapters and the Claude Code adapter (`adapters/`, `.claude-plugin/`): the gate and
+  the person's commands, not announced in the README yet.
+
 ## In progress
-- Foreman for any harness: pull request #61 (the neutral half and Claude Code), in review.
+- Foreman for any harness: Codex, pi and OpenCode next (`trabajo/agnostico.md`).
 
 ## Next steps
 1. `trabajo/agnostico.md`, T2 to T7. Names of the packages and where each adapter is published: to the owner when
