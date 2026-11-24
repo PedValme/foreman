@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """The one entry point of Foreman's adapters: ``python3 -I adapters/hook.py <host>``.
 
-The harness's hook calls it with its own JSON on standard input and reads the answer from standard output. Run it
-with ``-I`` (isolated): Python then ignores ``PYTHON*`` variables and the user's site directory, and the only
-directories added to the import path are the two below, both inside Foreman's own installation.
+The harness's hook (or its extension) calls it with JSON on standard input and reads the answer from standard
+output. Run it with ``-I`` (isolated): Python then ignores ``PYTHON*`` variables and the user's site directory, and
+the only directories added to the import path are the two below, both inside Foreman's own installation.
+
+It never answers through its exit code: a decision is JSON on standard output with exit code 0, and exit code 1 means
+the adapter could not run (the harness then goes on as with any failed hook).
 """
+import importlib
+import importlib.util
 import os
 import sys
 
@@ -23,12 +28,17 @@ def main(argv=None) -> int:
         sys.stderr.write("Foreman needs Python %d.%d or newer; this is %s.\n"
                          % (MIN_PYTHON[0], MIN_PYTHON[1], sys.version.split()[0]))
         return 1
+    from foreman_hosts import hosts
     host = argv[0] if argv else ""
-    if host == "claude-code":
-        from foreman_hosts import claude_code
-        return claude_code.main()
-    sys.stderr.write("Foreman: unknown host %r. Known: claude-code.\n" % host)
-    return 1
+    module = hosts.MODULES.get(host)
+    if not module:
+        sys.stderr.write("Foreman: unknown host %r. Known: %s.\n" % (host, ", ".join(sorted(hosts.MODULES))))
+        return 1
+    name = "foreman_hosts." + module
+    if importlib.util.find_spec(name) is None:
+        sys.stderr.write("Foreman: the adapter for %s is not part of this installation.\n" % host)
+        return 1
+    return int(importlib.import_module(name).main() or 0)
 
 
 if __name__ == "__main__":

@@ -26,6 +26,8 @@ from typing import Callable, Optional
 from foreman import detector, gate, grants
 from foreman.detector import GitError, Repo
 
+from .hosts import MODULES
+
 logger = logging.getLogger(__name__)
 
 BLOCK, ASK, CONTINUE = "block", "ask", "continue"
@@ -56,7 +58,7 @@ class Host:
     attended: Callable[[], bool] = _never
 
 
-HOSTS = ("claude-code",)  # what `adapters/hook.py <host>` accepts
+HOSTS = tuple(MODULES)  # what `adapters/hook.py <host>` accepts
 
 
 # ─── Words ───────────────────────────────────────────────────────────────────
@@ -339,6 +341,55 @@ def pre_write(host: Host, path, cwd: str = "", session: str = "", turn: str = ""
     return decision
 
 
+_PATCH_PATHS = re.compile(r"(?m)^\*\*\* (?:(?:Update|Add|Delete) File|Move to):\s*(.+?)\s*$")
+
+
+def pre_patch(host: Host, patch, cwd: str = "", session: str = "", turn: str = "") -> Optional[dict]:
+    """Before the agent applies a patch in the ``*** Begin Patch`` format (the one the gate already reads for
+    Hermes's patch tool, and the one Codex's ``apply_patch`` sends): every file it names meets the guards, then
+    the gate reads the patch."""
+    if not isinstance(patch, str) or not patch.strip():
+        return None
+    base = cwd if isinstance(cwd, str) and cwd and os.path.isabs(cwd) else os.getcwd()
+
+    def full(path: str) -> str:
+        path = os.path.expanduser(path)
+        return os.path.normpath(path if os.path.isabs(path) else os.path.join(base, path))
+
+    paths = list(dict.fromkeys(full(p) for p in _PATCH_PATHS.findall(patch)))
+    if any(_is_own_path(host, p) for p in paths):
+        return {"action": BLOCK, "message": _OWN}
+    for path, old, new, _is_new in gate._v4a_files(patch):
+        try:
+            if host.is_config(full(path)) and host.config_off(old, new):
+                return {"action": BLOCK, "message": _OFF}
+        except Exception:
+            logger.warning("foreman: the host's config check failed", exc_info=True)
+    # The gate resolves a patch's relative paths against the session's directory, which outside Hermes it takes
+    # from the process: stand in it while the gate reads.
+    here = None
+    try:
+        here = os.getcwd()
+    except OSError:
+        pass
+    try:
+        if os.path.isdir(base):
+            os.chdir(base)
+        out = gate.on_pre_tool_call("patch", {"mode": "patch", "patch": patch},
+                                    task_id=session or "", session_id=session or "")
+    finally:
+        if here:
+            try:
+                os.chdir(here)
+            except OSError:
+                pass
+    decision = _decision(host, out)
+    if decision is None or decision["action"] != BLOCK:
+        for path in paths:
+            _touch(host, session, turn, path)
+    return decision
+
+
 # ─── A session's turns ───────────────────────────────────────────────────────
 # Hermes tells the gate which paths a turn changed; another harness does not. Two sources stand in for it: the
 # files that went through pre_write and exist changed since the turn began, and, when the agent used the shell,
@@ -579,6 +630,15 @@ def person_command(host: Host, text, cwd: str = "", session: str = "") -> Option
     spaced = not re.match(r"^\s*/foreman:", text, re.I)
     if spaced and parts and name not in PERSON_SUBCOMMANDS and name not in _hermes_subcommands():
         return None  # "/foreman is blocking my commit, why?" is a question for the model, not a command
+    return person_reply(host, m.group(1) or "", cwd)
+
+
+def person_reply(host: Host, args, cwd: str = "") -> str:
+    """Foreman's answer to its command with these arguments (``"status src"``, ``"allow 3f2a"``, ``""`` for the
+    verdict), for a harness whose own command mechanism already established that the person typed ``/foreman``."""
+    parts = (args if isinstance(args, str) else "").strip().split(None, 1)
+    name = parts[0].lower() if parts else "status"
+    rest = parts[1].strip() if len(parts) > 1 else ""
     try:
         return reword(host, _run_person(host, name, rest, cwd))
     except Exception as e:  # the person asked: always an answer, never a stack trace

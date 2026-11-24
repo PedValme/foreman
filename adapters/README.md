@@ -8,8 +8,14 @@ understands. It adds no rule and loosens none (PRODUCTO.md, rules 22 to 26).
 |---|---|
 | `hook.py` | The one entry point: `python3 -I adapters/hook.py <host>`, the harness's JSON on standard input |
 | `foreman_hosts/core.py` | The host-neutral half: shell command, write, turn start, end of turn, the person's command |
+| `foreman_hosts/hosts.py` | The harnesses there is an adapter for, and the module of each |
 | `foreman_hosts/claude_code.py` | Claude Code's dialect |
+| `foreman_hosts/neutral.py` | The request and answer for a harness whose extension is code (pi, OpenCode) |
 | `claude-code/` | Claude Code's hooks and commands, named by `.claude-plugin/plugin.json` at the repository root |
+
+A new harness is one dialect module (its `core.Host` and a `main`), its own folder here with what the harness loads,
+and its tests. A harness that runs a command hook with JSON reads `claude_code.py` as its model; one whose extension
+is code sends `neutral.py`'s requests from the thinnest extension the harness allows.
 
 Needs Python 3.9 or newer as `python3`, and git. No other dependency. Outside Hermes, Foreman keeps its state
 (what you allowed, each session's turn) in `~/.foreman`.
