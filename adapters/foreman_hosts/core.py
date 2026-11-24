@@ -579,6 +579,7 @@ def noted(host: Host, session: str, key: str) -> str:
 
 REVIEWER_DIR = "reviewer"            # in the state directory: one file per review running now, named by its token
 REVIEWER_TOKEN_SECONDS = 3600
+REVIEWER_CLOCK_SLACK_SECONDS = 5
 _TOKEN = re.compile(r"^[0-9a-f]{32}$")
 
 
@@ -604,8 +605,9 @@ def reviewer_session(env) -> bool:
 
 def _token_is_live(path: str) -> bool:
     """A token file written within the last hour. One dated in the future is not live either: nothing of
-    Foreman's writes such a file, and it would otherwise never expire."""
-    return 0 <= time.time() - os.path.getmtime(path) < REVIEWER_TOKEN_SECONDS
+    Foreman's writes such a file, and it would otherwise never expire. A few seconds ahead is still now: a file's
+    time and the clock do not tick together (seen on Windows: a file just written read as a moment in the future)."""
+    return -REVIEWER_CLOCK_SLACK_SECONDS <= time.time() - os.path.getmtime(path) < REVIEWER_TOKEN_SECONDS
 
 
 def run_session(argv: list, prompt: str, seconds: float, env=None, cwd: Optional[str] = None,

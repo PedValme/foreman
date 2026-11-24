@@ -177,6 +177,42 @@ class EntryPoint(PiCase):
         self.assertIn("In pi:", json.loads(stdout.getvalue())["reply"])
 
 
+
+class TheReviewersHost(PiCase):
+    def test_pi_has_a_reviewer_its_thinking_levels_and_the_sessions_own_state(self):
+        h = pi.host({"model": "p/m", "effort": "high", "event": "command"})
+        self.assertIsNotNone(h.fresh_session)
+        self.assertEqual(h.efforts, ("off", "minimal", "low", "medium", "high", "xhigh", "max"))
+        self.assertEqual((h.session().model, h.session().effort), ("p/m", "high"))
+        self.assertEqual(pi.host({}).session(), core.Session())
+        self.assertEqual(pi.host({"model": 7, "effort": None}).session(), core.Session())
+
+    def test_the_help_lists_the_review_in_pis_words(self):
+        reply = self.ask("command", args="help")["reply"]
+        self.assertIn("/foreman review ", reply)
+        self.assertIn("/foreman reviewer", reply)
+        self.assertPiWords(reply)
+
+    def test_the_review_is_one_level_above_the_sessions_exact_thinking_level(self):
+        reply = self.ask("command", args="reviewer", model="p/m-1", effort="medium")["reply"]
+        self.assertIn("p/m-1, the model this session runs on, at effort high, one level above this session's medium",
+                      reply)
+        self.assertIn("That is the model that wrote the code: more effort and a clean context", reply)
+        self.assertIn("Effort levels: off, minimal, low, medium, high, xhigh, max", reply)
+        top = self.ask("command", args="reviewer", effort="max")["reply"]
+        self.assertIn("the highest there is and the same as this session's", top)
+        self.assertIn("pi has not told Foreman this session's effort", self.ask("command", args="reviewer")["reply"])
+        self.assertPiWords(reply)
+
+    def test_choosing_a_reviewer_is_kept_and_checked_against_pis_levels(self):
+        self.assertIn("reviewer set", self.ask("command", args="reviewer some-model low")["reply"])
+        shown = self.ask("command", args="reviewer", model="other/model", effort="medium")["reply"]
+        self.assertIn("some-model at effort low", shown)
+        self.assertIn("is not an effort level of pi", self.ask("command", args="reviewer some-model fast")["reply"])
+        self.assertIn("back to the default", self.ask("command", args="reviewer default")["reply"])
+
+
+
 def _node_skip_reason() -> str:
     """Why the extension's tests cannot run here, or "" when they can."""
     node = shutil.which("node")
@@ -268,6 +304,14 @@ class TheExtension(PiCase):
         self.assertIn("Foreman: BLOCKED", out["status"]["printed"])
         self.assertEqual(out["help_json"]["printed"], "")  # never mixed into pi's JSON event stream
         self.assertIn("In pi:", out["help_json"]["stderr"])
+
+
+    def test_the_variable_alone_switches_nothing_off(self):
+        # a project's settings can set it for every session: standing down is hook.py's, for a live token only
+        for value in ("1", "0" * 32, ""):
+            out = self.drive("stood-down", FOREMAN_REVIEWER=value)
+            self.assertEqual(out["registered"]["commands"], ["foreman"], value)
+            self.assertEqual(out["registered"]["events"], ["agent_before_settle", "before_agent_start", "tool_call"])
 
     def test_a_turn_is_sent_back_once_and_a_turn_that_talked_is_not(self):
         out = self.drive("turn")

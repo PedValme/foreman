@@ -16,8 +16,9 @@ mod.default({
 });
 
 const shown = [];
-function context(hasUI, confirmAnswer = false, cwd = repo, mode = hasUI ? "tui" : "print") {
+function context(hasUI, confirmAnswer = false, cwd = repo, mode = hasUI ? "tui" : "print", extra = {}) {
 	return {
+		...extra,
 		cwd,
 		hasUI,
 		mode,
@@ -34,7 +35,7 @@ function context(hasUI, confirmAnswer = false, cwd = repo, mode = hasUI ? "tui" 
 
 const tool = (name, input, ctx = context(false)) => handlers.tool_call({ type: "tool_call", toolName: name, toolCallId: "c1", input }, ctx);
 
-async function command(args, hasUI, mode) {
+async function command(args, hasUI, mode, extra = {}) {
 	const printed = [];
 	const errors = [];
 	const write = process.stdout.write;
@@ -42,7 +43,7 @@ async function command(args, hasUI, mode) {
 	process.stdout.write = (chunk) => (printed.push(String(chunk)), true);
 	process.stderr.write = (chunk) => (errors.push(String(chunk)), true);
 	try {
-		await commands.foreman.handler(args, context(hasUI, false, repo, mode));
+		await commands.foreman.handler(args, context(hasUI, false, repo, mode, extra));
 	} finally {
 		process.stdout.write = write;
 		process.stderr.write = writeErr;
@@ -80,6 +81,21 @@ if (scenario === "gate") {
 	out.help = await command("help", false);
 	out.status = await command("status", false);
 	out.help_json = await command("help", false, "json"); // --mode json: standard output is pi's event stream
+} else if (scenario === "stood-down") {
+	// whatever FOREMAN_REVIEWER holds, the extension registers as usual: only `registered` is read
+} else if (scenario === "review") {
+	// the person's command carries the session's model and thinking level when pi states them; FAKE_PYTHON records it
+	process.env.FOREMAN_PYTHON = process.env.FAKE_PYTHON;
+	const at = (extra) => context(false, false, repo, "print", extra);
+	out.timeout_ms = mod.COMMAND_TIMEOUT_MS;
+	out.session = [
+		mod.sessionOf(at({ model: { provider: "p1", id: "m-1" }, thinkingLevel: "medium" })),
+		mod.sessionOf(at({ model: { id: "bare" } })),
+		mod.sessionOf(at({ model: undefined, thinkingLevel: "" })),
+		mod.sessionOf(at({ model: { id: 7 }, thinkingLevel: 3 })),
+	];
+	await command("reviewer", false, "print", { model: { provider: "p1", id: "m-1" }, thinkingLevel: "medium" });
+	await command("review", false, "print", {});
 } else if (scenario === "turn") {
 	await prompt("hi");
 	out.talk_only = await settle();

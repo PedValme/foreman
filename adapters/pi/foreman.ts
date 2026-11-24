@@ -24,7 +24,8 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK = join(HERE, "..", "hook.py");
 const TIMEOUT_MS = 30_000; // neutral.py: no answer within 30 seconds is no answer (the gate's own budget is 18)
-const SHELL_TOOLS = new Set(["bash", "powershell"]);
+export const COMMAND_TIMEOUT_MS = 600_000; // /foreman review waits for a model: neutral.py gives a `command` ten minutes
+const SHELL_TOOLS =new Set(["bash", "powershell"]);
 const READ_TOOLS = new Set(["read", "grep", "find", "ls"]);
 const PATH_KEYS = ["path", "file_path", "filePath", "file"];
 
@@ -187,6 +188,21 @@ async function personDecides(ctx: ExtensionContext, message: string) {
 	return ok ? undefined : { block: true, reason: `${message}\n(The user declined.)` };
 }
 
+/** The session's model (`provider/id`, which `pi --model` takes as it is) and thinking level, as pi's context states
+ * them; a key is left out when pi does not state it. They only decide what the review says about its reviewer. */
+export function sessionOf(ctx: ExtensionContext): Request {
+	const out: Request = {};
+	const model = ctx.model as { id?: unknown; provider?: unknown } | undefined;
+	if (model && typeof model.id === "string" && model.id) {
+		out.model = typeof model.provider === "string" && model.provider ? `${model.provider}/${model.id}` : model.id;
+	}
+	const level = (ctx as { thinkingLevel?: unknown }).thinkingLevel;
+	if (typeof level === "string" && level) {
+		out.effort = level;
+	}
+	return out;
+}
+
 export default function foreman(pi: ExtensionAPI) {
 	// pi starts a fresh copy of the extension for each session (startup, /new, /resume, /fork, /reload).
 	let errorShown = false;
@@ -263,9 +279,11 @@ export default function foreman(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("foreman", {
-		description: "Foreman: status [path], allow [id], help",
+		description: "Foreman: status [path], allow [id], review [target], reviewer [model] [effort], help",
 		handler: async (args, ctx) => {
-			const answer = await ask({ event: "command", args: args ?? "", cwd: ctx.cwd, attended: ctx.hasUI === true }, ctx.cwd);
+			// the review starts a session of pi and waits for it: ten minutes, not thirty seconds
+			const request: Request = { event: "command", args: args ?? "", cwd: ctx.cwd, attended: ctx.hasUI === true, ...sessionOf(ctx) };
+			const answer = await ask(request, ctx.cwd, COMMAND_TIMEOUT_MS);
 			if (answer instanceof Error) {
 				show(ctx, `Foreman could not run: ${answer.message}`, "error");
 			} else {
