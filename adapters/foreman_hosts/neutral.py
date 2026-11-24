@@ -53,8 +53,10 @@ What every extension must get right, so the harnesses behave alike:
 - **The review** (``command`` with ``review`` or ``reviewer``) starts a session of the harness and waits for it:
   the extension gives a ``command`` request ten minutes, not thirty seconds. It sends the session's ``model`` and
   ``effort`` as the harness names them, or leaves them out when it does not know them (``session()`` below): they
-  only decide what the review says about its own reviewer and its default effort. And inside the reviewer's own
-  session (the environment variable ``FOREMAN_REVIEWER`` is ``1``) the extension does nothing at all.
+  only decide what the review says about its own reviewer and its default effort. Inside the reviewer's own
+  session the extension behaves as in any other and every request is answered ``{}``: this program knows that
+  session by the token of the review that is running. The extension never reads ``FOREMAN_REVIEWER`` itself: the
+  variable alone proves nothing, because a project's configuration can set one for every session.
 """
 from __future__ import annotations
 

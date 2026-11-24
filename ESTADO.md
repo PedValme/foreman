@@ -89,6 +89,11 @@
   replaced by a separate command is not noticed; `include`d makefiles and a new `GNUmakefile` are not covered; a
   merge through `gh api` or a direct push to the base branch is not blocked; the real-panel behaviour test runs only
   where node, React and jsdom are installed (CI skips it).
+- Unresolved (Hermes plugin, found 2026-11-24 reviewing the adapters; fixed there, not in `plugin/`): a finding the
+  review verified keeps the line breaks of its `title`, `why` and `fix`, so a diff that steers the reviewer can make
+  `/foreman review` print a line that reads as Foreman's own (a second "Foreman review: PASS" under the real
+  verdict; the real first line and the verdict itself are not changed). The fix is one line in `review.verify`
+  (collapse whitespace in those fields) and belongs in the one catalog update.
 - Unresolved: the deterministic detector does not see a loosened assertion or an emptied test; only the
   second-model review does. A change bounced by the review whose agent ends the turn without changing it stays
   "bounced 1/3", with no notice to the owner (the notice comes only at the limit).
