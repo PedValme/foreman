@@ -1,9 +1,16 @@
-# Foreman state — 2026-11-23
+# Foreman state — 2026-11-24
 
 > Rewritten in full, never appended; kept short.
 
 <!-- pic-method: next-session -->
 ## Next session
+- First topic, asked by the owner on 2026-11-24: improvements, and evaluating Foreman for any harness («convertirlo en
+  un producto agnóstico, y me parece muy buena idea, que funcione en cualquier otro arnés también lo evaluamos y
+  revisamos en la sesión fresca»). Evaluate and propose with a recommendation; nothing is decided or built. Seen so far
+  (imports only, not studied): `detector.py` already runs alone in CI; Hermes is imported directly in `gate.py`,
+  `review.py` and `panel_api.py`, and the hooks, commands, notifications and panel are registered through its plugin
+  API. To answer: which harnesses, what hook each one offers to block before a command or an edit, and what that does
+  to the catalog listing.
 - External PR #57 (`***REDACTED***` as a placeholder in the detector): read in full, nothing malicious seen, not run.
   Changes asked on 2026-11-23: git-filter-repo's default marker is `***REMOVED***`, which it leaves blocked. Next:
   when the author pushes the fix, re-read the whole diff, approve its held CI run (the owner chose to wait for the
@@ -11,11 +18,11 @@
 - Foreman won 1st place in the Hermes Agent Plugin Hackathon (nearly 1,000 entries; Nous's post:
   https://x.com/NousResearch/status/2123882434173559007). Both READMEs say so since 2026-11-20 and open with a 9 s GIF
   of the block (`docs/media/foreman-block.gif`, cut from the hackathon video) since 2026-11-22; the `plugin/` README
-  reaches the catalog page only with the next SHA-bump pull request. How the prize is paid is unknown: Nous has not
-  written yet, and no official rules were found.
+  reaches the catalog page only with the next SHA-bump pull request. The prizes are in Nous's launch post
+  (https://x.com/NousResearch/status/2118094256438936062; read by another agent, not checked here); how they are paid
+  is unknown.
 - Promotion left this repository (DECISIONES, 2026-11-23): the owner's networks, posts and profiles are a separate
-  project's; here only Foreman and its technical side (that project may ask for facts or real cases). A Foreman for
-  other harnesses (Claude Code, Codex, Cursor) is a product decision for later.
+  project's; here only Foreman and its technical side (that project may ask for facts or real cases).
 - Before: the catalog listing, now done. Foreman is in the Hermes catalog: NousResearch/hermes-agent#153851,
   approved and merged by the maintainer on 2026-11-13 at the pin ce9b01a after both asks were fixed; its page is
   https://hermes-agent.nousresearch.com/marketplace/foreman. The hackathon submission was complete on 2026-11-11
