@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "^(Bash|apply_patch)$",
+        "matcher": "^(Bash|apply_patch|Edit|Write)$",
         "hooks": [
           {"type": "command", "command": "python3 -I \"/path/to/foreman/adapters/hook.py\" codex || exit 1", "timeout": 30}
         ]

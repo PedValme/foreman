@@ -11,12 +11,13 @@ the field names of Claude Code (checked on Codex CLI 0.171.0, in ``codex exec``)
 - ``Stop``: ``{"decision": "block", "reason": …}`` keeps the agent working with the reason as its next prompt.
 - ``UserPromptSubmit``: ``{"decision": "block", "reason": …}`` drops the prompt before any model turn. Only the
   person's typing fires it, so it is where Foreman's commands live. Codex's interactive prompt refuses an unknown
-  ``/name`` before any hook, so here they are typed as plain words: ``foreman status``, ``foreman allow <id>``,
-  ``foreman help``.
+  ``/name`` before any hook (read in its binary, not seen), so here they are typed as plain words, and only as
+  these exact one-line prompts: ``foreman``, ``foreman status [path]``, ``foreman allow``, ``foreman help``. Any
+  other prompt goes to the model.
 
-Whether a person is at the session is something Codex states in one place: the first line of the session's
-transcript (``transcript_path``), whose ``source`` is ``cli`` for the interactive terminal and ``vscode`` for the
-editor and desktop app, ``exec`` for ``codex exec``. Anything else, or a transcript that cannot be read, is "nobody".
+Allowing a finding (``foreman allow <id>``) is not available in Codex yet: nothing Codex gives a hook was shown to
+tell the person's prompt in an interactive session from a prompt the model writes for a subagent or a resumed
+session, and with nobody attending ``allow`` must do nothing (PRODUCTO.md, rule 24). Listing what waits stays.
 """
 from __future__ import annotations
 
@@ -32,10 +33,8 @@ from . import core
 NAME = "codex"
 CLI = ("codex",)  # the command, and its npm package (`npx @openai/codex`) as core.programs names it
 SHELL_TOOLS = {"Bash"}
-PATCH_TOOLS = {"apply_patch"}
+PATCH_TOOLS = {"apply_patch", "Edit", "Write"}  # Codex reports `apply_patch`; its documentation also names these
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # Foreman's clone or package
-ATTENDED_SOURCES = {"cli", "vscode"}
-_MAX_META_BYTES = 4 * 1024 * 1024
 
 # Codex's settings: config.toml, hooks.json and requirements.toml in a `.codex` folder (the user's, a project's)
 # or in the system folder (/etc/codex).
@@ -98,33 +97,13 @@ def _program_dirs(roots) -> tuple:
     return tuple(out)
 
 
-def session_source(transcript_path) -> Optional[str]:
-    """The ``source`` Codex wrote in the first line of this session's transcript (``cli``, ``vscode``, ``exec``…),
-    or None when it cannot be read or is not a plain word (a subagent's source is an object)."""
-    if not isinstance(transcript_path, str) or not transcript_path or not os.path.isabs(transcript_path):
-        return None
-    try:
-        with open(transcript_path, "rb") as fh:
-            line = fh.readline(_MAX_META_BYTES)
-        meta = json.loads(line.decode("utf-8", "replace"))
-    except (OSError, ValueError):
-        return None
-    payload = meta.get("payload") if isinstance(meta, dict) else None
-    if not isinstance(meta, dict) or meta.get("type") != "session_meta" or not isinstance(payload, dict):
-        return None
-    source = payload.get("source")
-    return source if isinstance(source, str) else None
-
-
-def host(data: Optional[dict] = None, env=None) -> core.Host:
+def host(env=None) -> core.Host:
     env = os.environ if env is None else env
-    data = data if isinstance(data, dict) else {}
     roots = dict.fromkeys(r for r in (ROOT, env.get("PLUGIN_ROOT")) if r)
-    transcript = data.get("transcript_path")
+    # Never attended (the module's docstring says why): allowing a finding is answered before core is asked.
     return core.Host(
         name=NAME, label="Codex", person=lambda sub: "foreman " + sub, program_dirs=_program_dirs(roots),
         cli=CLI, switches_off=_switches_off, is_config=_is_config, config_off=_config_off,
-        attended=lambda: session_source(transcript) in ATTENDED_SOURCES,
     )
 
 
@@ -142,15 +121,30 @@ def _command(args: dict):
     return command
 
 
+def _where(cwd: str, args: dict) -> str:
+    """Where the shell command runs: the call's own ``workdir`` when it gives one (resolved against the session's
+    directory), else the hook's ``cwd``."""
+    workdir = args.get("workdir")
+    if isinstance(workdir, str) and workdir.strip():
+        workdir = os.path.expanduser(workdir.strip())
+        if os.path.isabs(workdir):
+            return os.path.normpath(workdir)
+        if cwd:
+            return os.path.normpath(os.path.join(cwd, workdir))
+    return cwd
+
+
 def _pre_tool(h: core.Host, data: dict) -> Optional[dict]:
     tool, args = data.get("tool_name"), data.get("tool_input")
     if not isinstance(args, dict):
         return None
     cwd, session, turn = _text(data.get("cwd")), _text(data.get("session_id")), _text(data.get("turn_id"))
     if tool in SHELL_TOOLS:
-        return core.pre_shell(h, _command(args), cwd, session, turn)
+        return core.pre_shell(h, _command(args), _where(cwd, args), session, turn)
     if tool in PATCH_TOOLS:
         patch = next((args[k] for k in ("command", "patch", "input") if isinstance(args.get(k), str)), None)
+        if tool != "apply_patch" and not (patch or "").lstrip().startswith("*** Begin Patch"):
+            return None  # an `Edit` or `Write` whose input is not a patch this adapter can read
         return core.pre_patch(h, patch, cwd, session, turn)
     return None
 
@@ -169,29 +163,39 @@ def _pre_tool_answer(decision: Optional[dict]) -> Optional[dict]:
                                    "permissionDecisionReason": message}}
 
 
-_PERSON_WORDS = re.compile(r"^\s*/?foreman(?=$|\s)", re.I)
+# The person's commands, only as these exact one-line prompts; anything else is a prompt for the model.
+_PERSON_COMMAND = re.compile(r"[ \t]*/?foreman(?:[ \t]+(?:status(?:[ \t]+\S+)?|allow(?:[ \t]+\S+)?|help))?[ \t]*",
+                             re.I)
+_ALLOW_ID = re.compile(r"[ \t]*/?foreman[ \t]+allow[ \t]+\S+[ \t]*", re.I)
+NO_ALLOW = ("Foreman: allowing a finding is not available in Codex yet. Nothing Codex tells its hooks was shown to "
+            "tell your own prompt in an interactive session from a prompt the agent writes for a subagent or a "
+            "resumed session, and allowing must stay out of the agent's reach. To let a marked finding through, "
+            "fix it instead, or commit the change yourself in your own terminal.")
 
 
-def _as_person_command(prompt) -> Optional[str]:
-    """``foreman allow 3f2a`` (or ``/foreman allow 3f2a``) as core reads it, else None."""
-    if not isinstance(prompt, str):
+def person_reply(h: core.Host, prompt, cwd: str = "") -> Optional[str]:
+    """Foreman's answer when ``prompt`` is exactly one of its commands, else None (the prompt goes to the model)."""
+    if not isinstance(prompt, str) or not _PERSON_COMMAND.fullmatch(prompt):
         return None
-    m = _PERSON_WORDS.match(prompt)
-    if not m:
-        return None
-    return "/foreman" + prompt[m.end():]
+    if _ALLOW_ID.fullmatch(prompt):
+        return NO_ALLOW
+    words = prompt.strip().lstrip("/").split(None, 1)
+    args = words[1] if len(words) > 1 else ""
+    reply = core.person_reply(h, args, cwd)
+    if args.lower() in ("allow", "help"):
+        reply += "\n\n" + NO_ALLOW
+    return reply
 
 
 def answer(data: dict, env=None) -> Optional[dict]:
     """What Codex should read back for this hook input, or None for nothing (the call goes on)."""
-    h = host(data, env)
+    h = host(env)
     event = data.get("hook_event_name")
     cwd, session, turn = _text(data.get("cwd")), _text(data.get("session_id")), _text(data.get("turn_id"))
     if event == "PreToolUse":
         return _pre_tool_answer(_pre_tool(h, data))
     if event == "UserPromptSubmit":
-        command = _as_person_command(data.get("prompt"))
-        reply = core.person_command(h, command, cwd, session) if command is not None else None
+        reply = person_reply(h, data.get("prompt"), cwd)
         if reply is not None:
             return {"decision": "block", "reason": reply}
         core.turn_start(h, cwd, session, turn)

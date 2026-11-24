@@ -31,33 +31,19 @@ class CodexCase(GitRepoCase):
         self.write("tests/test_cart.py", "def test_total():\n    assert 1 + 1 == 2\n")
         self.write("cart.py", "def total():\n    return 2\n")
         self.commit("base")
-        self.transcripts = os.path.join(self.tmp, "sessions")
-        os.makedirs(self.transcripts)
-        self.transcript = self.session_file("cli")
-
-    def session_file(self, source, name=None):
-        """A transcript whose first line is the session_meta Codex writes (only the keys the adapter reads)."""
-        path = os.path.join(self.transcripts, name or ("rollout-%s.jsonl" % (source if isinstance(source, str) else "x")))
-        with open(path, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps({"timestamp": "2026-11-24T00:00:00Z", "type": "session_meta",
-                                 "payload": {"id": "sess-1", "originator": "codex-tui", "source": source}}) + "\n")
-            fh.write(json.dumps({"type": "event_msg", "payload": {"source": "exec"}}) + "\n")
-        return path
 
     def payload(self, event, **more):
         data = {"session_id": "sess-1", "turn_id": "turn-1", "cwd": self.root, "hook_event_name": event,
-                "model": "gpt-test", "permission_mode": "bypassPermissions", "transcript_path": self.transcript}
+                "model": "gpt-test", "permission_mode": "bypassPermissions",
+                "transcript_path": os.path.join(self.tmp, "rollout.jsonl")}
         data.update(more)
         return data
 
     def tool(self, name, **tool_input):
         return codex.answer(self.payload("PreToolUse", tool_name=name, tool_use_id="call-1", tool_input=tool_input), {})
 
-    def prompt(self, text, turn="turn-1", transcript=None):
-        more = {"prompt": text, "turn_id": turn}
-        if transcript is not None:
-            more["transcript_path"] = transcript
-        return codex.answer(self.payload("UserPromptSubmit", **more), {})
+    def prompt(self, text, turn="turn-1"):
+        return codex.answer(self.payload("UserPromptSubmit", prompt=text, turn_id=turn), {})
 
     def stop(self, turn="turn-1", active=False):
         return codex.answer(self.payload("Stop", turn_id=turn, stop_hook_active=active,
@@ -118,6 +104,30 @@ class PreToolUse(CodexCase):
         absolute = SKIP_PATCH.replace("tests/test_cart.py", os.path.join(self.root, "tests", "test_cart.py"))
         self.assertEqual(self.decision(self.tool("apply_patch", command=absolute))[0], "deny")
         self.assertIsNone(self.tool("apply_patch", command=PLAIN_PATCH))
+
+    def test_a_workdir_in_the_call_is_where_the_command_is_inspected(self):
+        # Codex 0.171.0 was measured passing the workdir as the hook's `cwd` and none in tool_input; a `workdir`
+        # that does come in tool_input is where the command runs, so the gate reads that repository.
+        clean = os.path.join(self.tmp, "clean")
+        os.makedirs(clean)
+        self.write("tests/test_cart.py", SKIPPED)
+        self.git("add", "-A")
+        for workdir in (self.root, os.path.relpath(self.root, clean)):
+            out = codex.answer(self.payload("PreToolUse", tool_name="Bash", cwd=clean,
+                                            tool_input={"command": "git commit -m x", "workdir": workdir}), {})
+            verdict, reason = self.decision(out)
+            self.assertEqual(verdict, "deny", workdir)
+            self.assertIn("tests/test_cart.py:4", reason)
+        self.assertEqual(codex._where("/a/b", {"workdir": "c"}), os.path.normpath("/a/b/c"))
+        self.assertEqual(codex._where("/a/b", {"workdir": "/x"}), "/x")
+        self.assertEqual(codex._where("/a/b", {"workdir": 3}), "/a/b")
+        self.assertEqual(codex._where("/a/b", {}), "/a/b")
+
+    def test_edit_and_write_carrying_a_patch_are_read_as_patches(self):
+        for name in ("Edit", "Write"):
+            self.assertEqual(self.decision(self.tool(name, command=SKIP_PATCH))[0], "deny", name)
+            self.assertIsNone(self.tool(name, command=PLAIN_PATCH), name)
+            self.assertIsNone(self.tool(name, file_path="tests/test_cart.py", content="x"), name)
 
     def test_a_patch_in_a_directory_that_does_not_exist_is_refused(self):
         out = codex.answer(self.payload("PreToolUse", tool_name="apply_patch", cwd=os.path.join(self.tmp, "gone"),
@@ -191,9 +201,9 @@ class PreToolUse(CodexCase):
 
     def test_a_copy_installed_as_a_plugin_is_foremans_whole(self):
         installed = os.path.join(self.tmp, ".codex", "plugins", "cache", "local", "foreman", "local")
-        h = codex.host({}, {"PLUGIN_ROOT": installed})
+        h = codex.host({"PLUGIN_ROOT": installed})
         self.assertIn(installed, h.program_dirs)
-        self.assertNotIn(ROOT, codex.host({}, {}).program_dirs)  # a clone: only its code folders
+        self.assertNotIn(ROOT, codex.host({}).program_dirs)  # a clone: only its code folders
 
     def test_the_agent_cannot_type_the_persons_allow_through_a_nested_session(self):
         self.assertEqual(self.decision(self.tool("Bash", command="codex exec 'foreman allow 3f2a'"))[0], "deny")
@@ -208,6 +218,16 @@ class PersonCommands(CodexCase):
         self.assertIsNone(self.prompt("foremanship"))
         self.assertEqual(core._load(codex.host(), "sess-1")["turn"], "turn-1")
 
+    def test_only_the_exact_one_line_forms_are_commands(self):
+        for text in ("foreman status looks wrong, why?", "foreman help me fix the failing commit",
+                     "foreman allow me to explain", "foreman review this diff please", "foreman\nstatus",
+                     "foreman status\nand also fix it", "foreman: status", "foreman status a b",
+                     "please run foreman status", "foreman board"):
+            self.assertIsNone(self.prompt(text), text)
+        for text in ("foreman", "foreman status", "foreman status tests", "/foreman help", "  FOREMAN help  ",
+                     "foreman allow", "foreman allow 3f2a"):
+            self.assertEqual(self.prompt(text)["decision"], "block", text)
+
     def test_status_is_answered_without_the_model(self):
         out = self.prompt("foreman status")
         self.assertEqual(out["decision"], "block")
@@ -220,52 +240,30 @@ class PersonCommands(CodexCase):
         reason = self.prompt("foreman help")["reason"]
         self.assertIn("In Codex:", reason)
         self.assertIn("foreman status", reason)
-        self.assertIn("foreman allow <id>", reason)
+        self.assertIn("not available in Codex yet", reason)
         self.assertCodexWords(reason)
 
-    def test_a_hermes_only_subcommand_says_it_is_not_here(self):
-        self.assertIn("not available in Codex", self.prompt("foreman board")["reason"])
+    def test_a_hermes_only_subcommand_as_an_exact_command_says_it_is_not_here(self):
+        self.assertIsNone(self.prompt("foreman board"))  # not one of Codex's forms: the model gets it
+        self.assertIsNone(self.prompt("foreman merge"))
 
-    def test_the_person_allows_a_marked_finding_only_in_an_attended_session(self):
+    def test_allowing_a_finding_is_not_available_in_codex(self):
         self.write("tests/test_cart.py", MARKED)
         self.git("add", "-A")
         self.assertEqual(self.decision(self.tool("Bash", command="git commit -m green"))[0], "deny")
         short_id = grants.pending()[0]["id"]
-        for unattended in (self.session_file("exec"), self.session_file({"subagent": "x"}),
-                           os.path.join(self.tmp, "missing.jsonl"), ""):
-            refused = self.prompt("foreman allow %s" % short_id, transcript=unattended)
-            self.assertIn("nobody is attending", refused["reason"], unattended)
-            self.assertIn("`foreman allow %s`" % short_id, refused["reason"])
+        for text in ("foreman allow %s" % short_id, "/foreman allow %s" % short_id):
+            refused = self.prompt(text)["reason"]
+            self.assertIn("not available in Codex yet", refused)
+            self.assertNotIn("allowed", refused)
+        self.assertEqual([e["id"] for e in grants.pending()], [short_id])
         self.assertEqual(self.decision(self.tool("Bash", command="git commit -m green"))[0], "deny")
-        self.assertIn("allowed %s" % short_id, self.prompt("foreman allow %s" % short_id)["reason"])
-        self.assertIsNone(self.tool("Bash", command="git commit -m green"))
+        listing = self.prompt("foreman allow")["reason"]  # listing what waits stays
+        self.assertIn(short_id, listing)
+        self.assertIn("not available in Codex yet", listing)
 
-    def test_listing_what_waits_works_unattended(self):
-        out = self.prompt("foreman allow", transcript=self.session_file("exec"))
-        self.assertIn("nothing is waiting", out["reason"])
-
-
-class Attended(CodexCase):
-    def test_the_sources_codex_writes(self):
-        self.assertEqual(codex.session_source(self.session_file("cli")), "cli")
-        self.assertEqual(codex.session_source(self.session_file("vscode")), "vscode")
-        self.assertEqual(codex.session_source(self.session_file("exec")), "exec")
-        self.assertIsNone(codex.session_source(self.session_file({"subagent": {"thread_spawn": {}}})))
-        self.assertIsNone(codex.session_source("relative/path.jsonl"))
-        self.assertIsNone(codex.session_source(None))
-        self.assertTrue(codex.host({"transcript_path": self.session_file("cli")}).attended())
-        self.assertTrue(codex.host({"transcript_path": self.session_file("vscode")}).attended())
-        self.assertFalse(codex.host({"transcript_path": self.session_file("exec")}).attended())
-        self.assertFalse(codex.host({}).attended())
-
-    def test_a_first_line_that_is_not_the_session_meta_is_nobody(self):
-        path = os.path.join(self.transcripts, "odd.jsonl")
-        with open(path, "w") as fh:
-            fh.write(json.dumps({"type": "event_msg", "payload": {"source": "cli"}}) + "\n")
-        self.assertIsNone(codex.session_source(path))
-        with open(path, "w") as fh:
-            fh.write("not json\n")
-        self.assertIsNone(codex.session_source(path))
+    def test_listing_with_nothing_waiting(self):
+        self.assertIn("nothing is waiting", self.prompt("foreman allow")["reason"])
 
 
 class Stop(CodexCase):
@@ -389,12 +387,12 @@ class HooksFile(unittest.TestCase):
                                      'python3 -I "/path/to/foreman/adapters/hook.py" codex || exit 1', event)
                     self.assertEqual(hook["type"], "command")
         matcher = hooks["PreToolUse"][0]["matcher"]
-        self.assertEqual(matcher, "^(Bash|apply_patch)$")
-        self.assertEqual(codex.SHELL_TOOLS | codex.PATCH_TOOLS, {"Bash", "apply_patch"})
+        self.assertEqual(matcher, "^(Bash|apply_patch|Edit|Write)$")
+        self.assertEqual(set(matcher[2:-2].split("|")), codex.SHELL_TOOLS | codex.PATCH_TOOLS)
 
     def test_the_readme_try_command_matches_the_hooks_file(self):
         readme = self.read("adapters", "codex", "README.md")
-        self.assertIn("^(Bash|apply_patch)\\$", readme)
+        self.assertIn("^(Bash|apply_patch|Edit|Write)\\$", readme)
         self.assertIn("adapters/hook.py codex || exit 1", readme)
         self.assertIn("--dangerously-bypass-hook-trust", readme)
 
