@@ -71,8 +71,13 @@ class CodexFreshSession(CodexCase):
         configs = [argv[i + 1] for i, a in enumerate(argv) if a == "-c"]
         self.assertIn("model_reasoning_effort=high", configs)
         self.assertTrue(any(c.startswith("model_instructions_file=\"") for c in configs))
-        for tool in ("shell_tool", "unified_exec", "view_image"):  # no shell or command tool at all
-            self.assertEqual(argv[argv.index(tool) - 1], "--disable")
+        # No shell or command tool, no file-viewing, apps, plugins, image generation, sub-agents or web search: what
+        # `codex debug prompt-input` showed declared and what `codex features list` names (README, "The review").
+        off = [argv[i + 1] for i, a in enumerate(argv) if a == "--disable"]
+        self.assertEqual(sorted(off), sorted(("shell_tool", "unified_exec", "view_image", "apps", "plugins",
+                                              "image_generation", "multi_agent", "multi_agent_v2")))
+        self.assertEqual(tuple(off), codex.TOOLS_OFF)
+        self.assertIn('web_search="disabled"', configs)
         self.assertEqual(argv[-2], "-")  # the prompt is read from standard input
         self.assertNotIn("THE PROMPT", argv)
         self.assertNotIn("SYSTEM", argv)
@@ -93,7 +98,7 @@ class CodexFreshSession(CodexCase):
         argv = self.read("argv").split("\n")
         self.assertNotIn("--model", argv)
         self.assertNotIn("-m", argv)
-        self.assertNotIn("-c", argv)
+        self.assertFalse(any(a.startswith("model_reasoning_effort") for a in argv))
         self.assertEqual(self.read("stdin"), "P")
         self.assertFalse(any("model_instructions_file" in a for a in argv))  # no rules, no file
 

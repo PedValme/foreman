@@ -118,6 +118,14 @@ def _event_message(event: dict) -> str:
     return ""
 
 
+# Features switched off in the reviewer's session: whatever can run a command, read the person's files or data,
+# reach the network or start other agents. Each name exists in Codex 0.171.0 (`--disable` refuses an unknown one).
+# Read with `codex debug prompt-input` (no model call): the shell and command tools are declared by default and
+# gone with the first three; the tools Codex still declares are in the README.
+TOOLS_OFF = ("shell_tool", "unified_exec", "view_image", "apps", "plugins", "image_generation", "multi_agent",
+             "multi_agent_v2")
+
+
 def _strict(schema):
     """The schema as Codex's API takes it (seen: a 400 without it): every object closed with
     ``additionalProperties: false`` and every property required."""
@@ -149,8 +157,9 @@ def _fresh_session(env):
             # network, not reads, so a session with a shell could read any file of the person's (seen).
             argv = [shutil.which("codex", path=env.get("PATH")) or "codex", "exec", "--ephemeral", "--ignore-user-config",
                     "--skip-git-repo-check", "--sandbox", "read-only", "--color", "never", "--json",
-                    "--disable", "shell_tool", "--disable", "unified_exec", "--disable", "view_image",
-                    "--output-schema", schema_file]
+                    "--output-schema", schema_file, "-c", 'web_search="disabled"']
+            for feature in TOOLS_OFF:
+                argv += ["--disable", feature]
             if system:  # Foreman's fixed rules (never the diff) as the session's own instructions
                 rules = os.path.join(empty, "instructions.md")
                 with open(rules, "w", encoding="utf-8") as fh:

@@ -69,13 +69,24 @@ that every finding quotes a line of the diff, prints a verdict (PASS, CONCERNS o
 same diff by the same reviewer is never sent twice (`--fresh` asks again). It is advice: it grants, merges and
 unblocks nothing, and Foreman's own gate decides what it decides without it.
 
-The session is `codex exec --ephemeral --ignore-user-config --sandbox read-only` with the shell, command and image
-tools switched off (`--disable shell_tool --disable unified_exec --disable view_image`), started by Foreman in an empty
+The session is `codex exec --ephemeral --ignore-user-config --sandbox read-only`, started by Foreman in an empty
 temporary directory, with the diff on standard input and Foreman's fixed rules as its instructions
-(`-c model_instructions_file=<file>`; the diff never goes in that file). The switch-off matters: Codex's read-only
-sandbox blocks writes and the network, not reads, so a session with a shell can read any file of yours. Measured: with the
-shell on, a session asked to read a file outside its directory did; with those three switches off, it answered that it
-had no tool to do so. Codex's login is the one you already have.
+(`-c model_instructions_file=<file>`; the diff never goes in that file). Codex's read-only sandbox blocks writes and
+the network, not reads, so what the session can reach is decided by its tools. Foreman switches off what Codex lets it
+(`--disable shell_tool unified_exec view_image apps plugins image_generation multi_agent multi_agent_v2` and
+`-c web_search="disabled"`); the names were checked to exist on 0.171.0.
+
+What was found, by `codex debug prompt-input` with an empty Codex home (it calls no model): by default Codex declares a
+JavaScript `exec` tool whose nested tools include `exec_command`, `write_stdin`, `view_image`, `apply_patch` and the
+MCP resource tools; with the switches above `exec_command`, `write_stdin` and `view_image` are gone from that list.
+Still declared: `apply_patch` (it writes, and the read-only sandbox is what stops it; not tried), the MCP resource
+readers (with `--ignore-user-config` and an empty directory no MCP server is configured, so they have nothing to
+read), a clock, `request_user_input` and the sub-agent tools (the last two have no one to ask, and there is no
+switch for them that took effect in that list). Not shown by that command, so not verified: the web search tool and
+anything the login adds (apps, connectors); they are switched off by the flags above but a real session's tool list
+was not read. Measured with a real session, before the extra switches: with the shell on, a session asked to read a
+file outside its directory did; with the first three off it said it had no tool to do so.
+Codex's login is the one you already have.
 
 Who started it is not fully known. `foreman review` is a prompt, and nothing Codex tells its hooks was shown to
 separate your own prompt from one the agent writes for a subagent, so a review the agent asked for in that way
