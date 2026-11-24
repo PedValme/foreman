@@ -17,6 +17,7 @@ hands. The person's command is the only way in (``core.person_reply``).
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -70,6 +71,27 @@ def _save_setting(host: core.Host, model: str, effort: str) -> None:
     else:
         reviewers.pop(host.name, None)
     data["reviewer"] = reviewers
+    _write_config(data)
+
+
+def each_turn(host: core.Host) -> bool:
+    """The person turned on the review at the end of every turn, for this harness (off unless they did)."""
+    chosen = _config().get("each_turn")
+    return isinstance(chosen, dict) and chosen.get(host.name) is True
+
+
+def _save_each_turn(host: core.Host, on: bool) -> None:
+    data = _config()
+    chosen = data.get("each_turn") if isinstance(data.get("each_turn"), dict) else {}
+    if on:
+        chosen[host.name] = True
+    else:
+        chosen.pop(host.name, None)
+    data["each_turn"] = chosen
+    _write_config(data)
+
+
+def _write_config(data: dict) -> None:
     path = _config_path()
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".tmp-")
     try:
@@ -224,15 +246,18 @@ def describe(host: core.Host, p: Plan, ran: str = "") -> list:
 class _Context:
     """The part of Hermes's plugin context ``review.py`` uses, for a harness that is not Hermes."""
 
-    def __init__(self, host: core.Host, p: Plan):
-        self.host, self.plan = host, p
+    def __init__(self, host: core.Host, p: Plan, level: str = ""):
+        self.host, self.plan, self.level = host, p, level
         self.llm = self
         self.deadline = time.monotonic() + REVIEW_BUDGET_SECONDS
 
     def get_config(self, key: str, default=None):
         # The review reads its reviewer from here and keeps one stored result per diff and reviewer: give it the
         # reviewer's name, so a change of model or effort is a new review and the same one is never sent twice.
-        return self.plan.token if key == "reviewer_model" else default
+        if key == "reviewer_model":
+            return self.plan.token
+        # `auto_review` (rule 16): "finish" only for the end of a turn where the person turned that review on.
+        return self.level if key == "auto_review" and self.level else default
 
     def has_capability(self, _name: str) -> bool:
         return True  # Hermes's grant for a plugin to pick another model: the person picked it here themselves
@@ -348,9 +373,67 @@ def _keep_the_reviewer(host: core.Host, p: Plan, record: dict) -> None:
         logger.warning("foreman: cannot store who reviewed", exc_info=True)
 
 
+# ─── At the end of every turn, where the person turned it on ─────────────────
+
+EACH_TURN = "every-turn"  # `reviewer every-turn on|off`
+
+
+@contextlib.contextmanager
+def bound(host: core.Host, p: Plan, level: str = ""):
+    """``review.py`` on this harness's reviewer for a while: its context, and every record it returns finished as
+    every review here is (``finish``). What it had before comes back afterwards."""
+    before = (review._CTX, review.run_review)
+    inner = review.run_review
+
+    def run_review(*args, **kwargs):
+        record = inner(*args, **kwargs)
+        finish(host, p, record)
+        return record
+
+    review.bind(_Context(host, p, level))
+    review.run_review = run_review
+    try:
+        yield
+    finally:
+        review._CTX, review.run_review = before
+
+
+def when(host: core.Host) -> str:
+    """One line: when the review runs in this harness."""
+    usual = "when you ask" + (" and before a merge" if "merge" in host.board else "")
+    if each_turn(host):
+        return ("It reviews %s, and at the end of every turn that changed code (`%s off` stops that)."
+                % (usual, host.person("reviewer " + EACH_TURN)))
+    return ("It reviews %s. `%s on` also reviews at the end of every turn that changed code: one more session of "
+            "%s each time, on your account." % (usual, host.person("reviewer " + EACH_TURN), host.label))
+
+
+def turn_end(host: core.Host, changed: list, session: str, attempt: int) -> Optional[dict]:
+    """The end of a turn where the person turned the review on: the core's own ``finish`` level (rule 16) with
+    this harness's reviewer (rule 25). The gate comes first, as always. When it finds nothing, Foreman itself
+    starts the reviewer on the change (in Hermes the agent is asked to call a tool for that; here the verdict
+    never passes through the author's hands), and the core's loop decides: send the change back with the verified
+    BLOCKING and HIGH findings, never twice for the same diff, at most ``max_bounces`` times."""
+    from foreman import finish as loop
+    from foreman import gate
+    with bound(host, plan(host), "finish"):
+        try:
+            roots, blockers = gate._scan_changed(changed, time.monotonic() + gate.HOOK_BUDGET_SECONDS, session)
+            if roots and not blockers:
+                loop._tool({"path": roots[0]}, session)  # the review of this exact diff: stored, or run now
+        except Exception:
+            logger.warning("foreman: the review at the end of the turn failed", exc_info=True)
+        out = gate.on_pre_verify(coding=True, attempt=attempt, changed_paths=changed, session_id=session)
+    if isinstance(out, dict) and out.get("message") == loop.REVIEW_FIRST:
+        # The core asking the agent to call its review tool: there is none here, and Foreman has just tried the
+        # review itself (it could not run). The turn is not held for that; `review` and the pipeline say so.
+        return None
+    return out
+
+
 def configure(host: core.Host, args: str) -> str:
-    """``reviewer`` shows who reviews; ``reviewer <model> [effort]`` or ``reviewer <effort>`` sets it;
-    ``reviewer default`` goes back to the default."""
+    """``reviewer`` shows who reviews and when; ``reviewer <model> [effort]`` or ``reviewer <effort>`` sets who;
+    ``reviewer default`` goes back to the default; ``reviewer every-turn on|off`` sets when."""
     if host.fresh_session is None:
         return "Foreman: the review is not available in %s yet." % host.label
     words = (args or "").split()
@@ -359,7 +442,14 @@ def configure(host: core.Host, args: str) -> str:
         lines = describe(host, plan(host))
         lines[0] = lines[0].replace("Reviewer: ", "Foreman's reviewer in %s: " % host.label, 1)
         return "\n".join(lines + ["Effort levels: %s. `%s default` goes back to the default."
-                                  % (levels, host.person("reviewer"))])
+                                  % (levels, host.person("reviewer")), when(host)])
+    if words[0].lower() == EACH_TURN:
+        choice = words[1].lower() if len(words) == 2 else ""
+        if choice not in ("on", "off"):
+            return "Foreman: `%s on` or `%s off`.\n%s" % (host.person("reviewer " + EACH_TURN),
+                                                          host.person("reviewer " + EACH_TURN), when(host))
+        _save_each_turn(host, choice == "on")
+        return "Foreman: the review at the end of every turn is %s in %s.\n%s" % (choice, host.label, when(host))
     if len(words) == 1 and words[0].lower() in _UNSET:
         _save_setting(host, "", "")
         return "\n".join(["Foreman: the reviewer is back to the default."] + describe(host, plan(host)))

@@ -326,7 +326,13 @@ def codex_words(text: str) -> str:
     elsewhere = "in Foreman's config.json (`foreman reviewer <model>` says how)"
     for old, new in ((" `foreman reviewer default` goes back to the default.", ""),
                      ("Choose another with `foreman reviewer <model> [effort]`.", "Choose another " + elsewhere + "."),
-                     ("Choose a reviewer with `foreman reviewer <model> [effort]`.", "Choose a reviewer " + elsewhere + ".")):
+                     ("Choose a reviewer with `foreman reviewer <model> [effort]`.", "Choose a reviewer " + elsewhere + "."),
+                     # nor to turn the review at the end of every turn on or off from a prompt
+                     ("`foreman reviewer every-turn on` also reviews",
+                      "{\"each_turn\": {\"codex\": true}} in Foreman's config.json also reviews"),
+                     ("(`foreman reviewer every-turn off` stops that)",
+                      "(removing \"each_turn\" from Foreman's config.json stops that)"),
+                     ("; `every-turn on|off` for when", "")):
         text = text.replace(old, new)
     return text
 
@@ -351,8 +357,8 @@ _MODEL_LIKE = r"(?=[^\s]*[-._:/@0-9])" + _MODEL_WORD
 _PERSON_COMMAND = re.compile(
     r"[ \t]*/?foreman(?:[ \t]+(?:status(?:[ \t]+\S+)?|allow(?:[ \t]+\S+)?|help"
     r"|review(?:[ \t]+--fresh(?:[ \t]+[^\s-]\S*)?|[ \t]+[^\s-]\S*(?:[ \t]+--fresh)?)?"
-    r"|reviewer(?:[ \t]+(?:default|%s|%s(?:[ \t]+%s)?))?))?[ \t]*" % (_EFFORT_WORD, _MODEL_LIKE, _EFFORT_WORD),
-    re.I)
+    r"|reviewer(?:[ \t]+(?:default|every-turn(?:[ \t]+(?:on|off))?|%s|%s(?:[ \t]+%s)?))?))?[ \t]*"
+    % (_EFFORT_WORD, _MODEL_LIKE, _EFFORT_WORD), re.I)
 _ALLOW_ID = re.compile(r"[ \t]*/?foreman[ \t]+allow[ \t]+\S+[ \t]*", re.I)
 NO_ALLOW = ("Foreman: allowing a finding is not available in Codex yet. Nothing Codex tells its hooks was shown to "
             "tell your own prompt in an interactive session from a prompt the agent writes for a subagent or a "
@@ -369,7 +375,8 @@ def no_set_reviewer() -> str:
             "your own prompt from one the agent writes for a subagent, and a choice saved here is reported by every "
             "later review as yours. Set it yourself in %s, as {\"reviewer\": {\"codex\": {\"model\": \"<model>\", "
             "\"effort\": \"<%s>\"}}} (either may be left out or empty), or delete the file's `codex` entry to go "
-            "back to the default. `foreman reviewer` shows who reviews." % (
+            "back to the default. The review at the end of every turn is set there too, for the same reason: "
+            "{\"each_turn\": {\"codex\": true}}. `foreman reviewer` shows who reviews and when." % (
                 os.path.join(grants.store_dir(), "config.json"), "|".join(EFFORTS)))
 
 

@@ -121,6 +121,9 @@ _PLAIN = (
     ("Foreman blocked this write_file:", "Foreman blocked this write:"),
     ("Foreman blocked this patch:", "Foreman blocked this edit:"),
     ("Foreman: Hermes's approval denied", "Foreman did not run"),  # the board, when its own gh was not started
+    # The review at the end of a turn: in Hermes the agent calls a tool for it; here Foreman runs it itself.
+    ("Foreman reviews the new diff (call `foreman_review`).", "Foreman reviews the new diff."),
+    ("(run `foreman_review` to see them)", "(the user's `/foreman review` shows them)"),
 )
 # In Hermes the review is "the second-model review". Here the reviewer is a fresh session that, with nothing chosen,
 # runs on the model that wrote the code: the review never names itself a second model (rule 25). A line the core
@@ -172,6 +175,9 @@ _PERSON_WRITES = ("Foreman blocked this command: merging or rejecting a pull req
 _STATE_DIR = re.compile(r"(?:^|[\s\"'=:/\\~])\.foreman(?=$|[/\\\s\"'])")
 _ALLOW_WORDS = re.compile(r"(?i)\bforeman\W{1,3}allow\b")
 _WRITE_WORDS = re.compile(r"(?i)\bforeman\W{1,3}(?:%s)\b" % "|".join(BOARD_WRITES))
+_EACH_TURN_WORDS = re.compile(r"(?i)\bforeman\W{1,3}reviewer\W{1,3}every-turn\b")
+_PERSON_WHEN = ("Foreman blocked this command: whether Foreman reviews at the end of every turn is the user's "
+                "decision, typed by them (%s). If the review is in the way, tell the user why.")
 
 
 def _spellings(path: str) -> list:
@@ -349,6 +355,8 @@ def _guard_command(host: Host, command: str) -> Optional[dict]:
         return {"action": BLOCK, "message": _PERSON_ONLY % host.person("allow <id>")}
     if any(name in host.board for name in BOARD_WRITES) and _person_only(host, command, _WRITE_WORDS):
         return {"action": BLOCK, "message": _PERSON_WRITES % host.person("merge <pr>")}
+    if host.fresh_session is not None and _person_only(host, command, _EACH_TURN_WORDS):
+        return {"action": BLOCK, "message": _PERSON_WHEN % host.person("reviewer every-turn on|off")}
     return None
 
 
@@ -855,7 +863,14 @@ def end_of_turn(host: Host, cwd: str = "", session: str = "", turn: str = "") ->
         except GitError:
             pass
     nudges = state.get("nudges") if isinstance(state.get("nudges"), int) else 0
-    out = gate.on_pre_verify(coding=bool(changed), attempt=nudges, changed_paths=changed, session_id=session)
+    each_turn = False
+    if changed and host.fresh_session is not None:
+        from . import reviewer  # late: it loads the review
+        each_turn = reviewer.each_turn(host)  # the person turned on the review at the end of every turn
+    if each_turn:
+        out = reviewer.turn_end(host, changed, session, nudges)  # the gate first, then the review, then the loop
+    else:
+        out = gate.on_pre_verify(coding=bool(changed), attempt=nudges, changed_paths=changed, session_id=session)
     if isinstance(out, dict) and out.get("action") == "continue":
         state["nudges"] = nudges + 1
         _save(host, session, state)
@@ -870,7 +885,7 @@ PERSON_SUBCOMMANDS = {
     "status": "[path]  this repository's verdict (CLEAN, BLOCKED, INCOMPLETE, NEEDS YOUR OK)",
     "allow": "[id]  list findings the agent marked, or allow one of them (you only)",
     "review": "[pr|branch] [--fresh]  a fresh session that did not write the code reviews the change (advisory)",
-    "reviewer": "[model] [effort]  who reviews: show it, set it, or `default`",
+    "reviewer": "[model] [effort]  who reviews: show it, set it, or `default`; `every-turn on|off` for when",
     "help": "this help",
 }
 REVIEW_SUBCOMMANDS = ("review", "reviewer")  # listed and answered only where the harness has a reviewer

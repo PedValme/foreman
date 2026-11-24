@@ -119,6 +119,8 @@ if (scenario === "gate") {
 	await prompt("go");
 	out.first = await settle();
 	out.second = await settle();
+	out.third = await settle();
+	out.fourth = await settle();
 	await prompt("next");
 	out.next_run = await settle();
 } else if (scenario === "timeout") {

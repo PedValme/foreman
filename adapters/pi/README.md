@@ -79,7 +79,13 @@ Each of these was seen in a real session on pi 1.5.0 (macOS, the default model, 
   terminal UI: Escape in the selector posted nothing; the second time the comment was posted and the pull request
   closed. With `-p`, nothing is posted.
 
-What it does not do yet: the review on every turn (it runs when you ask, and before a merge).
+- **The review at the end of every turn**, only if you turn it on: `/foreman reviewer every-turn on` (`off` to
+  stop; off by default). When the agent is about to settle after a run that changed code and the gate finds
+  nothing, Foreman starts the reviewer on the change itself, and a verified BLOCKING or HIGH finding sends the
+  agent back with it: never twice for the same diff, at most three times in one run. It costs one more pi session
+  on each such run, on your account, and the run waits for it. Seen on pi 1.5.0 with `-p`: asked to loosen
+  `assert total() == 2` to `assert total()`, the agent did; the review sent the change back (`/foreman pipeline`:
+  "Review sent it back (1 blocking), bounce 1/3"), and the agent put the exact value back before it finished.
 
 ## Limits to know
 
@@ -129,7 +135,8 @@ What it does not do yet: the review on every turn (it runs when you ask, and bef
   answers, you are asked the new question. The selector shows the review's notes and "could not run"; its verdict
   line and who reviewed come with the reply, after the merge (`/foreman review <pr>` shows them before).
 - pi gives no id for one run of the agent, so Foreman starts a run at `before_agent_start` (once per prompt; a
-  continuation does not fire it) and sends the agent back at most once until the next prompt.
+  continuation does not fire it) and sends the agent back at most once until the next prompt for what the gate
+  finds, and at most three times in all where the review at the end of every turn is on.
 - pi runs each `bash` call in the session's directory: a `cd` does not carry to the next call, and Foreman inspects
   the session's directory.
 - Not seen: Windows (`powershell`, `python3` may be missing there: set `FOREMAN_PYTHON`), a pi package

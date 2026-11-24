@@ -13,8 +13,9 @@ Request (a JSON object; ``event`` decides which other keys are read)::
     {"event": "write",      "path": "...", ...}                                   a change the extension cannot read
     {"event": "patch",      "patch": "*** Begin Patch ...", ...}
     {"event": "turn_start", "cwd": "...", "session": "...", "turn": "..."}
-    {"event": "turn_end",   "cwd": "...", "session": "...", "turn": "..."}
-    {"event": "command",    "args": "allow 3f2a", "cwd": "...", "session": "...", "attended": true,
+    {"event": "turn_end",   "cwd": "...", "session": "...", "turn": "...",
+                            "model": "...", "effort": "..."}       the session's own, when the harness knows them
+    {"event": "command",   "args": "allow 3f2a", "cwd": "...", "session": "...", "attended": true,
                             "model": "...", "effort": "...",       the session's own, when the harness knows them
                             "answer": {"id": "...", "value": "..."}}   only when answering a question (below)
 
@@ -23,7 +24,7 @@ Answer (always one JSON object)::
     {}                                            go on
     {"action": "block", "message": "..."}         refuse the call; the model must read the message
     {"action": "ask", "message": "..."}           a person must decide; with nobody to ask, refuse with the message
-    {"action": "continue", "message": "..."}      (turn_end) send the agent back with the message, once
+    {"action": "continue", "message": "..."}      (turn_end) send the agent back with the message
     {"reply": "..."}                              (command) show it to the person
     {"question": {"id": "...", "question": "...", "options": [{"value": "...", "label": "..."}]}}
                                                   (command) the person picks one option; then the command again
@@ -37,6 +38,12 @@ What every extension must get right, so the harnesses behave alike:
 - **``session`` is required for the end-of-turn nudge**: it identifies the conversation, and without it
   ``turn_start`` and ``turn_end`` do nothing. ``turn`` identifies one run of the agent inside it; send ``""`` when
   the harness has no such id.
+- **The end of a turn can take minutes, and can send the agent back more than once.** This program counts: once
+  for what the gate finds, and, where the person turned on the review at the end of every turn (``reviewer
+  every-turn on``), once more for each review that sends the change back, three in all at most. That review starts
+  a session of the harness and waits for it, so a ``turn_end`` gets a command's time, not thirty seconds, and
+  carries the session's ``model`` and ``effort`` like a command. The extension keeps its own bound too: it sends
+  one run back at most three times, whatever this program answers.
 - **``command`` only from the person.** It is sent from the harness's own "the person typed /foreman" handler and
   from nowhere else: never from a tool the model can call, never from a command the harness implements as a prompt
   the model then runs. A harness with no handler that runs without the model does not send ``command`` at all

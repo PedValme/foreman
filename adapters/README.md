@@ -88,14 +88,26 @@ it, asked in pi's selector with the commit and the command it would run, and mer
 
 Outside Hermes the review is a fresh session of the harness itself, started by Foreman and never by the agent that
 wrote the code (`foreman_hosts/reviewer.py`): no tools, the diff in, one answer out, every finding checked against
-the diff. It runs when you ask for it; it is advice and unblocks nothing. Each was seen in a real session: an
-assertion loosened from an exact value to "is true", which the gate cannot see, came back BLOCKED with the line
-quoted, and the same review asked again returned the stored result with no model call.
+the diff. It runs when you ask for it (and, on pi, before a merge); it is advice and unblocks nothing. Each was seen
+in a real session: an assertion loosened from an exact value to "is true", which the gate cannot see, came back
+BLOCKED with the line quoted, and the same review asked again returned the stored result with no model call.
+
+**At the end of every turn, only if you turn it on** (`reviewer every-turn on`; off by default, per harness; in
+Codex it is set in Foreman's `config.json`, like the reviewer itself). Then, when the agent is about to finish a
+turn that changed code and the gate finds nothing, Foreman itself starts the reviewer on the change, and a
+verified BLOCKING or HIGH finding sends the agent back with it: never twice for the same diff, at most three times
+in one turn and three times for one change (the core's own loop and limits, `plugin/foreman/finish.py`); after
+that the turn ends and `pipeline` shows that the change waits for you. A review that could not run does not hold
+the turn. It costs one more session of the harness on each such turn, on your account, and the turn waits for it
+(minutes, with nothing shown). The agent cannot switch it through a nested harness. Seen on pi 1.5.0: the agent
+loosened an assertion, the review sent it back once and the agent put the exact value back. In Claude Code and
+Codex it was run in the tests and not seen in a session; OpenCode's plugin does not wait long enough for it yet.
 
 | | Claude Code | Codex | pi | OpenCode |
 |---|---|---|---|---|
 | You ask with | `/foreman:review` | `foreman review` | `/foreman review` | `/foreman review` |
 | You choose who reviews with | `/foreman:reviewer` | a file (not from a prompt) | `/foreman reviewer` | `/foreman reviewer` |
+| At the end of every turn | `/foreman:reviewer every-turn on` (tested, not seen) | the same file (tested, not seen) | `/foreman reviewer every-turn on` (seen) | not yet |
 | With nothing chosen | the default model, one effort level up once the session's effort is known | the session's model | the session's model, one thinking level up | the session's model |
 | Does the harness say which model wrote the code | no | yes | yes | yes |
 | The answer's form is held by | the harness (a schema) | the harness (a schema) | a seal made for that request | a seal made for that request |
@@ -143,8 +155,10 @@ What it does there, each seen in a real session on Claude Code 2.1.331:
   stop events and never its model; before the first of them (and always with `-p`) the effort is not raised, and the
   review says so. It takes as long as that model takes: up to a few minutes with nothing shown meanwhile.
 
-What it does not do yet: the review when someone asks to merge and on every turn (it runs when you ask), the board,
-merge and reject with reasons (Foreman on Hermes Agent has them).
+- **The review at the end of every turn**, `/foreman:reviewer every-turn on` (off by default): see "The review in
+  the four". The `Stop` hook waits up to ten minutes for it. Run in the tests, not seen in a session.
+
+What it does not do: the board, merge and reject with reasons (Foreman on Hermes Agent and on pi have them).
 
 Limits to know:
 
