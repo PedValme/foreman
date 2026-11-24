@@ -13,9 +13,10 @@
 - Tried: `/foreman` as a bare command does not work in Claude Code's interactive prompt (it rejects an unknown
   command before any hook), so the person's commands are the plugin's own (`/foreman:status`), which the
   `UserPromptSubmit` hook answers before the model sees them.
-- Reviewed by an agent that did not write it (2026-11-24): nothing blocking; its findings were fixed in #61 (a turn
-  that only talked is never sent back, a prompt costs no git call, the guards no longer catch a grep or a commit
-  message, a damaged installation fails open instead of denying every call) and the real sessions repeated.
+- Reviewed twice by agents that did not write it (2026-11-24): nothing blocking either time; the findings were
+  fixed in #61 (a turn that only talked is never sent back, a prompt costs no git call, the guards read the program
+  that runs, `npx` and the like included, and no longer catch a grep or a commit message, a damaged installation
+  fails open instead of denying every call) and the real sessions repeated after the first round.
 - Next action: merge #61 by squash when CI is green (it now also runs Python 3.9 on macOS and Windows). Then T2 to
   T4 (Codex, pi and OpenCode with the gate; independent, one agent each), T5 (the reviewer as a fresh session) and
   T6 (`/foreman` complete on pi and OpenCode). Each harness is published only after its own real-session test.
@@ -62,8 +63,11 @@
   adapter blocks what names them plainly, not a disguised attempt (a path built at run time, a script the agent
   writes). The required check in CI stays the independent control.
 - Unresolved (Claude Code adapter): without `python3` on the PATH its hooks fail and Claude Code goes on without the
-  gate, showing the error; not tried on Windows in a real session; its answers to the person's commands carry
-  Claude Code's own frame ("UserPromptSubmit operation blocked by hook").
+  gate, showing the error; not tried on Windows in a real session (nor whether its hook shell understands `||`);
+  its answers to the person's commands carry Claude Code's own frame ("UserPromptSubmit operation blocked by hook").
+- Unresolved (adapters): at the end of a turn in which the agent changed anything in a repository, even an
+  unrelated new file, the nudge lists every blocker in that working tree, the person's own uncommitted ones
+  included, as the Hermes gate does; the message tells the agent to say so instead of undoing it.
 - Unresolved: the Desktop pane can disappear from the app's layout and not return until the app is reloaded and the
   Desktop switch is toggled; cause not proven (#22).
 - Unresolved: with a running gateway, a slash command typed first in a CLI session cannot tell the repository and

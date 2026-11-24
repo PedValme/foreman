@@ -162,22 +162,54 @@ def programs(command: str, _depth: int = 0) -> list:
     out = []
     for words in gate.segments(command or ""):
         words = list(words)
-        for _ in range(4):
-            if len(words) > 1 and gate._prog(words[0]) in gate._WRAPPERS:
+        for _ in range(8):  # `FOO=1 sudo -u me env BAR=2 claude …`: assignments and wrappers in any order
+            if words and gate._ASSIGNMENT.match(words[0]):
+                words = words[1:]
+            elif len(words) > 1 and gate._prog(words[0]) in gate._WRAPPERS:
                 words = gate._skip_wrapper(words)
             else:
                 break
-        while words and gate._ASSIGNMENT.match(words[0]):
-            words = words[1:]
         if not words:
             continue
         prog = gate._prog(words[0])
         out.append((prog, words))
+        packaged = _packaged(prog, words)
+        if packaged:
+            out.append(packaged)
         if _depth < 3 and prog in (gate._SHELLS | gate._POWERSHELLS | gate._RUNNERS):
             for word in words[1:]:
                 if re.search(r"\s", word):
                     out += programs(word, _depth + 1)
+            rest = [w for w in words[1:]]
+            while rest and rest[0].startswith("-"):  # `pwsh -Command claude -p …`: the script given unquoted
+                rest = rest[1:]
+            if len(rest) > 1:
+                out += programs(" ".join(gate._requote(w) for w in rest), _depth + 1)
     return out
+
+
+_PACKAGE_RUNNERS = {"npx", "bunx", "pnpx"}
+_PACKAGE_MANAGERS = {"npm": {"exec", "x"}, "pnpm": {"dlx", "exec"}, "yarn": {"dlx", "exec"}, "bun": {"x"}}
+
+
+def _packaged(prog: str, words: list) -> Optional[tuple]:
+    """`npx @anthropic-ai/claude-code -p …`, `pnpm dlx …`, `npm exec -- claude …`: the program is the package the
+    launcher runs, named without its scope and version (`claude-code`)."""
+    rest = words[1:]
+    if prog in _PACKAGE_MANAGERS:
+        while rest and rest[0].startswith("-"):
+            rest = rest[1:]
+        if not rest or rest[0].lower() not in _PACKAGE_MANAGERS[prog]:
+            return None
+        rest = rest[1:]
+    elif prog not in _PACKAGE_RUNNERS:
+        return None
+    while rest and rest[0].startswith("-"):
+        rest = rest[1:]
+    if not rest:
+        return None
+    name = rest[0].replace("\\", "/").rsplit("/", 1)[-1].lower().split("@", 1)[0]
+    return (name, rest) if name else None
 
 
 def only_reads(prog: str, words: list) -> bool:
@@ -190,18 +222,25 @@ def only_reads(prog: str, words: list) -> bool:
 
 
 def _person_only(host: Host, command: str) -> bool:
-    """The agent starting its own harness to type the person's command (`claude -p "/foreman:allow 3f2a"`). The
-    harness must be the program that runs: a commit message or a grep that only mentions the words is not one."""
-    return any(prog in host.cli and _ALLOW_WORDS.search(" ".join(words)) for prog, words in programs(command))
+    """The agent starting its own harness to type the person's command (`claude -p "/foreman:allow 3f2a"`, or the
+    words piped into it). The harness must be a program that runs in the line: a commit message or a grep that only
+    mentions the words is not one."""
+    if not host.cli or not _ALLOW_WORDS.search(command or ""):
+        return False
+    return any(prog in host.cli for prog, _words in programs(command))
+
+
+_PYTHON = re.compile(r"^(?:python[\d.]*|pypy[\d.]*|py|hook\.py)$")
 
 
 def _runs_entry(command: str) -> bool:
     """The adapters' entry point run by hand, wherever it is named from (`cd <plugin> && python3 adapters/hook.py
-    claude-code`): the way to hand Foreman a made-up "the person typed this"."""
-    for _prog, words in programs(command):
+    claude-code`): the way to hand Foreman a made-up "the person typed this". Naming the file (`git add
+    adapters/hook.py`) is not running it."""
+    for prog, words in programs(command):
         text = " ".join(words)
-        if re.search(r"\bhook\.py\b", text) and any(re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(h), text)
-                                                     for h in HOSTS):
+        if _PYTHON.match(prog) and re.search(r"\bhook\.py\b", text) and any(
+                re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(h), text) for h in HOSTS):
             return True
     return False
 
@@ -452,9 +491,17 @@ def _note_shell(host: Host, cwd: str, session: str, turn: str) -> None:
             return
         deadline = time.monotonic() + TURN_BUDGET_SECONDS
         root = (detector.find_repo(cwd, deadline=deadline) if os.path.isdir(cwd) else None) or ""
+        signed = _signature(root, deadline) if root and root not in roots else None
+        latest = _load(host, session)  # another call of this turn may have written meanwhile: keep what it noted
+        if latest.get("turn") == state["turn"]:
+            for key, mine in (("cwds", cwds), ("roots", roots)):
+                theirs = latest.get(key) if isinstance(latest.get(key), dict) else {}
+                for k, v in theirs.items():
+                    mine.setdefault(k, v)
+            state["nudges"] = latest.get("nudges", state.get("nudges", 0))
         cwds[cwd] = root
         if root and root not in roots:
-            roots[root] = _signature(root, deadline)
+            roots[root] = signed
         state["cwds"], state["roots"] = cwds, roots
         _save(host, session, state)
     except Exception:  # bookkeeping for the end-of-turn nudge: never in the way of the gate itself

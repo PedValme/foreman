@@ -22,6 +22,7 @@ from typing import Optional
 from . import core
 
 NAME = "claude-code"
+CLI = ("claude", "claude-code")  # the command, and its npm package as `npx @anthropic-ai/claude-code` runs it
 SHELL_TOOLS = {"Bash", "PowerShell"}
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # the installed plugin
 
@@ -40,9 +41,9 @@ def _switches_off(command: str) -> bool:
     one."""
     for prog, words in core.programs(command):
         text = " ".join(words)
-        if prog == "claude" and _PLUGIN_OFF.search(text) and _FOREMAN.search(text):
+        if prog in CLI and _PLUGIN_OFF.search(text) and _FOREMAN.search(text):
             return True
-        if core.only_reads(prog, words):
+        if prog == "git" or core.only_reads(prog, words):  # git records a path or a message: it edits no settings
             continue
         if _SETTINGS.search(text) and (_HOOKS_WORD.search(text) or _FOREMAN.search(text)):
             return True
@@ -56,8 +57,8 @@ def _is_config(path: str) -> bool:
 
 
 def _config_off(before: str, after: str) -> bool:
-    """A settings file that, once written, disables every hook or this plugin, and did not before."""
-    return any(rule.search(after or "") and not rule.search(before or "") for rule in (_HOOKS_OFF, _PLUGIN_FALSE))
+    """A settings file that, once written, disables every hook or this plugin in one more place than before."""
+    return any(len(rule.findall(after or "")) > len(rule.findall(before or "")) for rule in (_HOOKS_OFF, _PLUGIN_FALSE))
 
 
 def _program_dirs(roots) -> tuple:
@@ -76,7 +77,7 @@ def host(env=None) -> core.Host:
     roots = dict.fromkeys(r for r in (ROOT, env.get("CLAUDE_PLUGIN_ROOT")) if r)
     return core.Host(
         name=NAME, label="Claude Code", person=lambda sub: "/foreman:" + sub, program_dirs=_program_dirs(roots),
-        cli=("claude",), switches_off=_switches_off, is_config=_is_config, config_off=_config_off,
+        cli=CLI, switches_off=_switches_off, is_config=_is_config, config_off=_config_off,
         # Claude Code sets it for its hooks: "1" in an interactive session, "0" with -p or the SDK.
         attended=lambda: env.get("CLAUDE_CODE_SESSION_ATTENDED") == "1",
     )

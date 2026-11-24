@@ -92,14 +92,22 @@ class PreToolUse(ClaudeCase):
                         "sed -i '' 's/\"foreman@foreman\": true/\"foreman@foreman\": false/' .claude/settings.local.json"):
             self.assertEqual(self.decision(self.tool("Bash", command=command))[0], "deny", command)
         for command in ("rm -rf ~/.claude/plugins/cache/foreman",
-                        "cd ~/.claude/plugins/cache/foreman/foreman/0.1.0 && ls"):
+                        "cd ~/.claude/plugins/cache/foreman/foreman/0.1.0 && ls",
+                        "npx @anthropic-ai/claude-code plugin disable foreman", "bunx claude plugin disable foreman",
+                        "npm exec -- claude plugins uninstall foreman"):
             self.assertEqual(self.decision(self.tool("Bash", command=command))[0], "deny", command)
 
     def test_reading_claude_codes_settings_is_ordinary_work(self):
         for command in ("claude plugin list", "cat ~/.claude/settings.json", "grep foreman ~/.claude/settings.json",
                         "jq .enabledPlugins ~/.claude/settings.json 2>/dev/null", "ls ~/.claude/plugins/cache/foreman",
-                        "git commit --allow-empty -m 'claude plugin disable foreman is blocked'"):
+                        "git commit --allow-empty -m 'claude plugin disable foreman is blocked'",
+                        "git commit --allow-empty -m 'chore: track foreman in .claude/settings.json'"):
             self.assertIsNone(self.tool("Bash", command=command), command)
+
+    def test_one_more_place_switched_off_counts_even_when_another_already_was(self):
+        before = '{"foreman-notes@x": false, "foreman@m": true}'
+        self.assertTrue(claude_code._config_off(before, before.replace('"foreman@m": true', '"foreman@m": false')))
+        self.assertFalse(claude_code._config_off(before, before.replace("}", ', "model": "a"}')))
 
     def test_a_settings_write_that_turns_foreman_off_is_denied(self):
         settings = os.path.join(self.root, ".claude", "settings.json")

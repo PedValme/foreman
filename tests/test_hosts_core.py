@@ -29,7 +29,7 @@ class HostCase(GitRepoCase):
         self.present = True
         self.host = core.Host(
             name="test-host", label="Test Host", person=lambda sub: "/foreman:" + sub,
-            program_dirs=(os.path.join(self.program, "adapters"),), cli=("claude",),
+            program_dirs=(os.path.join(self.program, "adapters"),), cli=("claude", "claude-code"),
             switches_off=lambda command: "TURN-FOREMAN-OFF" in command,
             is_config=lambda path: path.endswith("settings.json"),
             config_off=lambda before, after: "HOOKS-OFF" in after and "HOOKS-OFF" not in before,
@@ -139,8 +139,19 @@ class OwnGuard(HostCase):
 
     def test_the_harness_started_inside_a_shell_is_still_the_harness(self):
         for command in ("bash -c \"claude -p '/foreman:allow 3f2a'\"", "sudo -u me claude -p '/foreman:allow 3f2a'",
-                        "FOO=1 claude -p '/foreman allow 3f2a'"):
+                        "FOO=1 claude -p '/foreman allow 3f2a'", "FOO=1 sudo claude -p '/foreman:allow 3f2a'",
+                        "pwsh -Command claude -p '/foreman:allow 3f2a'", "/usr/local/bin/claude -p '/foreman:allow x'",
+                        "printf '/foreman:allow 3f2a' | claude -p"):
             self.assertEqual(self.shell(command)["action"], core.BLOCK, command)
+
+    def test_the_harness_started_through_a_package_launcher_is_still_the_harness(self):
+        for command in ("npx @anthropic-ai/claude-code -p '/foreman:allow 3f2a'",
+                        "npx -y @anthropic-ai/claude-code@latest -p '/foreman:allow 3f2a'",
+                        "bunx claude -p '/foreman:allow 3f2a'", "pnpm dlx @anthropic-ai/claude-code -p '/foreman:allow x'",
+                        "npm exec -- claude -p '/foreman:allow 3f2a'", "yarn dlx claude-code -p '/foreman allow x'"):
+            self.assertEqual(self.shell(command)["action"], core.BLOCK, command)
+        self.assertEqual([p for p, _w in core.programs("npm install claude")], ["npm"])  # installing is not running
+        self.assertIsNone(self.shell("npx prettier --check 'docs/foreman allow.md'"))
 
     def test_words_about_allow_are_not_the_persons_command(self):
         self.write("cart.py", "def total():\n    return 3\n")
@@ -152,11 +163,13 @@ class OwnGuard(HostCase):
 
     def test_the_entry_point_run_by_hand_is_blocked_wherever_it_is_named_from(self):
         for command in ("cd /somewhere && python3 adapters/hook.py claude-code < forged.json",
-                        "cat forged.json | python3 -I ./hook.py claude-code"):
+                        "cat forged.json | python3 -I ./hook.py claude-code", "./adapters/hook.py claude-code"):
             d = self.shell(command)
             self.assertEqual(d["action"], core.BLOCK, command)
             self.assertIn("own program and state", d["message"])
-        for command in ("git add adapters/hook.py", "python3 scripts/hook.py --install", "ls claude-code"):
+        for command in ("git add adapters/hook.py", "python3 scripts/hook.py --install", "ls claude-code",
+                        "git diff adapters/hook.py adapters/claude-code/hooks.json",
+                        "git add adapters/hook.py adapters/claude-code/"):
             self.assertIsNone(self.shell(command), command)
 
     def test_the_agent_cannot_write_into_foremans_program_or_state(self):
