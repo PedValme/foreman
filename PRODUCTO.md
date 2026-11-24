@@ -67,7 +67,9 @@ to 25; ESTADO.md says which ones exist today). Rules 1 to 21 are written for Her
     green and reach Hermes users together, in one substantial update tried first in the `foremandev` profile.
 24. **What a person decides stays out of the agent's reach, in every harness.** `allow` and `merge` exist only where
     the model cannot type them (a command the person types; never a tool, never the agent's shell), an agent that
-    runs them is blocked, and with nobody attending they do nothing.
+    runs them is blocked, and with nobody attending they do nothing. A harness that gives no sound sign that a
+    person typed the command does not offer `allow` at all (Codex today): the finding is fixed, or the person
+    commits it themselves.
 25. **Outside Hermes the reviewer is a fresh session that did not write the code.** Foreman launches it (never the
     writing agent), without tools, with the diff, and verifies its answer as rule 8's review does. The user picks
     its model and effort; with nothing picked, the same model one effort level up, and the verdict says so. It

@@ -9,9 +9,13 @@ understands. It adds no rule and loosens none (PRODUCTO.md, rules 22 to 26).
 | `hook.py` | The one entry point: `python3 -I adapters/hook.py <host>`, the harness's JSON on standard input |
 | `foreman_hosts/core.py` | The host-neutral half: shell command, write, turn start, end of turn, the person's command |
 | `foreman_hosts/hosts.py` | The harnesses there is an adapter for, and the module of each |
-| `foreman_hosts/claude_code.py` | Claude Code's dialect |
+| `foreman_hosts/claude_code.py`, `codex.py` | The dialects of the harnesses that run a command hook with JSON |
 | `foreman_hosts/neutral.py` | The request and answer for a harness whose extension is code (pi, OpenCode) |
+| `foreman_hosts/pi.py`, `opencode.py` | The dialects of those two: their guards and their words |
 | `claude-code/` | Claude Code's hooks and commands, named by `.claude-plugin/plugin.json` at the repository root |
+| `codex/` | Codex's `hooks.json` and its [README](codex/README.md) |
+| `pi/` | pi's extension (`foreman.ts`) and its [README](pi/README.md) |
+| `opencode/` | OpenCode's plugin (`foreman.ts`) and its [README](opencode/README.md) |
 
 A new harness is one dialect module (its `core.Host` and a `main`), its own folder here with what the harness loads,
 and its tests. A harness that runs a command hook with JSON reads `claude_code.py` as its model; one whose extension
@@ -19,6 +23,27 @@ is code sends `neutral.py`'s requests from the thinnest extension the harness al
 
 Needs Python 3.9 or newer as `python3`, and git. No other dependency. Outside Hermes, Foreman keeps its state
 (what you allowed, each session's turn) in `~/.foreman`.
+
+## The four harnesses side by side
+
+None is published yet. Each was seen in real sessions on macOS (Claude Code 2.1.331, Codex CLI 0.171.0, pi 1.5.0,
+OpenCode 2.3.2); each harness's own README says exactly what was seen, what was only read, and its limits.
+
+| | Claude Code | Codex | pi | OpenCode |
+|---|---|---|---|---|
+| A rigged commit, push or pull request; an agent-run merge | refused | refused | refused | refused |
+| A write that switches off a test | `Write`, `Edit` | `apply_patch` | `write`, `edit` | `write`, `edit`, `patch` |
+| A turn that left one behind is sent back once | `Stop` | `Stop` | `agent_before_settle` | `experimental.idle` |
+| Your commands, no model turn | `/foreman:status` | `foreman status` as a prompt | `/foreman status` | `/foreman status` (TUI, apps) |
+| Allowing a marked finding | typed in an interactive session | not available yet | at pi's interface | approved in OpenCode's permission prompt |
+| When Foreman must ask you | the permission prompt | refused with the reason | pi's dialog | the permission prompt |
+| With nobody attending | refused | refused | refused | refused |
+| To try it from a clone | `claude --plugin-dir` | `codex -c hooks.…` | `pi -e` | a link in `.opencode/plugins` |
+
+The same everywhere: the gate is the Hermes plugin's, on the agent's own machine, so the independent control stays
+the required check in CI (`examples/foreman-check.yml`); Foreman's hooks and state are files, guarded against the
+plain attempt and not a disguised one; the second-model review, the board and merge or reject with reasons are
+only in Foreman on Hermes Agent so far.
 
 ## Claude Code
 

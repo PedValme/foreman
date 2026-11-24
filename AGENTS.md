@@ -35,7 +35,9 @@ Read the index below, then ESTADO.md, its "Next session" first (where the last s
   command runs inside the gateway process, whose directory is the Hermes home, not the user's. Claude Code's
   interactive prompt rejects a `/foreman` that is not a real command before any hook sees it, so the person's
   commands are plugin commands (`/foreman:status`); outside Hermes Foreman's state is `~/.foreman`, on this machine
-  too: remove what a real-session test leaves there.
+  too: remove what a real-session test leaves there. Foreman's own check reads this repository's test files, so a
+  fixture builds a skip marker from parts (`"@pytest.mark." + "skip"`, `detector.MARKER`), never literally; CI runs
+  on Windows, so a test never compares a Unix-only path as a string (build paths from the test's temp directory).
 
 ## Where things are: one document per question
 | Question | Document | Who writes it |
@@ -54,17 +56,23 @@ Code and tests are what the system really does; when a document and the code dis
   in it reads outside `plugin/`. The root keeps the tests, examples and working documents. Requires Hermes
   >= 0.22.6. The user-facing README, messages and command output are in English.
 - The adapters for other harnesses are in `adapters/` (its README says what each file is): `foreman_hosts/core.py`
-  is the host-neutral half, one module per harness is its dialect, and `hook.py` is the entry point a harness's
-  hook runs (`python3 -I`, Python 3.9+). They import the gate from `plugin/foreman/`; `plugin/` never imports
-  them. The repository root is the package another harness installs (`.claude-plugin/` for Claude Code), so
+  is the host-neutral half, one module per harness is its dialect (Claude Code, Codex, pi, OpenCode), `neutral.py`
+  is the protocol a harness's own extension speaks when it is code (pi's and OpenCode's `foreman.ts`), and `hook.py`
+  is the entry point they all run (`python3 -I`, Python 3.9+). They import the gate from `plugin/foreman/`;
+  `plugin/` never imports them. The repository root is the package another harness installs (`.claude-plugin/` for Claude Code), so
   nothing binary, generated or private is committed anywhere in it.
 - Check, from the root: `python -m unittest discover -s tests -q` (`tests/tests_support.py` puts `plugin/` and
   `adapters/` on `sys.path`; import it before `foreman`) and `hermes plugins validate plugin --install-deps`. Both
   run before every commit; `claude plugin validate .` when the Claude Code plugin's files change. The detector, the
   adapters and their tests are the product's controls: a change to them is reviewed by an agent that did not write
   it.
-- Try the Claude Code adapter without installing it: `claude --plugin-dir <this clone>` in a throwaway repository
-  (`-p --setting-sources project,local` for a scripted session that leaves the owner's own hooks out).
+- Try an adapter without installing it, in a throwaway repository and from a clone other than the one being
+  edited (each harness's README under `adapters/` has the exact command): `claude --plugin-dir <clone>` (`-p
+  --setting-sources project,local` leaves the owner's own hooks out), `pi -ne -e <clone>/adapters/pi/foreman.ts`,
+  `codex -c hooks.…` with `--dangerously-bypass-hook-trust`, and for OpenCode a link in the throwaway repository's
+  `.opencode/plugins` with a project `opencode.json` that turns the other plugins off. Never write into the owner's
+  own harness configuration (`~/.claude`, `~/.codex`, `~/.pi`, `~/.config/opencode`) for a test; a real session
+  spends the owner's quota on that harness's provider and may be recorded by his own global hooks: few and short.
 - Try it without touching the owner's Hermes setup: `hermes plugins doctor plugin` (temporary HERMES_HOME), or a
   dedicated profile (`hermes -p foreman-dev …`). Never install it into the default profile.
 - Hermes's plugin documentation, read before using a surface: `website/docs/developer-guide/plugins/` and
