@@ -72,15 +72,78 @@ def _program_dirs(roots) -> tuple:
     return tuple(out)
 
 
-def host(env=None) -> core.Host:
+EFFORTS = ("low", "medium", "high", "xhigh", "max")  # `claude --effort`, lowest first
+
+
+def _effort(data: dict) -> str:
+    """The session's effort as this hook input states it (`effort.level`; not every event carries it)."""
+    effort = data.get("effort") if isinstance(data, dict) else None
+    level = effort.get("level") if isinstance(effort, dict) else None
+    return level if level in EFFORTS else ""
+
+
+def _short(text: str, limit: int = 300) -> str:
+    text = " ".join((text or "").split())
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def _fresh_session(env):
+    """Claude Code's own headless mode as the reviewer: one prompt, no tools, no session kept, the JSON the schema
+    asks for. It starts in an empty directory and reads only that directory's local settings, so neither the
+    project's instructions nor anyone's hooks or plugins are part of it; it uses the login Claude Code already has."""
+    def run(system: str, prompt: str, schema: dict, model: str, effort: str, seconds: float) -> core.Answer:
+        import tempfile
+        argv = [env.get("CLAUDE_CODE_EXECPATH") or "claude", "-p", "--output-format", "json",
+                "--json-schema", json.dumps(schema), "--tools", "", "--no-session-persistence",
+                "--setting-sources", "local", "--system-prompt", system]
+        if model:
+            argv += ["--model", model]
+        if effort:
+            argv += ["--effort", effort]
+        with tempfile.TemporaryDirectory(prefix="foreman-review-") as empty:
+            code, out, err = core.run_session(argv, prompt, seconds, env, cwd=empty)
+        try:
+            data = json.loads(out)
+        except ValueError:
+            data = None
+        if not isinstance(data, dict):
+            raise RuntimeError("Claude Code gave no result (exit code %d): %s" % (code, _short(err or out) or "nothing"))
+        if data.get("is_error") or data.get("subtype") != "success":
+            status = data.get("api_error_status")
+            raise RuntimeError("Claude Code could not answer%s: %s" % (
+                " (%s)" % status if status else "", _short(str(data.get("result") or data.get("subtype") or err))))
+        parsed = data.get("structured_output")
+        if not isinstance(parsed, dict):
+            try:
+                parsed = json.loads(data.get("result") or "")
+            except (ValueError, TypeError):
+                parsed = None
+        usage = data.get("modelUsage") if isinstance(data.get("modelUsage"), dict) else {}
+        ran = max(usage, key=lambda m: (usage[m] or {}).get("outputTokens", 0) if isinstance(usage[m], dict) else 0,
+                  default="")
+        return core.Answer(parsed=parsed if isinstance(parsed, dict) else None, text=str(data.get("result") or ""),
+                           model=str(ran))
+    return run
+
+
+def host(env=None, data=None) -> core.Host:
     env = os.environ if env is None else env
+    data = data if isinstance(data, dict) else {}
     roots = dict.fromkeys(r for r in (ROOT, env.get("CLAUDE_PLUGIN_ROOT")) if r)
-    return core.Host(
+
+    def session() -> core.Session:
+        # Claude Code states the effort on tool and stop events, not on the prompt the person's command arrives
+        # with: the last one it stated for this session stands in. It does not tell a hook the model.
+        return core.Session(effort=_effort(data) or core.noted(h, _text(data.get("session_id")), "effort"))
+
+    h = core.Host(
         name=NAME, label="Claude Code", person=lambda sub: "/foreman:" + sub, program_dirs=_program_dirs(roots),
         cli=CLI, switches_off=_switches_off, is_config=_is_config, config_off=_config_off,
         # Claude Code sets it for its hooks: "1" in an interactive session, "0" with -p or the SDK.
         attended=lambda: env.get("CLAUDE_CODE_SESSION_ATTENDED") == "1",
+        fresh_session=_fresh_session(env), efforts=EFFORTS, session=session,
     )
+    return h
 
 
 def _text(value) -> str:
@@ -125,9 +188,11 @@ def _pre_tool_answer(decision: Optional[dict]) -> Optional[dict]:
 
 def answer(data: dict, env=None) -> Optional[dict]:
     """What Claude Code should read back for this hook input, or None for nothing (the call goes on)."""
-    h = host(env)
+    h = host(env, data)
     event = data.get("hook_event_name")
     cwd, session, turn = _text(data.get("cwd")), _text(data.get("session_id")), _text(data.get("prompt_id"))
+    if _effort(data):
+        core.note(h, session, "effort", _effort(data))  # for the reviewer's default: one level above the session's
     if event == "PreToolUse":
         return _pre_tool_answer(_pre_tool(h, data))
     if event == "UserPromptSubmit":

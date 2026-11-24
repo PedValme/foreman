@@ -28,6 +28,10 @@ def main(argv=None) -> int:
         sys.stderr.write("Foreman needs Python %d.%d or newer; this is %s.\n"
                          % (MIN_PYTHON[0], MIN_PYTHON[1], sys.version.split()[0]))
         return 1
+    if os.environ.get("FOREMAN_REVIEWER") == "1":
+        # This is the session Foreman itself started to review a change (foreman_hosts/reviewer.py): it has no
+        # tools to gate, and it must not review its own review. Nothing to say: the harness goes on.
+        return 0
     from foreman_hosts import hosts
     host = argv[0] if argv else ""
     module = hosts.MODULES.get(host)

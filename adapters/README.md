@@ -11,6 +11,7 @@ understands. It adds no rule and loosens none (PRODUCTO.md, rules 22 to 26).
 | `foreman_hosts/hosts.py` | The harnesses there is an adapter for, and the module of each |
 | `foreman_hosts/claude_code.py`, `codex.py` | The dialects of the harnesses that run a command hook with JSON |
 | `foreman_hosts/neutral.py` | The request and answer for a harness whose extension is code (pi, OpenCode) |
+| `foreman_hosts/reviewer.py` | The review outside Hermes: a fresh session of the harness, and who it is |
 | `foreman_hosts/pi.py`, `opencode.py` | The dialects of those two: their guards and their words |
 | `claude-code/` | Claude Code's hooks and commands, named by `.claude-plugin/plugin.json` at the repository root |
 | `codex/` | Codex's `hooks.json` and its [README](codex/README.md) |
@@ -42,8 +43,13 @@ OpenCode 2.3.2); each harness's own README says exactly what was seen, what was 
 
 The same everywhere: the gate is the Hermes plugin's, on the agent's own machine, so the independent control stays
 the required check in CI (`examples/foreman-check.yml`); Foreman's hooks and state are files, guarded against the
-plain attempt and not a disguised one; the second-model review, the board and merge or reject with reasons are
-only in Foreman on Hermes Agent so far.
+plain attempt and not a disguised one; the board and merge or reject with reasons are only in Foreman on Hermes
+Agent so far. The review outside Hermes is a fresh session of the harness itself (`foreman_hosts/reviewer.py`), on
+the model and effort you choose; the row below says where it exists.
+
+| | Claude Code | Codex | pi | OpenCode |
+|---|---|---|---|---|
+| The review, when you ask for it | `/foreman:review` | not yet | not yet | not yet |
 
 ## Claude Code
 
@@ -70,9 +76,20 @@ What it does there, each seen in a real session on Claude Code 2.1.331:
   `cd` inside one command, and a change inside a folder git already listed as untracked.
 - **Your commands**, answered by the hook with no model turn: `/foreman:status [path]`, `/foreman:allow [id]`,
   `/foreman:help`. Allowing a finding needs you at an interactive session: with `-p` it does nothing.
+- **The review**, `/foreman:review [pull request|branch] [--fresh]`: Foreman starts a fresh Claude Code session that
+  did not write the code (`claude -p`, no tools, no project settings, your own login), gives it the diff and checks
+  that every finding it returns quotes a line of that diff. It is advisory: it grants, merges and unblocks nothing.
+  The same diff by the same reviewer is never sent twice (`--fresh` asks again). Seen: an assertion loosened from
+  an exact value to "is true", which the gate cannot see (CLEAN), came back BLOCKED with the line quoted.
+- **Who reviews is yours**, `/foreman:reviewer [model] [effort]` (`default` to go back): any model and effort
+  `claude` accepts. With nothing chosen it is Claude Code's default model one effort level above the session that
+  asked, and the review says in plain words what that is: the model that wrote the code unless you switched model in
+  the session, with more effort and a clean context. Claude Code tells a hook the session's effort only on tool and
+  stop events and never its model; before the first of them (and always with `-p`) the effort is not raised, and the
+  review says so. It takes as long as that model takes: up to a few minutes with nothing shown meanwhile.
 
-What it does not do yet: the second-model review, the board, merge and reject with reasons (Foreman on Hermes Agent
-has them).
+What it does not do yet: the review when someone asks to merge and on every turn (it runs when you ask), the board,
+merge and reject with reasons (Foreman on Hermes Agent has them).
 
 Limits to know:
 
