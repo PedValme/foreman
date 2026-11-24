@@ -258,7 +258,7 @@ class FreshSession(OpenCodeCase):
         self.assertEqual(config["permissions"], [{"action": "*", "resource": "*", "effect": "deny"}])
         self.assertEqual(config["plugins"], ["-*", "opencode.*"])
         self.assertEqual(self.read("claude"), "1")
-        self.assertEqual(self.read("env"), "1")                    # Foreman's own plugin stands down inside it
+        self.assertRegex(self.read("env"), r"^[0-9a-f]{32}$")      # this review's token: Foreman's hook stands down
         # an empty directory of its own, and OpenCode takes its directory from PWD: both point there
         cwd = os.path.realpath(self.read("cwd").strip())
         self.assertNotEqual(cwd, os.path.realpath(self.root))
@@ -467,18 +467,18 @@ class Plugin(OpenCodeCase):
         self.assertIn("same model", out["variantAgain"])
         self.assertEqual(out["modelOf"], ["a/b#max", "a/b", None, None, None])
 
-    def test_inside_the_reviewers_own_session_the_plugin_does_nothing(self):
+    def test_the_variable_alone_switches_nothing_off_in_the_plugin(self):
+        # Foreman stands down in hook.py, for the token of a review that is running; a project's configuration
+        # can set the variable for every session, so the plugin does not read it.
         home = os.path.join(self.tmp, "home")
         os.makedirs(home, exist_ok=True)
         env = dict(os.environ, HOME=home, USERPROFILE=home, FOREMAN_REVIEWER="1")
         r = subprocess.run(RUNTIME + [os.path.join(ROOT, "tests", "opencode_plugin.mjs"), self.root, "reviewer-env"],
                            capture_output=True, env=env, timeout=120)
         self.assertEqual(r.returncode, 0, r.stderr.decode())
-        self.assertEqual(json.loads(r.stdout.decode()), {"registered": [], "commands": [], "asked": 0})
-        env["FOREMAN_REVIEWER"] = "0"                    # anything but "1" is an ordinary session
-        r = subprocess.run(RUNTIME + [os.path.join(ROOT, "tests", "opencode_plugin.mjs"), self.root, "reviewer-env"],
-                           capture_output=True, env=env, timeout=120)
-        self.assertEqual(json.loads(r.stdout.decode())["commands"], ["foreman"])
+        out = json.loads(r.stdout.decode())
+        self.assertEqual(out["commands"], ["foreman"])
+        self.assertIn("tool.execute.before", out["registered"])
 
     def test_when_python_cannot_answer_the_agent_keeps_working_and_git_goes_to_the_person(self):
         out = self.drive("broken")

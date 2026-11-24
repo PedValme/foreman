@@ -18,7 +18,6 @@ export type Answer = { action?: string; message?: string; reply?: string }
 
 const TIMEOUT_MS = 30_000 // the protocol's limit; the gate's own budget is 18 s
 const COMMAND_MS = 600_000 // a `command` request: the review starts a session of OpenCode and waits for it
-const REVIEWER_ENV = "FOREMAN_REVIEWER" // "1" inside the reviewer's own session: Foreman does nothing there
 const PERMISSION = "foreman" // the action Foreman's questions carry in OpenCode's permission mechanism
 const PERSON_MS = 1_000 // a yes sooner than this after the question was not typed by a person
 const SHELL_TOOL = "shell"
@@ -171,9 +170,6 @@ export function needsPerson(args: string): boolean {
 export default {
   id: "foreman",
   setup: async (ctx: any) => {
-    // The reviewer's own session loads the user's plugins, this one among them: inside it Foreman registers
-    // nothing and does nothing at all.
-    if (process.env[REVIEWER_ENV] === "1") return
     const base: string = ctx.location?.directory ?? process.cwd()
     const turns = new Map<string, string>()   // session -> the id of the person's prompt that started its current run
     const failed = new Map<string, string>()  // session -> why Foreman could not run, not yet shown to the person

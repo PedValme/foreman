@@ -89,13 +89,14 @@ Who reviews is yours: `/foreman reviewer [model]` (`default` to go back), a mode
   private server (`--standalone`) so that the configuration below reaches it, and it is never started with `--auto`.
 - **It cannot change anything.** Foreman passes it, in `OPENCODE_CONFIG_CONTENT` (read after your configuration
   files), a rule denying every permission and no plugin but OpenCode's built-in ones, and
-  `OPENCODE_DISABLE_CLAUDE_CODE=1` so that your Claude Code instructions are not read; `FOREMAN_REVIEWER=1` makes
-  Foreman's own plugin do nothing inside it. Seen: told to create a file and run `ls`, the session answered that it
+  `OPENCODE_DISABLE_CLAUDE_CODE=1` so that your Claude Code instructions are not read; the token of this
+  review in `FOREMAN_REVIEWER` makes Foreman's own hook (`hook.py`) answer nothing inside that session, whatever
+  plugin is loaded. Seen: told to create a file and run `ls`, the session answered that it
   has no write or shell tool, and the file did not exist.
-- **Who reviews by default**: OpenCode's default model, with a clean context and nothing raised: OpenCode does not
-  tell a plugin an effort, so the review says it is the model that wrote the code unless this session uses another
-  one. Choose another model to get a second opinion. Each review says who it was, and the model of this session when
-  OpenCode's record of it says so.
+- **Who reviews by default**: the model this session runs on, when OpenCode's record of the session names it (the
+  plugin sends it), in a clean context and with nothing raised: OpenCode has no effort to raise. With no model in the
+  record it is OpenCode's default model. Either way it is the model that wrote the code: choose another to get a
+  second opinion. Each review says who it was.
 - **Seen** (OpenCode 2.3.2, macOS, an OpenCode Go model, a throwaway copy of `examples/cart`): an assertion loosened
   from an exact value to "is true", which the gate cannot see (CLEAN), came back BLOCKED with the line quoted. The same
   diff again was answered from the stored result without a call. The Python side was called as the plugin does
