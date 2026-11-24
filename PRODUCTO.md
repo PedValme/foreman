@@ -73,7 +73,11 @@ to 25; ESTADO.md says which ones exist today). Rules 1 to 21 are written for Her
 25. **Outside Hermes the reviewer is a fresh session that did not write the code.** Foreman launches it (never the
     writing agent), without tools, with the diff, and verifies its answer as rule 8's review does. The user picks
     its model and effort; with nothing picked, the same model one effort level up, and the verdict says so. It
-    reviews when someone asks to merge; on every turn only if the user turns it on.
+    reviews when someone asks to merge; on every turn only if the user turns it on. What the review says about its
+    own reviewer is part of the verdict's truth: it names the session's model only when the harness names it, never
+    claims another model, and states what its session could still see or do where the harness leaves no way to
+    close it. Nothing the author of the diff controls can become the answer (a schema the harness enforces, or a
+    seal made for that one request).
 26. **Full where the harness allows it.** pi and OpenCode (its v2 plugin API) get the gate, `/foreman` and the
     reviewer; Claude Code and Codex get the gate, the person's commands and the reviewer. Phone notifications and
     the Desktop panel are Hermes's.
