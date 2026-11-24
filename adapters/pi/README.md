@@ -42,10 +42,35 @@ Each of these was seen in a real session on pi 1.5.0 (macOS, the default model, 
 - **When Foreman needs you** (the gate could not inspect a commit, for example its directory is gone), pi asks you
   with its own dialog; with nobody there (`-p`), the call is refused with the reason.
 
-What it does not do yet: the second-model review, the board, merge and reject with reasons (Foreman on Hermes Agent
-has them).
+- **The review**, `/foreman review [pull request|branch] [--fresh]`: Foreman starts a fresh pi session that did not
+  write the code (`pi --mode json --no-tools --no-extensions --no-session`, started in an empty temporary folder so
+  it reads neither your repository nor its instructions, with your own pi login), gives it the diff and checks that
+  every finding it returns quotes a line of that diff. It is advisory: it grants, merges and unblocks nothing. The
+  same diff by the same reviewer is never sent twice (`--fresh` asks again). Seen on pi 1.5.0: an assertion loosened
+  from an exact value to "is true", which the gate cannot see (CLEAN), came back BLOCKED with the line quoted; the
+  same review again answered from the stored result without calling the model.
+- **Who reviews is yours**, `/foreman reviewer [model] [effort]` (`default` to go back): any model pi knows
+  (`pi --list-models`; `provider/id` when two providers offer it) and any of pi's thinking levels: off, minimal,
+  low, medium, high, xhigh, max. With nothing chosen it is pi's default model one thinking level above the
+  session's. pi tells Foreman both the session's model and its thinking level, so the review states exactly what
+  that is, for example "at effort high, one level above this session's medium", and says plainly that it is the
+  model that wrote the code, with more thinking and a clean context, unless you chose another. When you choose a
+  model, it says whether it is the same as the session's. It takes as long as that model takes: up to a few
+  minutes with nothing shown meanwhile.
+
+What it does not do yet: the review when someone asks to merge and on every turn (it runs when you ask), the board,
+merge and reject with reasons (Foreman on Hermes Agent has them).
 
 ## Limits to know
+
+- **The review's limits in pi.** pi has no switch that forces a JSON schema, so Foreman puts the schema in what it
+  sends and reads the object out of the final text (plain, in a fenced block or among prose); a model that answers
+  with no object leaves the review without a verdict, and Foreman says so. Any model pi offers can be chosen, and a
+  small one may miss a rigged line or quote one wrongly (the quote is checked against the diff, a miss is not).
+  A model that does not support the thinking level you chose gets the nearest one it does (pi clamps it). The
+  review needs `pi` on the PATH (`FOREMAN_PI` names another), it uses whatever login pi has for the model, and it
+  is skipped inside its own session: `FOREMAN_REVIEWER=1` makes the extension do nothing there, so the reviewer
+  cannot call Foreman.
 
 - The gate runs on the agent's own machine. The independent control is still the required check in CI
   (`examples/foreman-check.yml`).

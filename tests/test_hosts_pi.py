@@ -177,6 +177,161 @@ class EntryPoint(PiCase):
         self.assertIn("In pi:", json.loads(stdout.getvalue())["reply"])
 
 
+PASS = {"findings": [], "summary": "Nothing rigged.", "verdict": "PASS"}
+
+
+def _events(*texts, model="m-1", provider="p-1", stop="stop", error=""):
+    """What `pi --mode json` writes for one prompt answered with ``texts`` (the shape seen on pi 1.5.0)."""
+    reply = {"role": "assistant", "content": [{"type": "thinking", "thinking": "hmm"}] +
+             [{"type": "text", "text": t} for t in texts], "provider": provider, "model": model, "stopReason": stop}
+    if error:
+        reply["errorMessage"] = error
+    return "\n".join(json.dumps(e) for e in (
+        {"type": "session", "version": 3, "id": "x", "cwd": "/"},
+        {"type": "message_end", "message": {"role": "user", "content": [{"type": "text", "text": "q"}]}},
+        {"type": "message_end", "message": reply}, {"type": "agent_settled", "aborted": False}))
+
+
+class ReadingTheObject(unittest.TestCase):
+    def test_the_object_is_found_in_plain_text_a_fence_or_around_prose(self):
+        plain = json.dumps(PASS)
+        for text in (plain, "  " + plain + "\n", "Here is my review:\n```json\n" + plain + "\n```\nDone.",
+                     "```\n" + plain + "\n```", "I checked it.\n" + plain + "\nThat is all.",
+                     "```text\nnot json\n```\n" + plain):
+            self.assertEqual(pi.read_object(text), PASS, text)
+
+    def test_no_object_is_no_answer(self):
+        for text in ("", "I would rather not.", "[1, 2]", "42", "```json\n[]\n```", '{"broken": ', "{not json}"):
+            self.assertIsNone(pi.read_object(text), text)
+
+
+class TheReviewersHost(PiCase):
+    def test_pi_has_a_reviewer_its_thinking_levels_and_the_sessions_own_state(self):
+        h = pi.host({"model": "p/m", "effort": "high", "event": "command"})
+        self.assertIsNotNone(h.fresh_session)
+        self.assertEqual(h.efforts, ("off", "minimal", "low", "medium", "high", "xhigh", "max"))
+        self.assertEqual((h.session().model, h.session().effort), ("p/m", "high"))
+        self.assertEqual(pi.host({}).session(), core.Session())
+        self.assertEqual(pi.host({"model": 7, "effort": None}).session(), core.Session())
+
+    def test_the_help_lists_the_review_in_pis_words(self):
+        reply = self.ask("command", args="help")["reply"]
+        self.assertIn("/foreman review ", reply)
+        self.assertIn("/foreman reviewer", reply)
+        self.assertPiWords(reply)
+
+    def test_the_review_is_one_level_above_the_sessions_exact_thinking_level(self):
+        reply = self.ask("command", args="reviewer", model="p/m-1", effort="medium")["reply"]
+        self.assertIn("pi's default model at effort high, one level above this session's medium", reply)
+        self.assertIn("Effort levels: off, minimal, low, medium, high, xhigh, max", reply)
+        top = self.ask("command", args="reviewer", effort="max")["reply"]
+        self.assertIn("the highest there is and the same as this session's", top)
+        self.assertIn("does not tell Foreman this session's effort", self.ask("command", args="reviewer")["reply"])
+        self.assertPiWords(reply)
+
+    def test_choosing_a_reviewer_is_kept_and_checked_against_pis_levels(self):
+        self.assertIn("reviewer set", self.ask("command", args="reviewer some-model low")["reply"])
+        shown = self.ask("command", args="reviewer", model="other/model", effort="medium")["reply"]
+        self.assertIn("some-model at effort low", shown)
+        self.assertIn("is not an effort level of pi", self.ask("command", args="reviewer some-model fast")["reply"])
+        self.assertIn("back to the default", self.ask("command", args="reviewer default")["reply"])
+
+
+POSIX_ONLY = "the stand-in for pi is a POSIX shell script"
+
+
+class PisFreshSession(PiCase):
+    """``pi._fresh_session`` against a stand-in program: the flags it passes and how it reads what pi writes."""
+
+    def program(self, stdout, code=0, stderr=""):
+        path = os.path.join(self.tmp, "fake-pi")
+        out = os.path.join(self.tmp, "pi-output")
+        with open(out, "w", encoding="utf-8") as fh:
+            fh.write(stdout)
+        with open(path, "w") as fh:
+            fh.write("#!/bin/sh\nprintf '%%s\\n' \"$@\" > '%s/argv'\ncat > '%s/stdin'\npwd > '%s/cwd'\n"
+                     "printf '%%s' \"$FOREMAN_REVIEWER\" > '%s/env'\ncat '%s'\nprintf '%%s' '%s' >&2\nexit %d\n"
+                     % (self.tmp, self.tmp, self.tmp, self.tmp, out, stderr, code))
+        os.chmod(path, 0o755)
+        return {"FOREMAN_PI": path, "PATH": os.environ.get("PATH", "")}
+
+    def read(self, name):
+        with open(os.path.join(self.tmp, name), encoding="utf-8") as fh:
+            return fh.read()
+
+    def run_it(self, env, model="", effort="", system="SYSTEM", prompt="THE PROMPT", schema=None):
+        return pi._fresh_session(env)(system, prompt, {"type": "object"} if schema is None else schema, model, effort, 30)
+
+    @unittest.skipIf(os.name == "nt", POSIX_ONLY)
+    def test_it_asks_without_tools_extensions_or_a_kept_session_and_reads_the_object(self):
+        env = self.program(_events(json.dumps(PASS), model="big", provider="vendor"))
+        answer = self.run_it(env, "vendor/big", "high")
+        self.assertEqual((answer.parsed, answer.model, answer.provider), (PASS, "big", "vendor"))
+        argv = self.read("argv").split("\n")
+        for flag in ("--no-tools", "--no-extensions", "--no-session", "--no-context-files", "--no-skills"):
+            self.assertIn(flag, argv)
+        self.assertEqual(argv[argv.index("--mode") + 1], "json")
+        self.assertEqual(argv[argv.index("--model") + 1], "vendor/big")
+        self.assertEqual(argv[argv.index("--thinking") + 1], "high")
+        self.assertEqual(argv[argv.index("--system-prompt") + 1], "SYSTEM")
+        self.assertNotIn("-p", argv)
+        stdin = self.read("stdin")
+        self.assertTrue(stdin.startswith("THE PROMPT"))
+        self.assertIn("one JSON object", stdin)
+        self.assertIn('"type": "object"', stdin)  # pi has no schema flag: the schema rides in what is sent
+        self.assertFalse(any("THE PROMPT" in a for a in argv))  # the diff never rides on the command line
+        self.assertEqual(self.read("env"), "1")
+        self.assertNotEqual(os.path.realpath(self.read("cwd").strip()), os.path.realpath(self.root))
+
+    @unittest.skipIf(os.name == "nt", POSIX_ONLY)
+    def test_no_model_and_no_effort_means_no_such_flags(self):
+        answer = self.run_it(self.program(_events(json.dumps(PASS))))
+        self.assertEqual(answer.parsed, PASS)
+        argv = self.read("argv").split("\n")
+        for flag in ("--model", "--thinking"):
+            self.assertNotIn(flag, argv)
+
+    @unittest.skipIf(os.name == "nt", POSIX_ONLY)
+    def test_the_object_is_read_out_of_prose_or_a_fence_and_no_object_is_no_answer(self):
+        for text in ("My review:\n" + json.dumps(PASS) + "\nBye.", "```json\n" + json.dumps(PASS) + "\n```"):
+            self.assertEqual(self.run_it(self.program(_events(text))).parsed, PASS, text)
+        two_blocks = self.run_it(self.program(_events("{\"findings\": [], ", "\"verdict\": \"PASS\", \"summary\": \"s\"}")))
+        self.assertEqual(two_blocks.parsed["verdict"], "PASS")  # the text blocks are joined
+        silent = self.run_it(self.program(_events("I would rather not.")))
+        self.assertIsNone(silent.parsed)
+        self.assertEqual(silent.text, "I would rather not.")
+
+    @unittest.skipIf(os.name == "nt", POSIX_ONLY)
+    def test_an_error_names_its_reason(self):
+        failed = self.program(_events(stop="error", error="429 Too Many Requests: slow down"))
+        with self.assertRaises(RuntimeError) as caught:
+            self.run_it(failed)
+        self.assertIn("429", str(caught.exception))
+        self.assertIn("slow down", str(caught.exception))
+        for stdout, code, stderr in (("not json at all", 3, "boom"), ("[]", 0, ""), ("", 1, "Error: Model \"x\" not found")):
+            with self.assertRaises(RuntimeError) as caught:
+                self.run_it(self.program(stdout, code, stderr))
+            self.assertIn("pi gave no result (exit code %d)" % code, str(caught.exception))
+        self.assertIn("not found", str(caught.exception))
+        with self.assertRaises(RuntimeError):
+            self.run_it({"FOREMAN_PI": os.path.join(self.tmp, "missing"), "PATH": ""})
+
+    @unittest.skipIf(os.name == "nt", POSIX_ONLY)
+    def test_a_whole_review_through_the_stand_in(self):
+        self.write("cart.py", "def total():\n    return 3\n")
+        env = self.program(_events(json.dumps(PASS), model="big", provider="vendor"))
+        h = pi.host({"event": "command", "model": "vendor/other", "effort": "low"}, env)
+        from foreman_hosts import reviewer
+        out = reviewer.run(h, "", self.root)
+        self.assertIn("Foreman review: PASS", out)
+        self.assertIn("at effort medium, one level above this session's low", out)
+        self.assertIn("answered by big", out)
+        argv = self.read("argv").split("\n")
+        self.assertEqual(argv[argv.index("--thinking") + 1], "medium")
+        self.assertNotIn("--model", argv)
+        self.assertNotIn("Hermes", out)
+
+
 def _node_skip_reason() -> str:
     """Why the extension's tests cannot run here, or "" when they can."""
     node = shutil.which("node")
@@ -268,6 +423,29 @@ class TheExtension(PiCase):
         self.assertIn("Foreman: BLOCKED", out["status"]["printed"])
         self.assertEqual(out["help_json"]["printed"], "")  # never mixed into pi's JSON event stream
         self.assertIn("In pi:", out["help_json"]["stderr"])
+
+    @unittest.skipIf(os.name == "nt", "the stand-in interpreter is a POSIX shell script")
+    def test_the_review_command_sends_the_sessions_model_and_effort_and_waits_ten_minutes(self):
+        record = os.path.join(self.tmp, "requests")
+        recorder = os.path.join(self.tmp, "recorder")
+        with open(recorder, "w") as fh:  # keeps each request (fake_python throws its standard input away)
+            fh.write("#!/bin/sh\ncat >> '%s'\necho >> '%s'\necho '{\"reply\": \"ok\"}'\n" % (record, record))
+        os.chmod(recorder, 0o755)
+        out = self.drive("review", FAKE_PYTHON=recorder)
+        self.assertEqual(out["timeout_ms"], 600000)
+        self.assertEqual(out["session"], [{"model": "p1/m-1", "effort": "medium"}, {"model": "bare"}, {}, {}])
+        with open(record, encoding="utf-8") as fh:
+            requests = [json.loads(line) for line in fh.read().split("\n") if line.strip()]
+        self.assertEqual([r["args"] for r in requests], ["reviewer", "review"])
+        self.assertEqual((requests[0]["model"], requests[0]["effort"]), ("p1/m-1", "medium"))
+        for key in ("model", "effort"):
+            self.assertNotIn(key, requests[1])  # left out when pi does not state them
+        self.assertTrue(all(r["event"] == "command" for r in requests))
+
+    def test_inside_the_reviewers_own_session_the_extension_does_nothing(self):
+        out = self.drive("stood-down", FOREMAN_REVIEWER="1")
+        self.assertEqual(out["registered"], {"events": [], "commands": []})
+        self.assertEqual(self.drive("stood-down")["registered"]["commands"], ["foreman"])
 
     def test_a_turn_is_sent_back_once_and_a_turn_that_talked_is_not(self):
         out = self.drive("turn")

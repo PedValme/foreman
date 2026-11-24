@@ -11,9 +11,14 @@ answer says. This module adds what is pi's own (pi 1.5.0, its documentation and 
   whose ``extensions`` or ``packages`` stop listing it or exclude it (``-path``, ``!pattern``).
 - ``attended``: the request's own flag, which the extension takes from pi's ``ctx.hasUI`` (true in pi's terminal
   interface and its RPC mode, false with ``-p`` and ``--mode json``).
+- The reviewer (``fresh_session``): pi's own headless run. pi has no flag that enforces a JSON schema, so the schema
+  goes into what is sent and the object is read out of the final text. ``--mode json`` is used rather than ``-p``
+  because its events say which model answered and why a call failed (``stopReason`` ``error`` and ``errorMessage``);
+  standard input alone is the prompt (pi 1.5.0 reads it with no message on the command line).
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 from typing import Optional
@@ -100,6 +105,94 @@ def _program_dirs(roots) -> tuple:
     return tuple(out)
 
 
+# pi's thinking levels, lowest first (`pi --help`: --thinking; docs/cli.md); a model clamps one it does not support.
+EFFORTS = ("off", "minimal", "low", "medium", "high", "xhigh", "max")
+
+_FENCE = re.compile(r"```[A-Za-z0-9_-]*[ \t]*\n(.*?)```", re.S)
+
+
+def _short(text: str, limit: int = 300) -> str:
+    text = " ".join((text or "").split())
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def read_object(text: str) -> Optional[dict]:
+    """The one JSON object in a model's final text: the text itself, a fenced block, or the first object with text
+    around it. None when there is none (an array or a scalar is not one)."""
+    text = (text or "").strip()
+    fenced = [m.strip() for m in _FENCE.findall(text)]
+    for candidate in [text] + fenced:
+        try:
+            value = json.loads(candidate)
+        except ValueError:
+            continue
+        if isinstance(value, dict):
+            return value
+    decoder = json.JSONDecoder()
+    for source in fenced + [text]:
+        at = source.find("{")
+        while at != -1:
+            try:
+                value, _end = decoder.raw_decode(source, at)
+            except ValueError:
+                value = None
+            if isinstance(value, dict):
+                return value
+            at = source.find("{", at + 1)
+    return None
+
+
+def _events(out: str) -> list:
+    events = []
+    for line in out.split("\n"):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(event, dict):
+                events.append(event)
+    return events
+
+
+def _fresh_session(env):
+    """pi's own headless mode as the reviewer: one prompt on standard input, no tools, no extensions, no skills, no
+    context files, no session kept. It starts in an empty directory, so it reads neither the repository under review
+    nor its instructions; it uses the login pi already has."""
+    def run(system: str, prompt: str, schema: dict, model: str, effort: str, seconds: float) -> core.Answer:
+        import shutil
+        import tempfile
+        program = env.get("FOREMAN_PI") or "pi"
+        program = shutil.which(program, path=env.get("PATH")) or program  # Windows: `pi` is `pi.cmd`
+        argv = [program, "--mode", "json", "--no-tools", "--no-extensions", "--no-session",
+                "--no-context-files", "--no-skills", "--no-prompt-templates", "--no-themes",
+                "--system-prompt", system]
+        if model:
+            argv += ["--model", model]
+        if effort:
+            argv += ["--thinking", effort]
+        ask = ("%s\n\nAnswer with one JSON object that follows this JSON Schema, and nothing else: no text before "
+               "or after it.\n\nJSON Schema:\n%s\n" % (prompt, json.dumps(schema)))
+        with tempfile.TemporaryDirectory(prefix="foreman-review-") as empty:
+            code, out, err = core.run_session(argv, ask, seconds, env, cwd=empty)
+        replies = [e["message"] for e in _events(out)
+                   if e.get("type") == "message_end" and isinstance(e.get("message"), dict)
+                   and e["message"].get("role") == "assistant"]
+        if not replies:
+            raise RuntimeError("pi gave no result (exit code %d): %s" % (code, _short(err or out) or "nothing"))
+        last = replies[-1]
+        if last.get("stopReason") in ("error", "aborted"):
+            raise RuntimeError("pi could not answer: %s"
+                               % (_short(str(last.get("errorMessage") or err)) or str(last.get("stopReason"))))
+        blocks = last.get("content") if isinstance(last.get("content"), list) else []
+        final = "".join(b.get("text", "") for b in blocks
+                        if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str))
+        return core.Answer(parsed=read_object(final), text=final, model=str(last.get("model") or ""),
+                           provider=str(last.get("provider") or ""))
+    return run
+
+
 def host(request: Optional[dict] = None, env=None) -> core.Host:
     env = os.environ if env is None else env
     request = request if isinstance(request, dict) else {}
@@ -109,6 +202,7 @@ def host(request: Optional[dict] = None, env=None) -> core.Host:
         config_off=_config_off,
         # The extension sends pi's ctx.hasUI. Only a real true counts.
         attended=lambda: neutral.attended(request),
+        fresh_session=_fresh_session(env), efforts=EFFORTS, session=lambda: neutral.session(request),
     )
 
 
