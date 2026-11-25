@@ -21,8 +21,8 @@ pi install -l git:github.com/PedValme/foreman     # for one project (.pi/setting
 Seen on pi 1.5.0 with a temporary `PI_CODING_AGENT_DIR`, from a copy of this repository served as a git remote on
 the machine itself (`git:http://127.0.0.1:<port>/PedValme/foreman.git`): "Installed git:…", pi cloned it into
 `<pi's folder>/git/127.0.0.1/PedValme/foreman`, `pi list` showed it, and in a throwaway repository `pi -p "/foreman
-help"` and `pi -p "/foreman"` (the board) answered with no model turn. The github.com form is read in pi's
-documentation (`docs/packages.md`), not run. pi keeps a git package as a full clone, so the copy is Foreman's whole:
+help"` and `pi -p "/foreman"` (the board) answered with no model turn. The github.com form was run too: `pi install
+git:github.com/PedValme/foreman` installed it, `pi list` showed it and `pi -p "/foreman help"` answered. pi keeps a git package as a full clone, so the copy is Foreman's whole:
 the agent cannot edit it (its `package.json` included), wherever `PI_CODING_AGENT_DIR` puts it.
 
 ## Try it

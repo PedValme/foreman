@@ -23,8 +23,10 @@ the machine itself: "Added marketplace `foreman-gate`", "Added plugin `foreman` 
 copied to `plugins/cache/foreman-gate/foreman/0.1.0`, and `codex plugin list` showed it "installed, enabled". With
 the trust step skipped for that one run (`codex exec --dangerously-bypass-hook-trust`), the prompt `foreman help`
 was blocked before any model turn (no tokens used), so the plugin's `UserPromptSubmit` hook ran with Codex's
-dialect. The trust step with `/hooks`, the gate on a real tool call and the `owner/repo` form were not tried
-(`owner/repo` is read in Codex's documentation).
+dialect. The `owner/repo` form was run against GitHub too: `codex plugin marketplace add PedValme/foreman` added
+the marketplace `foreman-gate`, `codex plugin add foreman@foreman-gate` installed it with its own `.codex-plugin`
+manifest, and `codex plugin list` showed it "installed, enabled". The trust step with `/hooks` and the gate on a
+real tool call were not tried.
 
 Why `.codex-plugin/`: Codex 0.171.0 also reads Claude Code's `.claude-plugin/marketplace.json` and `plugin.json`
 (that is how the marketplace above is found). Without `.codex-plugin/plugin.json` it installed the plugin from

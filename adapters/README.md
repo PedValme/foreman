@@ -49,8 +49,12 @@ temporary configuration directory, from a copy of this repository served as a gi
 (the same commands with that URL in place of GitHub's; nothing was pushed): each harness cloned it, installed it
 and listed it; pi answered `/foreman help` and `/foreman` with no model turn; OpenCode's TUI showed both parts
 (`/foreman help` and the board in its dialog); Codex blocked the prompt `foreman help` before any model turn,
-with its own dialect. Claude Code was not started (a session needs a login). The GitHub forms themselves are read in
-each tool's help or documentation, not run. Each harness's README has the details.
+with its own dialect. Claude Code was not started (a session needs a login). Then, with these files on GitHub, the
+commands as written above were run against it, again into temporary configuration directories: pi installed and
+listed `git:github.com/PedValme/foreman` and answered `/foreman help`; Claude Code added the marketplace
+`foreman-gate` and installed `foreman@foreman-gate`; Codex added the marketplace and listed the plugin "installed,
+enabled"; OpenCode installed `git+https://github.com/PedValme/foreman.git` into its package cache as
+`foreman-gate`. Each harness's README has the details.
 
 | | Claude Code | Codex | pi | OpenCode |
 |---|---|---|---|---|
@@ -169,8 +173,9 @@ remote on the machine itself: "Successfully added marketplace: foreman-gate", "S
 foreman@foreman-gate (scope: user)", and `claude plugin list` showed it enabled at version 0.1.0, copied to
 `plugins/cache/foreman-gate/foreman/0.1.0`. The installed copy's hook answered `/foreman:help` when run by hand; a
 session was not started (it needs a login). `claude plugin marketplace remove foreman-gate` uninstalls the plugin
-with it, so Foreman refuses it to the agent. The `owner/repo` form is read in `claude plugin marketplace add
---help`, not run.
+with it, so Foreman refuses it to the agent. The `owner/repo` form was run against GitHub too: `claude plugin
+marketplace add PedValme/foreman` answered "Successfully added marketplace: foreman-gate", and `claude plugin
+install foreman@foreman-gate` installed version 0.1.0.
 
 To try it from a clone instead:
 

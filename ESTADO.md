@@ -26,11 +26,13 @@
   and was installing Claude Code's hooks). Each installation was seen from a local git server into a redirected
   configuration directory: pi (`pi install git:…`, the board with no model turn), OpenCode (`opencode plugin add
   git+https://…`, both parts and the TUI dialog), Claude Code (marketplace add, install, enabled; no session, it
-  needs a login) and Codex (installed, and `foreman help` answered by its dialect). Not run: the same commands
-  against GitHub's `owner/repo`. Each harness's README has the exact command and what was seen.
-- Next for publication, each with the owner's yes: `npm publish` (his npm account; the npm page would show the
-  root README, which is about the Hermes plugin), the pull request to OpenCode's ecosystem page, Anthropic's
-  directory (it wants an icon), and the root README's section about the adapters.
+  needs a login) and Codex (installed, and `foreman help` answered by its dialect). Then the same commands were
+  run against GitHub (#80 merged), each into a temporary configuration directory: the four installed it. The root
+  README announces the adapters since the owner's «ok al readme» (#81). Each harness's README has what was seen.
+- Next for publication, each with the owner's yes and none given yet: `npm publish` as `foreman-gate` (his npm
+  account), which lists it in pi's catalog; the pull request to OpenCode's ecosystem page; Anthropic's directory
+  for Claude Code (it wants an icon and has a review); the focused issue to Hermes for a public accessor of the
+  terminal's directory (text shown to him first).
 - With the owner, open (asked on 2026-11-24; he wanted both evaluated before deciding, and they were, read-only):
   - Where to publish. Read in each harness's documentation and help, not tried: pi installs from git with a root
     `package.json` (`pi install git:…`) and lists in its catalog any npm package with the keyword `pi-package`;
@@ -53,13 +55,15 @@
 
 ## Delivered
 - The Hermes plugin, version 0.1.0, in `plugin/`, listed in the Hermes catalog; CI on Linux, macOS and Windows.
-- In Claude Code, Codex, pi and OpenCode (`adapters/`, `.claude-plugin/`), not published and not in the root README
-  yet: the gate, the person's commands and the review on request; on pi and in OpenCode's TUI also the board, merge
-  and reject; in Claude Code, Codex and pi the review at the end of every turn when turned on.
+- In Claude Code, Codex, pi and OpenCode (`adapters/`, `package.json`, `.claude-plugin/`, `.codex-plugin/`),
+  installable from this repository as `foreman-gate` and announced in the root README; in no store yet: the gate,
+  the person's commands and the review on request; on pi and in OpenCode's TUI also the board, merge and reject;
+  in Claude Code, Codex and pi the review at the end of every turn when turned on.
 - `PedValme/foreman-demo` (public) as the demo repository; the README as one page with the real capture and the GIF.
 
 ## In progress
-- Foreman for any harness: only T7 (names, publication, the catalog update) is left, with the owner.
+- Foreman for any harness: of T7, the name, the packaging and the README are done; the stores (npm, OpenCode's
+  page, Anthropic's directory) and the one Hermes catalog update are left, each with the owner's yes.
 
 ## Next steps
 1. T7 and the one Hermes catalog update (`trabajo/agnostico.md`, "Next step"; `trabajo/model-picker.md`).
