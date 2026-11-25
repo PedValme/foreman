@@ -96,9 +96,12 @@ class TuiCase(base.OpenCodeCase):
         home = os.path.join(self.tmp, "home")
         os.makedirs(home, exist_ok=True)
         extra = [hook, sys.executable] if hook else []
+        # The TUI started in the project, as a person starts it: in the directory as the system itself spells it.
+        # (Windows CI hands out its temporary folder by its short name, `RUNNER~1`; the board compares spellings,
+        # so a process started under that name lists one repository twice: a known issue of the core, ESTADO.md.)
         r = subprocess.run(base.RUNTIME + [os.path.join(TESTS, "opencode_tui.mjs"), self.root, scenario, *extra],
                            capture_output=True, env=dict(os.environ, HOME=home, USERPROFILE=home, **env),
-                           cwd=self.root, timeout=180)  # the TUI started in the project, as a person starts it
+                           cwd=os.path.realpath(self.root), timeout=180)
         self.assertEqual(r.returncode, 0, r.stderr.decode())
         return json.loads(r.stdout.decode())
 
