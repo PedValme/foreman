@@ -281,12 +281,21 @@ def pinned(keys: tuple = ()) -> Optional[str]:
     return entry["path"]
 
 
+def _same_place(path: str) -> str:
+    """Equal for two spellings of one directory: through a link, or on Windows under a folder's short name
+    (``RUNNER~1``). Only for telling Foreman's own entries apart; a path a command names is matched as text."""
+    try:
+        return os.path.normcase(os.path.realpath(path))
+    except (OSError, ValueError):
+        return os.path.normcase(os.path.normpath(path))
+
+
 def pin(root: str, keys: tuple = ()) -> None:
     with _lock:
         data, now = _load_store(), time.time()
         data["pins"] = {k: v for k, v in data["pins"].items() if (v.get("at") or 0) + PIN_TTL_SECONDS > now}
         data["pins"][_session(keys)] = {"path": root, "at": now}
-        data["recent"] = [root] + [r for r in data["recent"] if os.path.normcase(r) != os.path.normcase(root)]
+        data["recent"] = [root] + [r for r in data["recent"] if _same_place(r) != _same_place(root)]
         data["recent"] = data["recent"][:MAX_RECENT]
         _save_store(data)
 
@@ -300,7 +309,7 @@ def remember(root: str) -> None:
     """Add ``root`` to the recently used repositories without pinning it for any session."""
     with _lock:
         data = _load_store()
-        data["recent"] = [root] + [r for r in data["recent"] if os.path.normcase(r) != os.path.normcase(root)]
+        data["recent"] = [root] + [r for r in data["recent"] if _same_place(r) != _same_place(root)]
         data["recent"] = data["recent"][:MAX_RECENT]
         _save_store(data)
 
@@ -424,7 +433,7 @@ def candidates(keys: tuple = (), platform: Optional[str] = None) -> list:
     def add(root: Optional[str], why: str):
         if not root:
             return
-        key = os.path.normcase(os.path.normpath(root))
+        key = _same_place(root)
         if key in seen or gate._hermes_data(root, root, homes):
             return
         seen.add(key)
@@ -486,7 +495,7 @@ def cmd_use(args: str, keys: tuple = (), platform: Optional[str] = None) -> str:
     if callable(ask):
         choices = [{"value": root, "label": os.path.basename(root) or root,
                     "description": "%s (%s%s)" % (root, why, ", pinned now" if current and
-                                                  os.path.normcase(current) == os.path.normcase(root) else "")}
+                                                  _same_place(current) == _same_place(root) else "")}
                    for root, why in options]
         try:
             picked = ask("Which repository should Foreman use in this session?", choices)
@@ -498,7 +507,7 @@ def cmd_use(args: str, keys: tuple = (), platform: Optional[str] = None) -> str:
         return _pinned_message(picked)
     lines = ["Foreman: repositories you can pin for this session:"]
     for i, (root, why) in enumerate(options, 1):
-        mark = "  <- pinned now" if current and os.path.normcase(current) == os.path.normcase(root) else ""
+        mark = "  <- pinned now" if current and _same_place(current) == _same_place(root) else ""
         lines.append("  %d. %s" % (i, root))
         lines.append("     %s%s" % (trim(why, WIDTH - 20), mark))
     lines.append("Type `/foreman use <number>` or `/foreman use <path>`.")

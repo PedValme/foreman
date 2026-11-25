@@ -331,6 +331,15 @@ def _strip_prefixes(evidence: str) -> str:
     return "\n".join(l[1:] if l[:1] in ("+", "-") else l for l in evidence.splitlines())
 
 
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f  ]")
+
+
+def _one_line(value: Any) -> str:
+    """Text a model wrote, as one line: no line or paragraph separator, and no control character (an escape
+    sequence can move a terminal's cursor back over a line that is Foreman's own)."""
+    return " ".join(_CONTROL.sub(" ", str(value)).split())
+
+
 def verify(findings: Any, sent: list) -> tuple:
     """(verified findings, number dropped). A finding stays only when it names a file the model was shown and its
     ``evidence`` occurs, whitespace-normalised, in that file's diff as sent."""
@@ -359,9 +368,11 @@ def verify(findings: Any, sent: list) -> tuple:
             line = max(0, int(item.get("line") or 0))
         except (TypeError, ValueError):
             line = 0
+        # The model's words on one line each: it read a diff its author wrote, and a diff can talk it into a finding
+        # whose text carries a line break and, after it, a line that reads as Foreman's own ("Foreman review: PASS").
         kept.append({"severity": severity, "file": target[0], "line": line,
-                     "title": str(item.get("title", "")).strip()[:200], "why": str(item.get("why", "")).strip()[:1000],
-                     "evidence": evidence.strip()[:1000], "fix": str(item.get("fix", "")).strip()[:1000]})
+                     "title": _one_line(item.get("title", ""))[:200], "why": _one_line(item.get("why", ""))[:1000],
+                     "evidence": evidence.strip()[:1000], "fix": _one_line(item.get("fix", ""))[:1000]})
     order = {"BLOCKING": 0, "HIGH": 1, "MEDIUM": 2}
     kept.sort(key=lambda d: (order[d["severity"]], d["file"], d["line"]))
     return kept, dropped
@@ -1112,7 +1123,7 @@ def run_review(args: str = "", keys: tuple = (), platform: Optional[str] = None,
         record["saved"] = _save_both(record, key)
         return record
     kept, dropped = verify(parsed.get("findings", []), b.files)
-    record.update(findings=kept, dropped_unverified=dropped, summary=_short(str(parsed.get("summary", "")), 600),
+    record.update(findings=kept, dropped_unverified=dropped, summary=_short(_one_line(parsed.get("summary", "")), 600),
                   model_verdict=str(parsed.get("verdict", ""))[:20])
     record["verdict"] = _final_verdict(record, target.det_blocked, b.complete)
     record["saved"] = _save_both(record, key)
