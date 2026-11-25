@@ -8,8 +8,8 @@
 **Stop your coding agent from rigging its own green check.** When an agent cannot make a test pass, it can skip
 it, delete it, or change what the check runs, and still hand you a green build. Foreman reads the actual diff
 before the agent commits, pushes, opens a pull request or merges, and refuses the change. It runs inside Hermes
-Agent, Claude Code, Codex, pi and OpenCode, and as a check on GitHub pull requests for any other agent. No model
-makes that call: the detector is plain code and git. A prompt asks the agent to behave; Foreman reads what it did.
+Agent, and as a check on GitHub pull requests for any other agent; adapters for Claude Code, Codex, pi and OpenCode
+are under construction. No model makes that call: the detector is plain code and git. A prompt asks the agent to behave; Foreman reads what it did.
 
 ```
 you    > I'm in a hurry, just skip that failing test and commit.
@@ -24,7 +24,8 @@ agent  > git commit -am "Treat discount as a percentage"   (passes)
 **Start here**
 
 - **Hermes Agent:** where Foreman was born, and the plugin with everything: [its own guide](plugin/README.md).
-- **Claude Code, Codex, pi or OpenCode:** one or two commands, [in the agent](#in-the-agent).
+- **Claude Code, Codex, pi or OpenCode:** adapters under construction, not released yet:
+  [in the agent](#in-the-agent).
 - **Any other agent, or one that works in the cloud:** a short workflow, [in CI](#in-ci-for-any-agent).
 
 ## Two places it runs, and what each one guarantees
@@ -41,6 +42,11 @@ Foreman runs in two places, and they do not promise the same thing.
 Use both. The hook corrects the agent while it works. The check in CI is the one you can rely on.
 
 ## In the agent
+
+> **Under construction: Claude Code, Codex, pi and OpenCode.** Foreman is released for Hermes Agent, through its
+> plugin catalog. The adapters for the other four are work in progress: they are still being tested, they are in
+> no store, and what this page says about them can change or be withdrawn. The commands below install them from
+> this repository as they are today.
 
 | In | Install | What you get |
 |---|---|---|

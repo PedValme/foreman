@@ -63,7 +63,7 @@ The optional Hermes Desktop panel shows the same line as cards:
 
 ## Install
 
-From the catalog, once listed:
+From Hermes's plugin catalog:
 
 ```
 hermes plugins install foreman
@@ -404,7 +404,8 @@ Desktop, or via `hermes config set plugins.entries.foreman.settings.<key> <value
   provider keys.
 - **Reads files** of that repository: untracked files (up to 500, 512 KB each) to look for secrets and markers, the
   file a `write_file` would replace, `package.json`, `Makefile`, `tox.ini` and `.foreman.json` at the base, the SARIF
-  reports you name, and a commit message file given with `-F`. It may read a non-ignored `.env` only to warn before it
+  reports you name, a commit message file given with `-F`, and `.git/MERGE_HEAD` while a merge is in progress (which
+  commit is coming in). It may read a non-ignored `.env` only to warn before it
   is committed; values are never printed or stored.
 - **Reads the session's working directory** through a Hermes internal (`tools.terminal_tool.get_session_cwd`), guarded,
   then the public `ctx.session_cwd()` and `resolve_agent_cwd()`. `/foreman use` lists the directories directly inside

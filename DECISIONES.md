@@ -6,7 +6,7 @@ the owner confirms it. An option the owner turned down is a decision too and sta
 `YYYY-MM-DD · rejected: what · the reason, with the owner's words`; proposing it again needs a new fact.
 
 - 2026-11-09 · Enter the Hermes Agent Plugin Hackathon (closes 2026-11-11 17:00 EST) with Foreman: test-integrity
-  gate inside the agent loop, ported from fábrica's `detector.py`, with hermes-security's SARIF as an optional source
+  gate inside the agent loop, ported from the detector of the owner's private tooling, with hermes-security's SARIF as an optional source
   and a CI mode · Pedro: «Hagámoslo, no perdemos nada».
 - 2026-11-09 · Public repository `PedValme/foreman`, MIT licence, category «en construcción», created with Pedro's
   account · Pedro: «ok crealo tu autorizo que usenos mi cuenta».
@@ -107,8 +107,8 @@ the owner confirms it. An option the owner turned down is a decision too and sta
   configurados» and «tiene que haber manera de llamarlo orgánicamente». Ajustes del agente: the dropdown is
   Hermes's own auxiliary-model picker (Foreman registers its review as an auxiliary task, by default on the first
   fallback model, no capability needed) rather than a page Foreman draws itself.
-- 2026-11-12 · Foreman stays in the owner's default Hermes profile, and Glorieto leaves its pull requests to the
-  owner's `/foreman merge` · lives in PedValme/glorieto DECISIONES.md, 2026-11-12.
+- 2026-11-12 · Foreman stays in the owner's default Hermes profile, and his Hermes agent leaves its pull requests
+  to the owner's `/foreman merge` · the decision lives in the owner's private environment, 2026-11-12.
 - 2026-11-14 · The owner's default profile runs the catalog's version of Foreman (ce9b01a, installed pinned from
   the repo until Hermes's bundled catalog lists it, then by name) · Pedro: «sí, hazlo», to the recommendation to
   install the catalog's version.
@@ -201,3 +201,14 @@ the owner confirms it. An option the owner turned down is a decision too and sta
 - 2026-11-24 · The root README announces the adapters · Pedro: «ok al readme», to the section he read ("In Claude
   Code, Codex, pi and OpenCode": the install command from git for each, what each gives, where the limits are).
   npm, OpenCode's page, Anthropic's directory and the issue to Hermes still wait for his yes, one by one.
+- 2026-11-25 · The plugin's own fixes go to the catalog now · Pedro: «subir las mejoras y correciones del propio
+  plugin que hemos ejecutado». The update to 0.2.0 goes ahead with what is built; its trial on his Hermes machine
+  and its pull request under his account need his own yes each. When the adapters for other harnesses are
+  announced or published is his to say, each time (the line of 2026-11-24 on `foreman-gate`).
+- 2026-11-25 · The new adapters are shown as under construction · Pedro: «pongámoslo como en construcción todo»,
+  in full: «deja el ritmo y como está, pero pongámoslo como en construcción todo osea todo lo nuevo, todo lo
+  relativo a los adaptadores nuevos», and why: «ni siquiera lo hemos terminado de probar, tiene que estar en
+  construcción». Acota «ok al readme» (2026-11-24): the root README keeps its section and its commands,
+  marked as work in progress, not released. Ajustes del agente: the mark is in the README's opening, its "Start
+  here" and its "In the agent" section, and at the top of `adapters/README.md` and of each harness's guide; the
+  check in CI is not an adapter and stays as it was. Va en: this repository's AGENTS.md (the index).

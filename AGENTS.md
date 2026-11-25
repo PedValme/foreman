@@ -41,6 +41,9 @@ Read the index below, then ESTADO.md, its "Next session" first (where the last s
   - Nothing is announced that the listed Hermes plugin does not have yet: the catalog update comes before an
     announcement — announcing what `main` has while the catalog lists an older plugin promises Hermes users
     more than they get (DECISIONES.md, 2026-11-25).
+  - Whatever the public reads about the adapters for other harnesses says "under construction", and nothing
+    about them is announced or published until the owner says so — they are not fully tested or released, and
+    the page must not promise what is not finished (DECISIONES.md, 2026-11-25).
 - Operation: see "This repository".
 - Known pitfalls: the Hermes on the Windows development PC has no model provider, so a real session can only run
   on the owner's Hermes machine; `hermes plugins install --ref` needs the full 40-character commit; with a gateway running, a slash

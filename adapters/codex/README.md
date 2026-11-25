@@ -1,6 +1,6 @@
 # Foreman for Codex
 
-Not published yet.
+Under construction: still being tested, not published.
 
 Needs Python 3.9 or newer as `python3`, and git. Outside Hermes, Foreman keeps its state (what waits for you,
 each session's turn) in `~/.foreman`.
