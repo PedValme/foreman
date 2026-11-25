@@ -4,6 +4,22 @@
 
 <!-- pic-method: next-session -->
 ## Next session
+- In progress on 2026-11-25, branch `claude/catalog-core-fixes` (two commits, not pushed, no pull request yet;
+  853 tests green, `hermes plugins validate` passed): what the core owed the catalog update, except the model
+  picker. A finding's words on one line in `review.verify`; `/foreman use` offering one repository once
+  (`board._same_place`); and the three seams, as names the core asks its context for (`foreman_host_label`,
+  `foreman_review_before_merge`, `foreman_finish_review`), so the adapters wrap nothing. It waits for the
+  verdict of a reviewer that did not write it; then its pull request. Still to build for the update: the native
+  model picker (`trabajo/model-picker.md`; its Desktop API is being read again against Hermes v0.23.3), the
+  plugin's version, and its README, whose list of git commands lacks `config --get`, `check-ignore` (both run
+  since before the pin) and `show-ref` (new). The real-panel test runs on this Mac with
+  `FOREMAN_NODE_MODULES` set to a folder that links `react`, `react-dom`, `scheduler` and `jsdom` from Hermes's
+  pnpm store (`~/.hermes/hermes-agent/node_modules/.pnpm`); Hermes's own `node_modules` is not flat there.
+- The owner asked on 2026-11-25 whether the hackathon's rules forbid Foreman on other platforms. Read: Nous's
+  announcement of 2026-11-04 (the rules live in that post on X), the winners' closing post and the catalog's 20
+  rules: nothing asks for exclusivity, gives Nous any right over the entry or conditions what comes after. Not
+  read: the entry form (closed) and the prize message Nous sent him; he looks at that one before the
+  announcement.
 - Next action: the one Hermes catalog update, which the owner put before any announcement (DECISIONES,
   2026-11-25: «OK con tu recomendación»). It carries everything on `main` since the pin ce9b01a: the gate's fixes
   (#83, #84, #85), what a git attribute could hide (#88), the scrubber's marker (#57), the credit line (#86,
