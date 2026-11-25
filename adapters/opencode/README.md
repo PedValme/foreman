@@ -114,8 +114,11 @@ terminal, a plugin the agent plants):
   `../README.md`): the review first, then your confirmation in the select dialog, then exactly `gh pr merge <pr>
   --squash --delete-branch --match-head-commit <the commit inspected>`. Seen on the demo repository: `/foreman reject
   3 --close` asked "Post the comment and close PR #3?" with its three options, and Escape posted nothing; `/foreman
-  merge 3` refused a BLOCKED pull request before any review. Only tested, not seen: a merge or a rejection carried
-  out (no real pull request was merged or commented on), with a fake `gh` and a fake reviewer.
+  merge 3` refused a BLOCKED pull request before any review; `/foreman merge 21`, on a throwaway pull request,
+  started the review (an OpenCode session of its own; about a minute with only the "Foreman is working" notice),
+  asked "Merge PR #21 of PedValme/foreman-demo (8ef72a5, squash) into main?" in the select dialog and, on Merge,
+  merged it by squash and showed the review's verdict and who reviewed. Only tested, not seen: a rejection carried
+  out (no comment was posted from OpenCode), with a fake `gh`.
 - **Allow**: `/foreman allow <id>` asks you to confirm that finding's id in a dialog first; only tested, not seen.
 - **On the home screen** (no session open), a repository pinned with `use` is kept for that TUI's run only, not for
   a session (tested).

@@ -91,8 +91,10 @@ at its prompt, and no auto-approve mode answers its dialogs, while OpenCode's se
 from the HTTP API, the SDK or `opencode api`; through it both answer "nobody is attending". Seen in OpenCode 2.3.2's
 TUI on the demo repository: `/foreman reject 3 --close` asked in the select dialog (closed with Escape: nothing
 posted), `/foreman merge 3` refused a BLOCKED pull request before any review, and through the server command
-`/foreman merge 7` answered "nobody is attending". A merge carried out to the end was only tested, with a fake `gh`
-and a fake reviewer (`tests/test_hosts_opencode_tui.py`); see [opencode/README.md](opencode/README.md).
+`/foreman merge 7` answered "nobody is attending". And a merge carried out to the end: `/foreman merge 21` on a
+throwaway pull request reviewed it (PASS, by OpenCode's default model, said as such), asked in the select dialog and
+merged it by squash. A rejection carried out to the end was only tested, with a fake `gh`
+(`tests/test_hosts_opencode_tui.py`); see [opencode/README.md](opencode/README.md).
 
 ## The review in the four
 
