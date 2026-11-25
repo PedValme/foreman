@@ -31,8 +31,9 @@ temporary ones, from a copy of this repository served as a git remote on the mac
 (`git+http://127.0.0.1:<port>/PedValme/foreman.git`): "Plugin … installed and added to <that folder>/opencode/
 opencode.json"; the cache held only `adapters/`, `plugin/foreman/`, `package.json`, `README.md` and `LICENSE`; in the
 TUI (`opencode --standalone`) typing `/foreman` listed both parts, and `/foreman help` and `/foreman` showed their
-replies in the TUI part's dialog, with no model turn. The github.com form is read in OpenCode's source (its
-`plugin add` takes an npm or git package specifier), not run. Seen too: `opencode plugin list --standalone` printed
+replies in the TUI part's dialog, with no model turn. The github.com form was run too: `opencode plugin add
+git+https://github.com/PedValme/foreman.git` installed it into the package cache as `foreman-gate` and wrote that
+specifier into `opencode.json` (its TUI was not opened that time). Seen too: `opencode plugin list --standalone` printed
 "No plugins found" while its own log showed the plugin loading, and `opencode plugin update <that specifier>`
 answered "Plugin is not configured"; to update, remove it and add it again. The installed copy is Foreman's whole
 (the agent cannot edit it), and removing its entry from `opencode.json` is refused to the agent like `"-foreman"`.
