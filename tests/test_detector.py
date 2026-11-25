@@ -168,6 +168,43 @@ class LineRules(unittest.TestCase):
         self.assertEqual(len(detector.detect("", ["tests/test_x.py"])), 1)
 
 
+class ScrubbedValues(unittest.TestCase):
+    """A value a history scrubber removed is a placeholder, not a secret.
+
+    A scrubber writes its replacement marker (built at runtime here, like every other fixture in this file) where
+    it took a value out: git-filter-repo's default is the word REMOVED between asterisks, and REDACTED is the other
+    common spelling. A repository scrubbed that way and committed again leaks nothing, so the marker on its own is
+    a placeholder. Only the whole value: a real value with a marker pasted after it is still a finding.
+    """
+    MARKS = ("*" * 3 + "REDACT" + "ED" + "*" * 3, "*" * 3 + "REMOV" + "ED" + "*" * 3,
+             "*" * 3 + "remov" + "ed" + "*" * 3, "*" + "REMOV" + "ED" + "*")
+    MARK = MARKS[0]
+
+    def test_the_marker_alone_is_not_a_secret(self):
+        for mark in self.MARKS:
+            self.assertFalse(one('api_' + 'key = "' + mark + '"'), mark)
+            self.assertFalse(one('pass' + 'word = "' + mark + '"'), mark)
+            self.assertFalse(one('"api_' + 'key": "' + mark + '"'), mark)                  # quoted JSON key
+            self.assertFalse(one('URL = "postgresql://' + 'app:' + mark + '@db.internal/app"'), mark)
+
+    def test_the_marker_in_an_env_or_yaml_file(self):
+        for mark in self.MARKS:
+            self.assertFalse(one("API_" + "KEY=" + mark, "x/.env"), mark)                  # unquoted, env file
+            self.assertFalse(one("  api_" + "key: " + '"' + mark + '"', "cfg.yaml"), mark)
+
+    def test_a_value_that_is_more_than_the_marker_still_counts(self):
+        for mark in self.MARKS:
+            self.assertTrue(one('api_' + 'key = "' + "sk-A1b2C3" + mark + '"'), mark)
+            self.assertTrue(one('api_' + 'key = "' + mark + "sk-A1b2C3d4E5f6G7h8" + '"'), mark)
+            self.assertTrue(one("API_" + "KEY=" + mark + "sk-A1b2C3d4E5f6G7h8", "x/.env"), mark)
+
+    def test_a_word_that_only_contains_the_marker_word_still_counts(self):
+        # Without the asterisks on both sides it is not a scrubber's marker: a generated value can hold the letters.
+        for value in ("REMOV" + "ED" + "a1B2c3D4e5F6g7H8", "x9" + "REDACT" + "ED" + "k2J8m4Q7w1",
+                      "*" * 3 + "REMOV" + "ED" + "a1B2c3D4e5F6g7H8"):
+            self.assertTrue(one('api_' + 'key = "' + value + '"'), value)
+
+
 class SkipMarkers(unittest.TestCase):
     MARKERS = (
         "it." + "skip('x', () => {})", "test." + "only('x', () => {})", "describe." + "skip.each([1])('x', f)",
