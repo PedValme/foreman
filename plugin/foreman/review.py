@@ -340,6 +340,17 @@ def _one_line(value: Any) -> str:
     return " ".join(_CONTROL.sub(" ", str(value)).split())
 
 
+def _one_line_each(record: dict) -> None:
+    """A stored record's words as ``verify`` leaves them today, whatever version stored it."""
+    for finding in record.get("findings") or []:
+        if isinstance(finding, dict):
+            for key in ("title", "why", "fix"):
+                if isinstance(finding.get(key), str):
+                    finding[key] = _one_line(finding[key])
+    if isinstance(record.get("summary"), str):
+        record["summary"] = _one_line(record["summary"])
+
+
 def verify(findings: Any, sent: list) -> tuple:
     """(verified findings, number dropped). A finding stays only when it names a file the model was shown and its
     ``evidence`` occurs, whitespace-normalised, in that file's diff as sent."""
@@ -728,7 +739,9 @@ def _call_model_once(ctx: Any, choice: Choice, instructions: str, inputs: list) 
 
 
 def _short(text: str, limit: int = 240) -> str:
-    text = " ".join((text or "").split())
+    """One line, cut to ``limit``. Everything printed through here is text a model wrote or quoted from the diff
+    (a finding's evidence, the answer that was not JSON): no control character survives it."""
+    text = _one_line(text or "")
     return text if len(text) <= limit else text[:limit - 1] + "…"
 
 
@@ -1058,6 +1071,7 @@ def run_review(args: str = "", keys: tuple = (), platform: Optional[str] = None,
         # the same diff may have been reviewed under another target (a branch, then its pull request)
         stored.update(repo=root, slug=target.slug, head=target.head or stored.get("head"),
                       target={"kind": target.kind, "ref": target.ref, "title": target.title, "base": target.base})
+        _one_line_each(stored)  # a record stored by a version that kept a finding's line breaks
         _finish(ctx, stored)
         return stored
     record = {"schema": SCHEMA_VERSION, "repo": root, "slug": target.slug,

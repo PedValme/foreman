@@ -310,7 +310,8 @@ def pin(root: str, keys: tuple = ()) -> None:
         data, now = _load_store(), time.time()
         data["pins"] = {k: v for k, v in data["pins"].items() if (v.get("at") or 0) + PIN_TTL_SECONDS > now}
         data["pins"][_session(keys)] = {"path": root, "at": now}
-        data["recent"] = [root] + [r for r in data["recent"] if _same_place(r) != _same_place(root)]
+        here = _same_place(root)
+        data["recent"] = [root] + [r for r in data["recent"] if _same_place(r) != here]
         data["recent"] = data["recent"][:MAX_RECENT]
         _save_store(data)
 
@@ -324,7 +325,8 @@ def remember(root: str) -> None:
     """Add ``root`` to the recently used repositories without pinning it for any session."""
     with _lock:
         data = _load_store()
-        data["recent"] = [root] + [r for r in data["recent"] if _same_place(r) != _same_place(root)]
+        here = _same_place(root)
+        data["recent"] = [root] + [r for r in data["recent"] if _same_place(r) != here]
         data["recent"] = data["recent"][:MAX_RECENT]
         _save_store(data)
 
@@ -507,10 +509,11 @@ def cmd_use(args: str, keys: tuple = (), platform: Optional[str] = None) -> str:
         return _pinned_message(options[n - 1][0])
     ask = getattr(_CTX, "ask_choice", None)
     picked = None
+    pinned_at = _same_place(current) if current else None
     if callable(ask):
         choices = [{"value": root, "label": os.path.basename(root) or root,
-                    "description": "%s (%s%s)" % (root, why, ", pinned now" if current and
-                                                  _same_place(current) == _same_place(root) else "")}
+                    "description": "%s (%s%s)" % (root, why, ", pinned now" if pinned_at is not None and
+                                                  pinned_at == _same_place(root) else "")}
                    for root, why in options]
         try:
             picked = ask("Which repository should Foreman use in this session?", choices)
@@ -522,7 +525,7 @@ def cmd_use(args: str, keys: tuple = (), platform: Optional[str] = None) -> str:
         return _pinned_message(picked)
     lines = ["Foreman: repositories you can pin for this session:"]
     for i, (root, why) in enumerate(options, 1):
-        mark = "  <- pinned now" if current and _same_place(current) == _same_place(root) else ""
+        mark = "  <- pinned now" if pinned_at is not None and pinned_at == _same_place(root) else ""
         lines.append("  %d. %s" % (i, root))
         lines.append("     %s%s" % (trim(why, WIDTH - 20), mark))
     lines.append("Type `/foreman use <number>` or `/foreman use <path>`.")

@@ -79,13 +79,11 @@ class _Context:
         self.plan: Optional[reviewer.Plan] = None  # this harness's reviewer, where it has one (``_bound``)
         self.foreman_host_label = host.label  # the board signs what it posts with it (``board.host_label``)
 
-    def foreman_review_before_merge(self, number: int, head: str, record: dict) -> Optional[list]:
+    def foreman_review_before_merge(self, number: int, head: str, record: dict) -> list:
         """The board's lines about the review before a merge (``board._review_for_merge`` asks for them): what
         was reviewed and, when a reviewer's session answered for this diff, who reviewed, in the words every
-        review in this harness uses (rule 25). The board's own lines name "the second model" and how Hermes
-        routed it: they are Hermes's."""
-        if self.plan is None:
-            return None
+        review in this harness uses (rule 25). Always a list: the board's own lines name "the second model" and
+        how Hermes routed it, which is never true here."""
         verdict = record.get("verdict")
         if record.get("error"):  # it could not run, or there was nothing to review: nobody reviewed
             first = "The review of PR #%d at %s: %s." % (number, head, verdict)
@@ -94,8 +92,8 @@ class _Context:
                      "started again)." % (number, head, verdict, record.get("time") or "earlier"))
         else:
             first = "Foreman reviewed PR #%d at %s before the merge: %s." % (number, head, verdict)
-        said = reviewer.who(self.host, self.plan, record) if isinstance(record.get("model"), dict) \
-            and not record.get("error") else []
+        said = reviewer.who(self.host, self.plan, record) if self.plan is not None \
+            and isinstance(record.get("model"), dict) and not record.get("error") else []
         return [board.wrap(first)] + said
 
     def session_cwd(self) -> str:

@@ -75,8 +75,13 @@ class OneRepositoryUnderTwoSpellings(GitRepoCase):
         self.assertEqual(board.recent(), [self.root])  # as it was named last
 
     def test_the_list_marks_it_as_pinned_whatever_its_spelling(self):
+        # Pinned through the link, listed from the folder itself: no entry of the list is spelt as the pin is.
+        session = Session(self.tmp)
+        board.bind(session)
+        gate.bind(session)
         board.pin(os.path.join(self.link, "repo"), KEYS)
         out = board.cmd_use("", KEYS, "telegram")
+        self.assertNotIn(self.link, out)
         self.assertEqual(out.count("<- pinned now"), 1, out)
 
 
