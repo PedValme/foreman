@@ -19,7 +19,7 @@
     "Stop": [
       {
         "hooks": [
-          {"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.py\" claude-code || exit 1", "timeout": 30}
+          {"type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/adapters/hook.py\" claude-code || exit 1", "timeout": 600}
         ]
       }
     ]

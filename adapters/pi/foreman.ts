@@ -32,6 +32,7 @@ const READ_TOOLS = new Set(["read", "grep", "find", "ls"]);
 const PATH_KEYS = ["path", "file_path", "filePath", "file"];
 
 const MAX_QUESTIONS = 3; // neutral.py: at most three questions for one command
+const MAX_SENT_BACK = 3; // neutral.py: a run is sent back at most three times (the gate once, the review's bounces)
 
 type Request = Record<string, unknown>;
 type Option = { value: string; label: string };
@@ -229,7 +230,7 @@ export function optionLines(options: Option[]): string[] {
 export default function foreman(pi: ExtensionAPI) {
 	// pi starts a fresh copy of the extension for each session (startup, /new, /resume, /fork, /reload).
 	let errorShown = false;
-	let continued = false; // this run was already sent back once
+	let sentBack = 0; // how many times this run was already sent back
 	const failed = (ctx: ExtensionContext, what: string, error: Error) => {
 		if (!errorShown) {
 			errorShown = true; // once per session: the person sees it, the agent is not held up by Foreman's fault
@@ -269,7 +270,7 @@ export default function foreman(pi: ExtensionAPI) {
 
 	// A prompt starts a run (before_agent_start fires once per prompt; a continuation asked below does not fire it).
 	pi.on("before_agent_start", async (_event, ctx) => {
-		continued = false;
+		sentBack = 0;
 		const answer = await ask({ ...base(ctx), event: "turn_start" }, ctx.cwd);
 		if (answer instanceof Error) {
 			failed(ctx, "start this turn", answer);
@@ -277,13 +278,16 @@ export default function foreman(pi: ExtensionAPI) {
 		return undefined;
 	});
 
-	// pi's final actionable boundary. Python counts the nudges (the second time in one run it answers {}); this side
-	// also sends the agent back at most once per run, so a Python side that cannot save its count never loops.
+	// pi's final actionable boundary. Python counts the nudges: one for what the gate finds, and, where the person
+	// turned on the review at the end of every turn, one per review that sends the change back (three in all at
+	// most). This side also stops at three per run, so a Python side that cannot save its count never loops. That
+	// review starts a session of pi and waits for it, so the answer gets a command's time; the session's model and
+	// thinking level go with the request, for the review's default reviewer.
 	pi.on("agent_before_settle", async (event, ctx) => {
-		if (continued) {
+		if (sentBack >= MAX_SENT_BACK) {
 			return undefined;
 		}
-		const answer = await ask({ ...base(ctx), event: "turn_end" }, ctx.cwd);
+		const answer = await ask({ ...base(ctx), event: "turn_end", ...sessionOf(ctx) }, ctx.cwd, COMMAND_TIMEOUT_MS);
 		if (answer instanceof Error) {
 			failed(ctx, "check the end of this turn", answer);
 			return undefined;
@@ -291,7 +295,7 @@ export default function foreman(pi: ExtensionAPI) {
 		if (answer.action !== "continue") {
 			return undefined;
 		}
-		continued = true;
+		sentBack += 1;
 		return {
 			entries: [
 				...event.entries,

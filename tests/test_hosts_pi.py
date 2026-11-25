@@ -280,11 +280,14 @@ class TheExtension(PiCase):
                                                    "path": "file://host/x"}])
 
     @unittest.skipIf(os.name == "nt", "the stand-in interpreter is a POSIX shell script")
-    def test_the_extension_sends_the_agent_back_at_most_once_per_run_on_its_own(self):
+    def test_the_extension_stops_sending_the_agent_back_on_its_own(self):
+        # Python decides how often (once for the gate; up to three where the review at the end of every turn is
+        # on); against a Python side that says "continue" every time, the extension still stops at three per run
         out = self.drive("always-continue",
                          FAKE_PYTHON=self.fake_python("""echo '{"action": "continue", "message": "undo it"}'"""))
-        self.assertTrue(out["first"]["continue"])
-        self.assertIsNone(out["second"])
+        for nth in ("first", "second", "third"):
+            self.assertTrue(out[nth]["continue"], nth)
+        self.assertIsNone(out["fourth"])
         self.assertTrue(out["next_run"]["continue"])
 
     @unittest.skipIf(os.name == "nt", "the stand-in interpreter is a POSIX shell script")

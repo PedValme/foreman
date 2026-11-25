@@ -17,7 +17,7 @@ HOOK="python3 -I $FOREMAN/adapters/hook.py codex || exit 1"
 codex --dangerously-bypass-hook-trust \
   -c "hooks.PreToolUse=[{matcher=\"^(Bash|apply_patch|Edit|Write)\$\",hooks=[{type=\"command\",command=\"$HOOK\",timeout=30}]}]" \
   -c "hooks.UserPromptSubmit=[{hooks=[{type=\"command\",command=\"$HOOK\",timeout=600}]}]" \
-  -c "hooks.Stop=[{hooks=[{type=\"command\",command=\"$HOOK\",timeout=30}]}]"
+  -c "hooks.Stop=[{hooks=[{type=\"command\",command=\"$HOOK\",timeout=600}]}]"
 ```
 
 The same flags work with `codex exec`. `--dangerously-bypass-hook-trust` is there because Codex runs a hook only
@@ -58,8 +58,12 @@ in `-s workspace-write`:
 Codex has no way for a hook to ask you. When Foreman would ask (it could not inspect a command, or the working
 directory does not exist), the call is refused with the reason; run it yourself if you have checked the change.
 
-What it does not do yet: the review when someone asks to merge and on every turn (it runs when you ask), the board,
-merge and reject with reasons (Foreman on Hermes Agent has them).
+The review at the end of every turn is off unless you turn it on, in Foreman's `config.json` like the reviewer
+itself (`{"each_turn": {"codex": true}}`; `foreman reviewer` shows whether it is on): then a turn that changed code
+and passed the gate is reviewed before it ends, and a verified BLOCKING or HIGH finding sends the agent back with
+it. The `Stop` hook waits up to ten minutes for it. Run in the tests, not seen in a session.
+
+What it does not do: the board, merge and reject with reasons (Foreman on Hermes Agent and on pi have them).
 
 ## The review
 

@@ -148,6 +148,7 @@ def host(env=None, data=None) -> core.Host:
         # Claude Code sets it for its hooks: "1" in an interactive session, "0" with -p or the SDK.
         attended=lambda: env.get("CLAUDE_CODE_SESSION_ATTENDED") == "1",
         fresh_session=_fresh_session(env), efforts=EFFORTS, session=session,
+        turn_review=True,  # the Stop hook waits ten minutes (adapters/claude-code/hooks.json)
     )
     return h
 

@@ -18,7 +18,7 @@
     "Stop": [
       {
         "hooks": [
-          {"type": "command", "command": "python3 -I \"/path/to/foreman/adapters/hook.py\" codex || exit 1", "timeout": 30}
+          {"type": "command", "command": "python3 -I \"/path/to/foreman/adapters/hook.py\" codex || exit 1", "timeout": 600}
         ]
       }
     ]
