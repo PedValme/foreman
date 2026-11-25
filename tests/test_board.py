@@ -286,6 +286,40 @@ class PullRequestVerdicts(BoardCase):
         self.gh.add(["pr", "diff", "7"], clean_diff())
         self.assertIn("[check-changed] scripts/check.sh", self.run_cmd("verdict 7"))
 
+    # Found on 2026-11-25: a pull request that marks its tests as having no diff in a .gitattributes gets "Binary
+    # files differ" from GitHub, and that read as a change with nothing in it.
+    BINARY_TEST = ("diff --git a/tests/test_x.py b/tests/test_x.py\nindex 1111111..2222222 100644\n"
+                   "Binary files a/tests/test_x.py and b/tests/test_x.py differ\n")
+    ATTRIBUTES = ("diff --git a/.gitattributes b/.gitattributes\nnew file mode 100644\nindex 0000000..3333333\n"
+                  "--- /dev/null\n+++ b/.gitattributes\n@@ -0,0 +1 @@\n+*.cfg -diff\n")
+    BINARY_CONFIG = ("diff --git a/app.cfg b/app.cfg\nindex 1111111..2222222 100644\n"
+                     "Binary files a/app.cfg and b/app.cfg differ\n")
+    IMAGE = ("diff --git a/logo.png b/logo.png\nnew file mode 100644\nindex 0000000..4444444\n"
+             "Binary files /dev/null and b/logo.png differ\n")
+
+    def unread(self, diff, path):
+        self.gh.add(["pr", "view", "7"], pr_view(7))
+        self.gh.add(["pr", "diff", "7"], diff)
+        out = self.run_cmd("verdict 7")
+        self.assertIn("INCOMPLETE", out)
+        self.assertIn("could not read %s" % path, out)
+        self.assertIn("Foreman will not merge PR #7", self.run_cmd("merge 7"))
+        self.assertEqual(board._CTX.dispatched, [])
+
+    def test_a_test_file_github_shows_as_binary_was_not_read_and_the_verdict_says_so(self):
+        self.unread(clean_diff() + self.BINARY_TEST, "tests/test_x.py")
+
+    def test_a_file_whose_name_is_not_a_binarys_shown_as_binary_was_not_read(self):
+        self.unread(clean_diff() + self.BINARY_CONFIG, "app.cfg")  # hidden by the base's own attributes
+
+    def test_any_file_shown_as_binary_by_a_change_that_touches_the_attributes_was_not_read(self):
+        self.unread(clean_diff() + self.ATTRIBUTES + self.IMAGE, "logo.png")
+
+    def test_a_binary_file_in_a_change_that_leaves_the_attributes_alone_is_no_finding(self):
+        self.gh.add(["pr", "view", "7"], pr_view(7))
+        self.gh.add(["pr", "diff", "7"], clean_diff() + self.IMAGE)
+        self.assertNotIn("INCOMPLETE", self.run_cmd("verdict 7"))
+
     def test_merge_refused_when_blocked(self):
         self.blocked_pr()
         out = self.run_cmd("merge 7")

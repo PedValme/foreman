@@ -480,6 +480,15 @@ a quoted string or a comment does not, except in the files that run the check (C
   narrows what is inspected (a wildcard refspec, a
   configured `remote.<name>.push`, `remote.<name>.mirror` or `push.default=matching`, also given with `git -c`, asks
   you; a local branch as upstream is ignored);
+- git's attributes can make git show no diff for a file, or store something other than the file. A file git shows
+  as binary is read as text all the same, unless its name says it is binary (`.png`, `.zip`, `.bin`…), and a line
+  added to a `.gitattributes` that does either (`-diff`, `binary`, `filter=`, `working-tree-encoding=`, a `diff=`
+  driver that is not one of git's own) is a `check-changed` finding, unless it names such files (`*.png binary`);
+  so is a `.gitattributes` moved to another folder. What still follows the attributes: a file under a binary's
+  name; a clean filter the base already had, which stores a pointer in place of a file it newly matches; a pull
+  request that is not in your clone, read from GitHub's diff, where a file shown as binary makes the verdict
+  `INCOMPLETE` until you fetch it; and the diff the second model reviews, which leaves such a file out. Objects
+  swapped with `git replace` are read as they really are;
 - the commit that concludes a merge is read for what the resolution itself does when a remote already has the
   commits that come in: their own changes are not that commit's (a merge of commits no remote has is read whole,
   as any commit). A `MERGE_HEAD` left or written by hand has the same effect as the merge it names;

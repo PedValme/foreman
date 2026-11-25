@@ -650,6 +650,14 @@ def pr_verdict(root: str, number: int) -> dict:
             findings = detector.findings_from_diff(diff, name_status, messages=messages, deadline=repo.deadline)
             v["notes"].append("The base branch `%s` is not in the local clone, so changes to the check were not "
                               "checked." % v["base"])
+        # GitHub answers "Binary files differ" for a file whose attributes say it has no diff, and a pull request
+        # can set those itself: nothing was read of such a file, so the verdict says so instead of passing it.
+        unread = detector.unread_in_diff(diff, [p for row in name_status.splitlines() for p in row.split("\t")[1:]])
+        if unread:
+            v["errors"].append("could not read %s: GitHub's diff shows no text for %s (fetch the pull request and "
+                               "run `/foreman verdict %d` again)" % (", ".join(unread[:5]) + (
+                                   " and %d more" % (len(unread) - 5) if len(unread) > 5 else ""),
+                                   "it" if len(unread) == 1 else "them", number))
         v["notes"].append("Inspected from GitHub's diff (the head is not in the local clone): a secret added and "
                           "removed again in an earlier commit is not seen. Fetch the branch and run `/foreman "
                           "verdict %d` again for the full check." % number)

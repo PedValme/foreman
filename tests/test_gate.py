@@ -1,4 +1,5 @@
 """The hooks, called the way Hermes calls them, on temporary git repositories."""
+import hashlib
 import importlib.util
 import json
 import os
@@ -1242,6 +1243,165 @@ class HookBypasses(GitRepoCase):
             self.assertNotIn("rule_key", d)
         for command in ("git config core.hooksPath", "git config --get core.hooksPath", "git config user.name x"):
             self.assertIsNone(terminal(command, self.root), command)
+
+
+class AttributesThatHideADiff(GitRepoCase):
+    """git prints "Binary files differ" for a file its attributes mark as having no diff, and Foreman read that as a
+    change with nothing in it. Found on 2026-11-25 by a review: a `.gitattributes` line in the same change (or one
+    in `.git/info/attributes`) hid a test switched off, and a secret, from every reading of the diff."""
+
+    def setUp(self):
+        super().setUp()
+        self.write("app.py", "x = 1\n")
+        self.write("tests/test_app.py", "def test_x():\n    assert True\n")
+        self.commit("base")
+        self.git("checkout", "-q", "-b", "feature")
+
+    def rig(self):
+        self.write("tests/test_app.py", SKIP + "\ndef test_x():\n    assert True\n")
+
+    def test_a_commit_that_marks_its_tests_as_having_no_diff_is_still_read(self):
+        self.git("config", "diff.hidden.binary", "true")
+        for attributes in ("tests/** -diff\n", "tests/** binary\n", "*.py -diff -text\n", "tests/** diff=hidden\n",
+                           "[attr]quiet -diff\ntests/** quiet\n"):
+            self.write(".gitattributes", attributes)
+            self.rig()
+            self.git("add", "-A")
+            for command in ("git commit -m x", "git commit -am x"):
+                d = terminal(command, self.root)
+                self.assertEqual(d["action"], "block", (attributes, command))
+                self.assertIn("[test-skipped] tests/test_app.py", d["message"], (attributes, command))
+                self.assertIn("[check-changed] .gitattributes", d["message"], (attributes, command))
+            self.git("reset", "-q", "--hard")
+
+    def test_a_push_and_a_pull_request_are_still_read(self):
+        self.write(".gitattributes", "tests/** -diff\n")
+        self.rig()
+        self.commit("a rig, and its tests marked as having no diff")
+        for command in ("git push -u origin feature", "gh pr create --fill --base main"):
+            d = terminal(command, self.root)
+            self.assertEqual(d["action"], "block", command)
+            self.assertIn("[test-skipped] tests/test_app.py", d["message"], command)
+        report = detector.scan_range(detector.Repo(self.root), "main", "HEAD")  # the check in CI
+        self.assertEqual(sorted((f.rule, f.file) for f in report.blockers),
+                         [("check-changed", ".gitattributes"), ("test-skipped", "tests/test_app.py")])
+
+    def test_attributes_kept_outside_the_tree_do_not_hide_a_test_either(self):
+        with open(os.path.join(self.root, ".git", "info", "attributes"), "w", encoding="utf-8") as fh:
+            fh.write("tests/** -diff\n")
+        self.rig()
+        self.git("add", "-A")
+        d = terminal("git commit -m x", self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertIn("[test-skipped] tests/test_app.py", d["message"])
+
+    def test_an_attribute_that_hides_or_transforms_files_is_a_finding_itself(self):
+        # A clean filter (what git-lfs uses) stores something other than the file: the commit holds a pointer and
+        # whoever checks out with the filter gets the real content, skip included.
+        for line in ("*.cfg binary", "* -diff", "tests/** filter=lfs diff=lfs merge=lfs -text",
+                     "src/** working-tree-encoding=UTF-16", "sub/*.py filter=mine", "*.lock -diff", "*.min.js -diff",
+                     "*.svg binary", "*.ipynb filter=nbstripout", "settings.[c]fg -diff"):
+            self.write(".gitattributes", line + "\n")
+            self.git("add", "-A")
+            d = terminal("git commit -m x", self.root)
+            self.assertEqual(d["action"], "block", line)
+            self.assertIn("[check-changed] .gitattributes", d["message"], line)
+        self.write("docs/.gitattributes", "*.md -diff\n")  # at any depth
+        self.git("add", "-A")
+        self.assertIn("docs/.gitattributes", terminal("git commit -m x", self.root)["message"])
+
+    def test_the_attributes_a_repository_commonly_sets_are_no_finding(self):
+        self.write(".gitattributes", "# line endings and what is binary\n* text=auto\n*.sh text eol=lf\n"
+                   "*.png binary\n*.PDF binary\nassets/**/*.woff2 -diff\n*.psd filter=lfs diff=lfs merge=lfs -text\n"
+                   "*.py diff=python\n*.md diff=markdown\ndocs/* linguist-documentation\n")
+        self.git("add", "-A")
+        self.assertIsNone(terminal("git commit -m x", self.root))
+
+    def test_a_person_can_allow_the_attribute_as_any_other_change_to_the_check(self):
+        self.write(".gitattributes", "*.lock -diff\n")
+        self.git("add", "-A")
+        d = terminal('git commit -m "lock files are noise in a diff" -m "%s .gitattributes: generated files"'
+                     % detector.MARKER, self.root)
+        self.assertEqual(d["action"], "block")  # marked: it waits for the person, it does not pass alone
+        self.assertIn("marked `%s`" % detector.MARKER, d["message"])
+        self.assertIn("/foreman allow", d["message"])
+
+    def secret(self, path="app.cfg"):
+        self.write(path, "K = '" + GHP + "c" * 36 + "'\n")
+        self.git("add", "-A")
+
+    def test_a_secret_is_read_whatever_hides_its_file(self):
+        # Attributes the change does not bring: the base's own, a macro the base defined, one of git's own drivers
+        # made binary in the configuration, attributes kept outside the tree.
+        self.git("checkout", "-q", "main")
+        self.write(".gitattributes", "*.cfg -diff\n[attr]quiet -diff\n")
+        self.commit("the base hides its configuration files from the diff")
+        self.git("checkout", "-q", "-b", "later")
+        self.secret()
+        d = terminal("git commit -m x", self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertIn("[secret] app.cfg", d["message"])
+        self.git("reset", "-q", "--hard")
+        self.write(".gitattributes", "*.cfg -diff\n[attr]quiet -diff\n*.ini quiet\n*.toml diff=python\n")
+        self.git("config", "diff.python.binary", "true")
+        with open(os.path.join(self.root, ".git", "info", "attributes"), "w", encoding="utf-8") as fh:
+            fh.write("*.env.sample -diff\n")
+        for path in ("app.ini", "app.toml", "x.env.sample"):
+            self.secret(path)
+            d = terminal("git commit -m x", self.root)
+            self.assertEqual(d["action"], "block", path)
+            self.assertIn(path, d["message"], path)
+
+    def test_a_secret_added_and_removed_again_in_a_hidden_file_is_still_in_the_history(self):
+        self.git("checkout", "-q", "main")
+        self.write(".gitattributes", "*.cfg -diff\n")
+        self.commit("the base hides its configuration files from the diff")
+        self.git("checkout", "-q", "-b", "later")
+        self.secret()
+        self.commit("a secret")
+        self.git("rm", "-q", "app.cfg")
+        self.commit("and its removal")
+        d = terminal("git push -u origin later", self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertIn("secret-history", d["message"])
+        self.assertIn("app.cfg", d["message"])
+
+    def test_a_gitattributes_moved_to_another_folder_is_a_finding(self):
+        self.git("checkout", "-q", "main")
+        self.write("assets/.gitattributes", "* -diff\n")
+        self.write("assets/notes.txt", "notes\n")
+        self.commit("the base keeps its assets out of the diff")
+        self.git("checkout", "-q", "-b", "later")
+        os.makedirs(os.path.join(self.root, "config"))
+        self.git("mv", "assets/.gitattributes", "config/.gitattributes")
+        self.secret("config/app.cfg")
+        d = terminal("git commit -m x", self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertIn("[check-changed] config/.gitattributes", d["message"])
+        self.assertIn("[secret] config/app.cfg", d["message"])
+
+    def test_a_file_that_is_really_binary_is_no_finding(self):
+        block, data = b"foreman", bytearray()
+        while len(data) < 1 << 20:  # one megabyte with no pattern to it, the same on every run
+            block = hashlib.sha256(block).digest()
+            data += block
+        for name in ("logo.bin", "blob", os.path.join("tests", "fixture.bin")):
+            with open(os.path.join(self.root, name), "wb") as fh:
+                fh.write(data)
+        self.git("add", "-A")
+        self.assertIsNone(terminal("git commit -m x", self.root))
+        self.commit("binary files")
+        self.assertIsNone(terminal("git push -u origin feature", self.root))
+
+    def test_a_replaced_commit_is_read_as_it_is(self):
+        # `git replace` shows another object's content in place of a commit's, locally; a push sends the real one.
+        self.rig()
+        self.commit("a rig")
+        clean = self.git("commit-tree", "main^{tree}", "-p", "main", "-m", "looks clean").strip()
+        self.git("replace", "HEAD", clean)
+        d = terminal("git push -u origin feature", self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertIn("[test-skipped] tests/test_app.py", d["message"])
 
 
 class Performance(GitRepoCase):
