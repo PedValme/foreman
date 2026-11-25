@@ -39,7 +39,12 @@ Read the index below, then ESTADO.md, its "Next session" first (where the last s
   fixture builds a skip marker from parts (`"@pytest.mark." + "skip"`, `detector.MARKER`), never literally; CI runs
   on Windows, so a test never compares a Unix-only path as a string (build paths from the test's temp directory).
   A new conditional skip (`skipIf` for a platform) goes in a new test file: added to an existing one it is a
-  finding of Foreman's own check, by design (there it could be switching off tests that already ran).
+  finding of Foreman's own check, by design (there it could be switching off tests that already ran). Outside
+  Hermes the adapters bind the core's contexts and wrap three of its functions for the length of one command
+  (`standin.py`, `reviewer.bound`): a test must find `board._CTX`, `gate._CTX`, `review._CTX` and those functions
+  as it left them, and a change to `board._review_for_merge`, `board.reject_comment` or `finish.py`'s messages is
+  checked against the adapters' tests. A harness's terminal UI can be driven for a real-session test through
+  tmux (`tmux send-keys`, `capture-pane`): that is how pi's selector and its merge were seen.
 
 ## Where things are: one document per question
 | Question | Document | Who writes it |
@@ -59,7 +64,10 @@ Code and tests are what the system really does; when a document and the code dis
   >= 0.22.6. The user-facing README, messages and command output are in English.
 - The adapters for other harnesses are in `adapters/` (its README says what each file is): `foreman_hosts/core.py`
   is the host-neutral half, one module per harness is its dialect (Claude Code, Codex, pi, OpenCode), `neutral.py`
-  is the protocol a harness's own extension speaks when it is code (pi's and OpenCode's `foreman.ts`), and `hook.py`
+  is the protocol a harness's own extension speaks when it is code (pi's `foreman.ts`; OpenCode's `foreman.ts` for
+  its server and `tui.ts` for its terminal interface, the only place where OpenCode shows a person typed), `reviewer.py`
+  is the review as a fresh session of the harness, `standin.py` runs the Hermes plugin's board, merge and reject
+  on a stand-in for Hermes's context, and `hook.py`
   is the entry point they all run (`python3 -I`, Python 3.9+). They import the gate from `plugin/foreman/`;
   `plugin/` never imports them. The repository root is the package another harness installs (`.claude-plugin/` for Claude Code), so
   nothing binary, generated or private is committed anywhere in it.
