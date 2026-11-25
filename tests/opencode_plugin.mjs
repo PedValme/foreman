@@ -142,6 +142,16 @@ if (scenario === "gate") {
   out.use = await command("use")
   out.pin = await command("use .")
   out.askedAfterBoard = seen.asked.length
+} else if (scenario === "server-writes") {
+  // Merge and reject through the server command (the apps, the HTTP API, the SDK, `opencode api`): nobody is
+  // attending there, whatever the person or a script answers; only `allow <id>` asks OpenCode's question.
+  approve = async () => { await sleep(1100) }                // even a person's yes to a question, were one asked
+  out.merge = await command("merge 7")
+  out.mergeYes = await command("merge 7 --yes")
+  out.reject = await command("reject 7 --close --yes note")
+  out.askedForWrites = seen.asked.length
+  out.allowNamedMerge = await command("allow merge 7")         // `allow` asks, and allows a finding: never a merge
+  out.asked = seen.asked.map((a) => a.resources)
 } else if (scenario === "review") {
   // The review's own command: a longer time, and the session's model as OpenCode's record states it.
   out.shellDelays = delays.length

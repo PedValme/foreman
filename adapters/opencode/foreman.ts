@@ -14,10 +14,12 @@ import { dirname, isAbsolute, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 export type Request = Record<string, unknown> & { event: string }
-export type Answer = { action?: string; message?: string; reply?: string }
+export type Option = { value: string; label: string }
+export type Question = { id: string; question: string; options: Option[] }
+export type Answer = { action?: string; message?: string; reply?: string; question?: Question }
 
 const TIMEOUT_MS = 30_000 // the protocol's limit; the gate's own budget is 18 s
-const COMMAND_MS = 600_000 // a `command` request: the review starts a session of OpenCode and waits for it
+export const COMMAND_MS = 600_000 // a `command` request: the review starts a session of OpenCode and waits for it
 const PERMISSION = "foreman" // the action Foreman's questions carry in OpenCode's permission mechanism
 const PERSON_MS = 1_000 // a yes sooner than this after the question was not typed by a person
 const SHELL_TOOL = "shell"
@@ -161,10 +163,22 @@ export function modelOf(session: unknown): string | undefined {
   return `${ref.providerID}/${ref.id}${typeof ref.variant === "string" && ref.variant ? `#${ref.variant}` : ""}`
 }
 
-/** `/foreman allow <id>` is the one command that needs a person there. */
+/** `/foreman allow <id>` is the one command this server command asks a person about (OpenCode's permission prompt).
+ * Merge and reject are not: through a server command nobody is attending (they are the TUI part's, `tui.ts`). */
 export function needsPerson(args: string): boolean {
   const words = args.split(/\s+/).filter(Boolean)
   return words.length > 1 && words[0].toLowerCase() === "allow"
+}
+
+/** A question as the Python side sent it, or undefined when it is not shaped as the protocol says. */
+export function questionOf(answer: Answer): Question | undefined {
+  const q = answer?.question
+  if (!q || typeof q !== "object" || typeof q.id !== "string" || typeof q.question !== "string"
+      || !Array.isArray(q.options)) {
+    return undefined
+  }
+  const options = q.options.filter((o) => o && typeof o.value === "string" && typeof o.label === "string" && o.label)
+  return options.length ? { id: q.id, question: q.question, options } : undefined
 }
 
 export default {
@@ -303,14 +317,16 @@ export default {
       active.delete(session)
     })
 
-    // `/foreman <args>`: code, no model turn. OpenCode shows a command's error to the person and nothing else, so
-    // Foreman's reply travels as that error. `attended` is true only after the person answered OpenCode's own
-    // question in its interface, which nobody can do for an unattended session.
+    // `/foreman <args>` as a server command: code, no model turn. OpenCode shows a command's error to the person and
+    // nothing else, so Foreman's reply travels as that error. In the TUI with Foreman's TUI part installed, the
+    // person's `/foreman` runs there instead (`tui.ts`); this one serves the apps, the HTTP API, the SDK and a TUI
+    // without that part. A server command cannot tell who sent it, so `attended` is true only for `allow <id>`, after
+    // the person answered OpenCode's own question in its interface: merge and reject find nobody attending here.
     await ctx.command.transform((editor: any) => {
       editor.add({
         name: "foreman",
         description: "Foreman: the board | verdict [pr|branch] | pipeline | prs | issues | use [path|n] | status [path] | "
-                     + "allow [id] | review [target] [--fresh] | reviewer [model] | help",
+                     + "allow [id] | review [target] [--fresh] | reviewer [model] | help (merge, reject: in the TUI)",
         execute: async (input: any) => {
           const args = commandArgs(input?.prompt)
           let attended = false
@@ -330,14 +346,17 @@ export default {
           } catch {}
           let answer: Answer
           try {
-            // `session`: the repository pinned with `/foreman use` is kept per conversation. This plugin has no
-            // dialog of several options, so `attended` stays false for every command but `allow`, and a command
+            // `session`: the repository pinned with `/foreman use` is kept per conversation. A server plugin has no
+            // dialog of several options, and `attended` stays false for every command but `allow`, so a command
             // that would ask (which repository) answers with the list and what to type instead.
             answer = await ask({ event: "command", args, cwd: base, session: String(input.sessionID ?? ""), attended,
                                  ...(model ? { model } : {}) }, HOOK, "python3", COMMAND_MS)
           } catch (e) {
             throw new Error(`Foreman could not run (${(e as Error).message}).`)
           }
+          // A question has no dialog here (the protocol: show its text and send nothing more).
+          const asked = questionOf(answer)
+          if (asked) throw new Error(`${asked.question}\n\nForeman: nothing was done (no dialog to answer it here).`)
           throw new Error(answer.reply ?? "Foreman gave no reply.")
         },
       })

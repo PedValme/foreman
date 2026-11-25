@@ -218,8 +218,9 @@ def run(host: core.Host, name: str, rest: str, cwd: str, session: str = "", answ
         # Rule 24: with nobody attending they do nothing, whatever the command says (`--yes` included).
         number = next((w.lstrip("#") for w in rest.split() if w.lstrip("#").isdigit()), "<pr>")
         return ("Foreman: `%s` writes to GitHub as you, so it needs you at the session, and nobody is attending "
-                "this one. Type `%s` in an interactive %s session. `%s` shows its verdict from anywhere."
-                % (name, host.person("%s %s" % (name, number)), host.label, host.person("verdict %s" % number)))
+                "this one. Type `%s` in %s. `%s` shows its verdict from anywhere."
+                % (name, host.person("%s %s" % (name, number)), core.attend_here(host),
+                   host.person("verdict %s" % number)))
     if name == "merge" and host.fresh_session is None:
         return "Foreman: `merge` is not available in %s yet: it has no reviewer here." % host.label
     command = board.SUBCOMMANDS[name][0]

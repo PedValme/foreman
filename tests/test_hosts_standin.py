@@ -45,7 +45,8 @@ class WhatEachHarnessAnswers(StandinCase):
     def test_pi_and_opencode_have_the_board_and_the_others_do_not(self):
         from foreman_hosts import claude_code, codex
         self.assertEqual(pi.host({}).board, core.BOARD_READS + core.BOARD_WRITES)
-        self.assertEqual(opencode.host({}).board, core.BOARD_READS)  # no merge or reject there yet
+        # merge and reject in OpenCode too: for the person at its TUI (tests/test_hosts_opencode_tui.py)
+        self.assertEqual(opencode.host({}).board, core.BOARD_READS + core.BOARD_WRITES)
         for module in (claude_code, codex):
             self.assertEqual(module.host({}).board, ())
 
@@ -61,7 +62,7 @@ class WhatEachHarnessAnswers(StandinCase):
             offered = list(module.host({}).board)
             self.assertEqual(lines[:len(offered)], offered)
             self.assertIn("status", lines)
-            self.assertEqual("merge" in lines, module is pi)
+            self.assertIn("merge", lines)
             self.assertIn("GitHub CLI", text)
 
     def test_a_harness_without_the_board_answers_as_before(self):
@@ -116,9 +117,10 @@ class TheCommandsThatOnlyRead(StandinCase):
         self.assertEqual(repository(self.reply("status", session="s-2")), "repo")
 
     def test_the_writes_are_offered_only_where_the_harness_lists_them(self):
-        for name in ("merge 7", "reject 7"):  # OpenCode does not list them yet (tests/test_hosts_standin_writes.py)
-            text = self.reply(name, opencode, attended=True)
-            self.assertIn("is not available in OpenCode yet", text)
+        import dataclasses
+        reads_only = dataclasses.replace(pi.host({"attended": True}), board=core.BOARD_READS)
+        for name in ("merge 7", "reject 7"):  # a harness that lists only the reads
+            self.assertIn("is not available in pi yet", core.person_reply(reads_only, name, self.root))
 
 
 class AQuestionForThePerson(StandinCase):

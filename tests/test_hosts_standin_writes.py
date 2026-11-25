@@ -336,11 +336,23 @@ class OutOfTheAgentsReach(WritesCase):
         self.assertEqual(out["action"], "block")
         self.assertIn("/foreman merge 7", out["message"])
 
+    def test_opencode_has_them_for_the_person_at_its_tui_only(self):
+        # Its TUI part sends attended true; its server command never does for these (tests/test_hosts_opencode_tui.py)
+        self.assertIn("merge", opencode.host({}).board)
+        self.clean_pr()
+        self.assertIn("nobody is attending", self.ask("merge 7", attended=False, module=opencode)["reply"])
+        _q, done = self.answered("merge 7", "merge", module=opencode)
+        self.assertEqual(self.gh.writes(), [MERGE])
+        self.assertIn("merged PR #7 (squash) in acme/widgets", done["reply"])
+        self.assertEqual(self.shell("opencode run '/foreman merge 7'", opencode)["action"], "block")
+        self.assertIn("/foreman merge 7", self.shell("gh pr merge 7", opencode)["message"])
+
     def test_a_harness_without_the_writes_is_as_before(self):
-        self.assertNotIn("merge", opencode.host({}).board)
-        self.assertIn("not available in OpenCode yet", self.ask("merge 7", module=opencode)["reply"])
-        self.assertEqual(self.shell("opencode run '/foreman merge 7'", opencode), {})
-        self.assertIn("merge it themselves", self.shell("gh pr merge 7", opencode)["message"])
+        reads_only = dataclasses.replace(pi.host({"attended": True}), board=core.BOARD_READS)
+        self.assertIn("not available in pi yet", core.person_reply(reads_only, "merge 7", self.root))
+        self.assertIsNone(core._guard_command(reads_only, "pi '/foreman merge 7'"))
+        out = core.pre_shell(reads_only, "gh pr merge 7", self.root)
+        self.assertIn("merge it themselves", out["message"])
 
     def test_pis_help_lists_them(self):
         text = self.ask("help")["reply"]

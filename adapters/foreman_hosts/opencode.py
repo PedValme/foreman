@@ -1,16 +1,29 @@
-"""OpenCode's dialect: its plugin (``adapters/opencode/foreman.ts``) speaks ``neutral.py``'s protocol.
+"""OpenCode's dialect: its plugins (``adapters/opencode/``) speak ``neutral.py``'s protocol.
 
-OpenCode (checked on 2.3.2, its v2 plugin API) runs plugins inside its own server, so Foreman's plugin there is
-TypeScript that sends one ``neutral`` request per event and does what the answer says. This module is what differs
-for OpenCode on the Python side: how the person types Foreman's command, OpenCode's own command names, and what turns
-a plugin off there.
+OpenCode (checked on 2.3.2, its v2 plugin API) runs a plugin's server part inside its own server
+(``adapters/opencode/foreman.ts``: the gate, and ``/foreman`` as a server command) and a plugin's TUI part inside its
+terminal interface (``adapters/opencode/tui.ts``: ``/foreman`` typed there). Both are TypeScript that send one
+``neutral`` request per event and do what the answer says. This module is what differs for OpenCode on the Python
+side: how the person types Foreman's command, OpenCode's own command names, and what turns a plugin off there.
 
-How OpenCode turns a plugin off (its source, 2.3.2: ``config/plugin/source.ts`` and ``plugin/supervisor.ts``):
+Who is attending (``attended``): the TUI part sends ``true`` for every ``/foreman`` it handles. A TUI plugin's slash
+command runs in the TUI process only for what a person typed at its prompt; no auto-approve mode answers its dialogs
+and OpenCode 2.3.2 gives the model's tools no way to type into it (read in the source, seen in a session). What
+remains (adapters/opencode/README.md): keys typed into the terminal from the agent's own shell, and plugin code the
+agent writes into a plugin folder, which OpenCode loads and which needs no Foreman to run gh. The server part sends ``true`` only for
+``allow <id>``, after a person answered OpenCode's permission prompt: a server command cannot tell a person's TUI from
+the HTTP API, the SDK or ``opencode api``, so through it ``merge`` and ``reject`` find nobody attending.
 
-- ``"plugins": ["-foreman"]`` (or ``"-*"``) in any ``opencode.json`` / ``opencode.jsonc`` it reads removes the plugin
-  with that id, even one installed globally: explicit configuration is applied last.
+How OpenCode turns a plugin off (its source, 2.3.2: ``config/plugin/source.ts``, ``plugin/supervisor.ts`` and the TUI's
+``plugin/context.tsx``):
+
+- ``"plugins": ["-foreman"]`` (or ``"-*"``) in any ``opencode.json`` / ``opencode.jsonc`` it reads removes the server
+  plugin with that id, even one installed globally: explicit configuration is applied last. The TUI reads its own
+  ``plugins`` list, in the user's ``cli.json`` (``~/.config/opencode/cli.json``), and a ``"-foreman"`` there removes
+  the TUI part.
 - A plugin file auto-discovered in a ``plugin``/``plugins`` folder of a configuration directory (``.opencode/plugins``
-  in a project, ``~/.config/opencode/plugins``) is off once that file is deleted or rewritten.
+  in a project, ``~/.config/opencode/plugins``) is off once that file is deleted or rewritten; a plugin folder there
+  (the form the TUI part needs) once the folder or its files are.
 - ``OPENCODE_DISABLE_PROJECT_CONFIG`` (or ``OPENCODE_CONFIG_PROJECT_DISABLE``) skips the project's configuration, and
   ``OPENCODE_CONFIG``, ``OPENCODE_CONFIG_DIR`` and ``OPENCODE_CONFIG_CONTENT`` replace or add to it, for an OpenCode
   started with them: from the agent's shell, a nested session without Foreman.
@@ -34,9 +47,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 _PLUGIN_OFF = re.compile(r"(?i)\bplugins?\s+(?:remove|rm|uninstall|disable)\b")
 _FOREMAN = re.compile(r"(?i)\bforeman\b")
-_CONFIG_FILE = re.compile(r"(?i)(?:^|[/\\\s\"'=])opencode\.jsonc?\b")
+# OpenCode's configuration files: a project's or the user's `opencode.json(c)`, and the TUI's own `opencode/cli.json`.
+_CONFIG_FILE = re.compile(r"(?i)(?:(?:^|[/\\\s\"'=])opencode\.jsonc?|opencode[/\\]cli\.json)\b")
+_CLI_CONFIG = re.compile(r"(?i)(?:^|/)opencode/cli\.json$")
 _PLUGIN_DIR = re.compile(r"(?i)(?:\.opencode|opencode)[/\\]plugins?\b")
-_OWN_PLUGIN = re.compile(r"(?i)(?:\.opencode|opencode)[/\\]plugins?[/\\][^/\\\s\"']*foreman")  # Foreman's own file
+# Foreman's own file or folder in a plugin folder (`.opencode/plugins/foreman.ts`, `.opencode/plugins/foreman/`)
+_OWN_PLUGIN = re.compile(r"(?i)(?:\.opencode|opencode)[/\\]plugins?[/\\][^/\\\s\"']*foreman")
+_IN_OWN_FOLDER = re.compile(r"(?i)(?:\.opencode|opencode)/plugins?/[^/]*foreman[^/]*/")  # a file inside that folder
 _CONFIG_ENV = re.compile(r"\bOPENCODE_(?:DISABLE_PROJECT_CONFIG|CONFIG_PROJECT_DISABLE|CONFIG|CONFIG_DIR|CONFIG_CONTENT)\b")
 _REMOVES = re.compile(r"[\"']-(?:\*|%s)[\"']" % re.escape(PLUGIN_ID))
 _REMOVERS = {"rm", "rmdir", "unlink", "mv", "trash", "srm", "shred"}
@@ -159,10 +176,13 @@ def _switches_off(command: str) -> bool:
 
 
 def _is_config(path: str) -> bool:
-    """An OpenCode configuration file, or a Foreman plugin file in one of OpenCode's plugin folders."""
+    """An OpenCode configuration file (the TUI's `cli.json` included), a Foreman plugin file in one of OpenCode's
+    plugin folders, or a file inside Foreman's own plugin folder there (the folder form the TUI part needs)."""
     p = path.replace("\\", "/")
     name = p.rsplit("/", 1)[-1].lower()
-    if name in ("opencode.json", "opencode.jsonc"):
+    if name in ("opencode.json", "opencode.jsonc") or _CLI_CONFIG.search(p):
+        return True
+    if _IN_OWN_FOLDER.search(p):
         return True
     return bool(_PLUGIN_DIR.search(p)) and _FOREMAN.search(name) is not None
 
@@ -186,6 +206,8 @@ def _short(text: str, limit: int = 300) -> str:
     text = " ".join((text or "").split())
     return text if len(text) <= limit else text[:limit - 1] + "…"
 
+
+ATTENDED_WHERE = "OpenCode's terminal interface (the TUI) with Foreman's TUI plugin installed"
 
 PROGRAM = "opencode"  # the command; tests replace this name (a Windows npm install is `opencode.cmd`: `which` finds it)
 
@@ -262,13 +284,14 @@ def host(request=None) -> core.Host:
     return core.Host(
         name=NAME, label="OpenCode", person=lambda sub: "/foreman " + sub, program_dirs=_program_dirs(),
         cli=CLI, switches_off=_switches_off, is_config=_is_config, config_off=_config_off,
-        # The plugin says true only from the /foreman command's own handler, after the person answered OpenCode's
-        # own question in its interface.
+        # The TUI part says true for what a person typed at the TUI's prompt; the server part only for `allow <id>`,
+        # after the person answered OpenCode's own permission prompt (the module's docstring).
         attended=lambda: neutral.attended(request),
         # No effort levels: OpenCode names reasoning levels per model (a ``#variant``), so the person names it as
         # part of the model: ``/foreman reviewer provider/model#variant``.
         fresh_session=_fresh_session(), efforts=(), session=lambda: neutral.session(request),
-        reviewer_caveat=CAVEAT, board=core.BOARD_READS,
+        # Merge and reject too, for the person at the TUI; through the server command they find nobody attending.
+        reviewer_caveat=CAVEAT, board=core.BOARD_READS + core.BOARD_WRITES, attended_where=ATTENDED_WHERE,
     )
 
 
