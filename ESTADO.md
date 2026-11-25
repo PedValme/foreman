@@ -1,4 +1,4 @@
-# Foreman state — 2026-11-24
+# Foreman state — 2026-11-25
 
 > Rewritten in full, never appended; kept short.
 
@@ -16,9 +16,21 @@
     Code, Codex and pi. Seen on pi: a loosened assertion was sent back once and the agent restored it.
   - #77: OpenCode's TUI plugin (`adapters/opencode/tui.ts`, installed as a folder): `/foreman` typed in the TUI,
     replies in a dialog, merge and reject there only. Seen: throwaway pull request #21 merged from the TUI.
-- Next action: T7, which starts with the owner's answers (names of the packages, where each adapter is published,
-  what the root README says); then the one Hermes catalog update. `trabajo/agnostico.md`, "Next step", lists both
-  and what an agent can do meanwhile without him.
+- Next action, asked by the owner on 2026-11-25 for a fresh session, together with what is pending: evaluate what
+  Foreman needs to be harness-agnostic, beyond a list of supported agents · his words: «¿Qué necesitaríamos para
+  que sea una herramienta agnóstica del arnés? Que pueda ser utilizada sin importar el arnés […] aunque sea una
+  versión un poco más acotada o limitada, dependiendo de lo que se pueda, pero para cualquier agente». It is an
+  evaluation: it reads, measures what it must and comes back with a recommendation; nothing is built before his
+  yes. Starting points, the agent's own and not evaluated: what already depends on no harness (the detector as a
+  command for the required check in CI, rule 10; `adapters/hook.py` with `neutral.py`'s protocol, for any harness
+  whose extension can run a command per event); what a harness-free tier could be (git's own hooks, `pre-commit`
+  and `pre-push`; a `foreman` command a person runs in any terminal for the verdict, the review and the merge; a
+  shim in front of `git` and `gh`; an MCP server, which the model may or may not call); the harnesses that read
+  Claude Code's hooks (Cursor, Copilot: never tried); and the question under all of it: what each tier can
+  promise (a gate the agent cannot skip, a gate it can skip, or only the check in CI) and where the person's own
+  commands (`allow`, `merge`) have no sound sign of a person.
+- Then T7's remaining steps, each with the owner's yes (below), and the one Hermes catalog update.
+  `trabajo/agnostico.md`, "Next step", lists what an agent can do meanwhile without him.
 - Decided on 2026-11-24 (DECISIONES): the public name in every store is `foreman-gate`, and `foreman` stays as the
   command, the plugin's name inside Claude Code, OpenCode's plugin id and the Hermes catalog entry. Done for it,
   with nothing published: a root `package.json` under that name (pi's manifest, OpenCode's entrypoints), the Claude
@@ -66,7 +78,9 @@
   page, Anthropic's directory) and the one Hermes catalog update are left, each with the owner's yes.
 
 ## Next steps
-1. T7 and the one Hermes catalog update (`trabajo/agnostico.md`, "Next step"; `trabajo/model-picker.md`).
+1. The evaluation the owner asked for: Foreman for any harness, even in a narrower form ("Next session", above).
+   Then T7's stores and the one Hermes catalog update (`trabajo/agnostico.md`, "Next step";
+   `trabajo/model-picker.md`).
 2. Without the owner: the per-turn review seen in a real Claude Code and Codex session; OpenCode's end of turn
    given the long wait so the per-turn review can be offered there; a rejection and `allow` seen in OpenCode's TUI.
 3. Propose the Hermes seams one by one (#153841's advice): first the terminal cwd accessor.
