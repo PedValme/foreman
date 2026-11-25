@@ -1,6 +1,10 @@
 # Foreman as a required check in CI. Copy this file to .github/workflows/foreman-check.yml in your repository,
 # then make the "foreman" job a required status check in the branch protection (or ruleset) of your default branch.
 #
+# The shorter way is the action, which does what the last three steps below do:
+#   - uses: PedValme/foreman@<full commit SHA>      (after the full-history checkout; see action.yml)
+# There a marked finding fails the check unless you set `strict: "false"`; here it passes unless you add --strict.
+#
 # Why in CI: inside Hermes the gate runs on the agent's own machine. A required check runs where the agent cannot
 # edit it, so a green result here does not depend on the agent, as long as this file is protected: a pull request
 # runs its own copy of the workflow, so protect .github/workflows/ (CODEOWNERS with required review, or a ruleset).
@@ -69,10 +73,13 @@ jobs:
       - name: Foreman
         env:
           BASE: ${{ github.base_ref }}
-          # The download's plugin/ folder holds the foreman package. A Foreman commit from before plugin/ existed has
-          # it at the root: use ${{ runner.temp }}/foreman for that one.
-          PYTHONPATH: ${{ runner.temp }}/foreman/plugin
-        run: python -m foreman.detector "origin/$BASE" HEAD
-        # Variants:
-        #   python -m foreman.detector "origin/$BASE" HEAD --strict
-        #   python -m foreman.detector "origin/$BASE" HEAD --sarif results.sarif --sarif-threshold error
+        # Run from Foreman's own folder, never from your checkout: `python -m` loads a folder named `foreman` from
+        # where it runs before any other, so a pull request that adds one would take the detector's place. The
+        # download's plugin/ folder holds the foreman package (a Foreman commit from before plugin/ existed has it at
+        # the root: use ${{ runner.temp }}/foreman for that one).
+        working-directory: ${{ runner.temp }}/foreman/plugin
+        run: python -m foreman.detector "origin/$BASE" HEAD --repo "$GITHUB_WORKSPACE"
+        # Variants (a report's path is given in full: this step does not run in your checkout):
+        #   python -m foreman.detector "origin/$BASE" HEAD --repo "$GITHUB_WORKSPACE" --strict
+        #   python -m foreman.detector "origin/$BASE" HEAD --repo "$GITHUB_WORKSPACE" \
+        #     --sarif "$GITHUB_WORKSPACE/results.sarif" --sarif-threshold error

@@ -25,11 +25,22 @@
      that branch on the remote, only when the command leaves no doubt about where the push goes. Each reviewed
      by an agent that did not write it; #85's first version let `git push -f origin topic` through with
      `push.default=upstream`, which writes the base branch, and was closed before it merged.
-  3. Next: `action.yml` at the root (the check in CI as a GitHub Action instead of a copied workflow) and a
-     README that says what Foreman promises by level: locked (the required check in CI, any agent, with the
-     workflow protected, the agent unable to merge alone, and marked findings failing or behind a required
-     review), guarded (a harness's hook, the five of today), early warning (git's own hooks: not built).
-  4. Then publish what is already built, each store with his own yes (below).
+  3. In this change, waiting for the owner's reading of the README (his «sigue con action.yml y el readme por
+     niveles (como es de cara al publico sometelo tambien a jucio de agentes)»): `action.yml` at the root, the
+     check in CI as a GitHub Action, and a README that says what Foreman holds by where it runs: in the agent (a
+     hook: it stops the shortcut, not an attack) and in CI (a lock once four conditions hold: the check required,
+     the workflows protected, the rules binding the agent's account, Foreman in a job of its own). Three agents
+     judged the README (truth and security, wording, positioning). Asked of him with it: whether a marked finding
+     fails the check by default in the action (`strict`, recommended: yes).
+     Found on the way and fixed: the CI command the documents gave (`python -m` from the checkout) let a pull
+     request bring its own detector in a folder named `foreman` (in this change: the action loads it isolated,
+     the example and the plugin's README run it from Foreman's own folder); and #88, a git attribute that hid a
+     test switched off or a secret from every reading (reviewed in three passes).
+  4. Then, in this order (his «OK con tu recomendación», DECISIONES): the Hermes catalog update, tried first in
+     the `foremandev` profile of his Hermes machine (his yes to connect, asked when it starts) and sent to the
+     catalog under his account after he sees the text; only then an announcement, which tells whoever copied the
+     old CI example to update it; and the stores, each with his own yes (below). In the README Hermes Agent
+     comes first, by his word.
   Not now: the `generic` host, a terminal command with `status`, Foreman's own installer of git's hooks. Never
   proposed to build: an MCP server, a shim in front of `git` and `gh`, a sandbox, a `reference-transaction` hook.
 - Done on 2026-11-25, #86 and #87: both READMEs credit Foreman to Pedro Valencia (@pedvalme), linking to his
@@ -119,9 +130,12 @@
   shell `Shell` and `Execute` (read in their documentation): there the gate would be off and silent.
 - Unresolved (a test that may depend on speed; not seen failing): `test_hosts_opencode_tui` asserts that the
   command returns within a second (`returnedAt`); on a much slower runner it could fail.
-- Unresolved (the check in CI): a finding marked `foreman:allow` passes the check unless `--strict` is given, so
-  where nobody reviews the pull request the agent's own marker goes through (the workflow's header says it; the
-  example does not default to it).
+- Unresolved (the check in CI, the workflow to copy only; the action fails a marked finding by default): in
+  `examples/foreman-check.yml` a finding marked `foreman:allow` passes the check unless `--strict` is added, so
+  where nobody reviews the pull request the agent's own marker goes through (its header says it).
+- Unresolved (the check in CI): Foreman cannot protect itself from a step that ran the pull request's code before
+  it in the same job (a `.pth` file, `BASH_ENV`, a git or a python put first on the PATH): it needs a job of its
+  own, which the README states as a condition and nothing enforces.
 - Unresolved (adapters, every harness): Foreman's hooks and state are files the agent's shell can reach, guarded
   against the plain attempt and not a disguised one; a second agent started without Foreman is outside the gate;
   when the adapter cannot run (no `python3`) the harness goes on without the gate and shows the error. The required

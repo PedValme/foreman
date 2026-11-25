@@ -356,11 +356,18 @@ or in `.foreman.json` at the base, so the hooks, `/foreman` and CI all see it:
 ## CI mode
 
 ```
-PYTHONPATH=<foreman checkout>/plugin python -m foreman.detector origin/<base> HEAD [--check "<command>"] [--sarif FILE] [--sarif-threshold LEVEL] [--sarif-scope changed|all] [--strict] [--json]
+cd <foreman checkout>/plugin
+python -m foreman.detector origin/<base> HEAD --repo <the repository you check> [--check "<command>"] [--sarif FILE] [--sarif-threshold LEVEL] [--sarif-scope changed|all] [--strict] [--json]
 ```
 
-Run it from the repository you check. Exit codes: **0** clean, **1** at least one blocker, **2** the run could not be
-done (not a repository, git failed, an unreadable SARIF report). There is no `/foreman allow` in CI: a finding marked
+Run it from Foreman's own folder, never from the repository you check: `python -m` loads a folder named `foreman`
+from where it runs before any other, so a pull request that adds one would take the detector's place (until
+2026-11-25 this page and the example workflow said to run it from the checked repository). On GitHub the action
+does it for you: `uses: PedValme/foreman@<full commit SHA>` after a full-history checkout
+([`action.yml`](../action.yml); there a marked finding fails the check unless `strict: "false"`). Either way, give
+it a job of its own: a step that installs or runs the pull request's code before it can change the Python, the
+shell or Foreman's own files. Exit codes: **0** clean, **1** at least one blocker, **2** the run could not be done
+(not a repository, git failed, an unreadable SARIF report). There is no `/foreman allow` in CI: a finding marked
 `foreman:allow` is listed as "marked `foreman:allow`: needs a reviewer's OK in the pull request", exits 0 and, under
 GitHub Actions, becomes a `::warning` annotation; `--strict` makes them blockers. The `--json` verdict value for such
 a run stays `NEEDS YOUR OK`.

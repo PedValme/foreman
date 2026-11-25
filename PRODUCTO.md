@@ -29,7 +29,8 @@ to 25; ESTADO.md says which ones exist today). Rules 1 to 21 are written for Her
    credentials), on a model different from the main one: by default the user's configured fallback model. If only
    the main model is available, the verdict says the reviewer is the same model. It never runs inside a hook.
 9. **Other sources.** A SARIF 2.1.0 file (hermes-security exports one) can add blockers by severity.
-10. **CI mode.** The same detector runs as a command for a required check, where independence is real.
+10. **CI mode.** The same detector runs as a command for a required check, where independence is real: as a
+    GitHub Action (`action.yml` at the root) or as the workflow to copy (`examples/foreman-check.yml`).
 11. **Works without GitHub.** Without `gh` or a remote, everything that only needs local git still works.
 12. **Catalog rules are product rules.** Public surfaces only, credentials only through Hermes, approvals never
     bypassed, clean failure when unattended, every risky behaviour disclosed in the README, declared capabilities
@@ -86,6 +87,14 @@ to 25; ESTADO.md says which ones exist today). Rules 1 to 21 are written for Her
     reviewer; Claude Code and Codex get the gate, the person's commands and the reviewer. Phone notifications and
     the Desktop panel are Hermes's. Outside Hermes `/foreman` is the Hermes plugin's own board, run unchanged on a
     stand-in for Hermes's context, so the two cannot drift apart.
+
+27. **Said by where it holds.** Foreman says what it promises by where it runs, not by a list of agents. In the
+    agent (a harness's hook) it stops the shortcut at the moment it is tried, and it is made of files the agent's
+    shell can reach. In CI (the required check) it is the one control the agent cannot move, once the check is
+    required, the workflows are protected, the rules bind the agent's own account and Foreman runs in a job of
+    its own. A harness is named only after its own test in a real session. The check in CI never loads the
+    detector from the repository it checks (a pull request could bring its own), and in the action a marked
+    finding fails unless the user turns that off.
 
 ## Out of this delivery
 Publishing GitHub checks from the agent, the owner's decisions and pending items, rework metrics. Buttons on the
