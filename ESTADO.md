@@ -19,6 +19,11 @@
 - Next action: T7, which starts with the owner's answers (names of the packages, where each adapter is published,
   what the root README says); then the one Hermes catalog update. `trabajo/agnostico.md`, "Next step", lists both
   and what an agent can do meanwhile without him.
+- Decided on 2026-11-24 (DECISIONES): the public name in every store is `foreman-gate`, and `foreman` stays as the
+  command, the plugin's name inside Claude Code, OpenCode's plugin id and the Hermes catalog entry. In progress
+  on the branch `claude/publication-install`, not merged: a root `package.json` under that name, the Claude Code
+  marketplace renamed, and each installation from git tried with a redirected configuration directory. Nothing is
+  published; npm, OpenCode's ecosystem page and Anthropic's directory each wait for the owner's yes.
 - With the owner, open (asked on 2026-11-24; he wanted both evaluated before deciding, and they were, read-only):
   - Where to publish. Read in each harness's documentation and help, not tried: pi installs from git with a root
     `package.json` (`pi install git:…`) and lists in its catalog any npm package with the keyword `pi-package`;
