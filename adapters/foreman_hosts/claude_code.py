@@ -26,10 +26,13 @@ CLI = ("claude", "claude-code")  # the command, and its npm package as `npx @ant
 SHELL_TOOLS = {"Bash", "PowerShell"}
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # the installed plugin
 
-_PLUGIN_OFF = re.compile(r"(?i)\bplugins?\s+(?:disable|uninstall|remove|rm)\b")
+# `claude plugin disable foreman`, and `claude plugin marketplace remove foreman-gate`, which uninstalls the
+# marketplace's plugins with it (seen on Claude Code 2.1.332).
+_PLUGIN_OFF = re.compile(r"(?i)\bplugins?\s+(?:marketplace\s+)?(?:disable|uninstall|remove|rm)\b")
 _FOREMAN = re.compile(r"(?i)\bforeman\b")
 _SETTINGS = re.compile(r"(?i)\.claude[/\\](?:managed-)?settings(?:\.local)?\.json")
 _PLUGINS_DIR = re.compile(r"(?i)\.claude[/\\]plugins\b")
+_PLUGIN_CACHE = re.compile(r"(?i)/plugins/cache/[^/]+/foreman/[^/]+/?$")  # an installed copy, wherever its home is
 _HOOKS_WORD = re.compile(r"(?i)disableAllHooks")
 _HOOKS_OFF = re.compile(r"(?i)[\"']disableAllHooks[\"']\s*:\s*true")
 _PLUGIN_FALSE = re.compile(r"(?i)foreman[^\"'\n]*[\"']\s*:\s*false")
@@ -66,7 +69,9 @@ def _program_dirs(roots) -> tuple:
     clone loaded with --plugin-dir only the folders with code are, so the rest of that repository stays workable."""
     out = []
     for root in roots:
-        if _PLUGINS_DIR.search(root.replace("\\", "/")):
+        # `~/.claude/plugins/…`, or `<CLAUDE_CONFIG_DIR>/plugins/cache/foreman-gate/foreman/<version>` when Claude
+        # Code's folder was moved (seen: `claude plugin install foreman@foreman-gate` copies the plugin there).
+        if _PLUGINS_DIR.search(root.replace("\\", "/")) or _PLUGIN_CACHE.search(root.replace("\\", "/")):
             out.append(root)
         out += [os.path.join(root, d) for d in ("adapters", ".claude-plugin", "plugin")]
     return tuple(out)

@@ -1,5 +1,5 @@
 {
-  "name": "foreman",
+  "name": "foreman-gate",
   "owner": {"name": "PedValme", "url": "https://github.com/PedValme"},
   "metadata": {"description": "Foreman: a green check the agent did not rig."},
   "plugins": [

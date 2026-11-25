@@ -1,5 +1,6 @@
 """pi's adapter: its dialect (``adapters/foreman_hosts/pi.py``), the entry point as the extension runs it, and the
 extension itself (``adapters/pi/foreman.ts``) driven without pi where ``node`` can load TypeScript."""
+import dataclasses
 import io
 import json
 import os
@@ -59,6 +60,30 @@ class TheHost(PiCase):
         self.assertEqual(pi._program_dirs((clone,)), (os.path.join(clone, "adapters"), os.path.join(clone, "plugin")))
         installed = os.path.join(self.tmp, ".pi", "agent", "git", "github.com", "x", "foreman")
         self.assertEqual(pi._program_dirs((installed,))[0], installed)
+
+    def test_a_package_pi_installed_is_whole_wherever_pi_keeps_it(self):
+        # `pi install git:…` clones into <pi's folder>/git/<host>/<path>; `npm:foreman-gate` into
+        # <pi's folder>/npm/node_modules/foreman-gate, or the older global npm root. pi's folder may be moved.
+        moved = os.path.join(self.tmp, "agent-home")
+        git_copy = os.path.join(moved, "git", "github.com", "PedValme", "foreman")
+        self.assertEqual(pi._program_dirs((git_copy,), {"PI_CODING_AGENT_DIR": moved})[0], git_copy)
+        npm_copy = os.path.join(self.tmp, "lib", "node_modules", "foreman-gate")
+        self.assertEqual(pi._program_dirs((npm_copy,), {})[0], npm_copy)
+        # Without that variable the same folder is an ordinary clone: only its code.
+        self.assertNotIn(git_copy, pi._program_dirs((git_copy,), {}))
+        self.assertNotIn(os.path.join(self.tmp, "agent-home-2"),
+                         pi._program_dirs((os.path.join(self.tmp, "agent-home-2"),), {"PI_CODING_AGENT_DIR": moved}))
+
+    def test_the_agent_cannot_edit_the_installed_packages_manifest(self):
+        # The package's package.json names the extension pi loads: emptying its `pi` field turns Foreman off.
+        moved = os.path.join(self.tmp, "agent-home")
+        copy = os.path.join(moved, "git", "github.com", "PedValme", "foreman")
+        env = {"PI_CODING_AGENT_DIR": moved}
+        h = dataclasses.replace(pi.host({}, env), program_dirs=pi._program_dirs((copy,), env))
+        manifest = os.path.join(copy, "package.json")
+        self.assertTrue(core._is_own_path(h, manifest))
+        self.assertTrue(core._names_own(h, "rm " + manifest))
+        self.assertFalse(core._is_own_path(h, os.path.join(self.root, "package.json")))
 
 
 class SwitchingOff(PiCase):

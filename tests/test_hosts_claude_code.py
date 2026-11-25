@@ -97,6 +97,18 @@ class PreToolUse(ClaudeCase):
                         "npm exec -- claude plugins uninstall foreman"):
             self.assertEqual(self.decision(self.tool("Bash", command=command))[0], "deny", command)
 
+    def test_the_agent_cannot_remove_the_foreman_gate_marketplace_or_its_plugin(self):
+        # Removing the marketplace uninstalls its plugins (seen on Claude Code 2.1.332).
+        for command in ("claude plugin uninstall foreman@foreman-gate",
+                        "claude plugin marketplace remove foreman-gate", "claude plugins marketplace rm foreman-gate",
+                        "claude plugin disable foreman@foreman-gate --scope user",
+                        "rm -rf ~/.claude/plugins/cache/foreman-gate",
+                        "rm -rf ~/.claude/plugins/marketplaces/foreman-gate"):
+            self.assertEqual(self.decision(self.tool("Bash", command=command))[0], "deny", command)
+        for command in ("claude plugin marketplace list", "claude plugin marketplace remove someone-else",
+                        "claude plugin marketplace update foreman-gate"):
+            self.assertIsNone(self.tool("Bash", command=command), command)
+
     def test_reading_claude_codes_settings_is_ordinary_work(self):
         for command in ("claude plugin list", "cat ~/.claude/settings.json", "grep foreman ~/.claude/settings.json",
                         "jq .enabledPlugins ~/.claude/settings.json 2>/dev/null", "ls ~/.claude/plugins/cache/foreman",
@@ -137,6 +149,16 @@ class PreToolUse(ClaudeCase):
         other = {"CLAUDE_PLUGIN_ROOT": os.path.join(self.tmp, "cache", "foreman")}
         target = os.path.join(self.tmp, "cache", "foreman", ".claude-plugin", "plugin.json")
         self.assertEqual(self.decision(self.tool("Write", env=other, file_path=target, content="{}"))[0], "deny")
+
+    def test_a_copy_from_the_foreman_gate_marketplace_is_foremans_whole_wherever_claude_codes_folder_is(self):
+        for home in (os.path.join(self.tmp, ".claude"), os.path.join(self.tmp, "moved-config")):
+            installed = os.path.join(home, "plugins", "cache", "foreman-gate", "foreman", "0.1.0")
+            env = {"CLAUDE_PLUGIN_ROOT": installed}
+            self.assertIn(installed, claude_code.host(env).program_dirs, home)
+            self.assertEqual(self.decision(self.tool("Write", env=env, file_path=os.path.join(installed, "README.md"),
+                                                     content="x"))[0], "deny", home)
+        clone = os.path.join(self.tmp, "src", "foreman")
+        self.assertNotIn(clone, claude_code._program_dirs((clone,)))
 
     def test_a_copy_claude_code_installed_is_foremans_whole_and_a_clone_is_not(self):
         installed = os.path.join(self.tmp, ".claude", "plugins", "cache", "foreman", "foreman", "0.1.0")
@@ -301,9 +323,16 @@ class PluginFiles(unittest.TestCase):
 
     def test_the_manifest_points_at_files_that_exist(self):
         manifest = json.loads(self.read(".claude-plugin", "plugin.json"))
-        self.assertEqual(manifest["name"], "foreman")
+        self.assertEqual(manifest["name"], "foreman")  # the prefix of /foreman:status (DECISIONES.md, 2026-11-24)
         self.assertTrue(os.path.isfile(os.path.join(ROOT, manifest["hooks"])))
         self.assertTrue(os.path.isdir(os.path.join(ROOT, manifest["commands"])))
+
+    def test_the_marketplace_is_foreman_gate_and_carries_the_plugin_foreman(self):
+        # `claude plugin install foreman@foreman-gate`: the public name is the marketplace's, the plugin keeps its own.
+        marketplace = json.loads(self.read(".claude-plugin", "marketplace.json"))
+        self.assertEqual(marketplace["name"], "foreman-gate")
+        self.assertEqual([p["name"] for p in marketplace["plugins"]], ["foreman"])
+        self.assertEqual(marketplace["plugins"][0]["source"], "./")
 
     def test_every_hook_runs_the_entry_point_isolated(self):
         hooks = json.loads(self.read("adapters", "claude-code", "hooks.json"))["hooks"]

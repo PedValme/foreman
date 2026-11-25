@@ -13,12 +13,33 @@ Both are thin: for each thing OpenCode tells them, they run `python3 -I <this cl
 one request (`../foreman_hosts/neutral.py`) and do what the answer says. OpenCode's own words for Foreman live in
 `../foreman_hosts/opencode.py`.
 
-Needs Python 3.9 or newer as `python3` on the PATH OpenCode runs with, and git. No npm package, no build step.
+Needs Python 3.9 or newer as `python3` on the PATH OpenCode runs with, and git. No npm dependency, no build step.
 
 ## Install it
 
-Use a clone you are not working in (Foreman keeps the agent out of the clone's `adapters/` and `plugin/`). There are
-two forms; use one of them, not both (both load the server part twice under one id).
+**As a package, from the repository (both parts).** The root `package.json` is the package `foreman-gate`; its
+`exports` name the server part (`./server`) and the TUI part (`./tui`), which is what `opencode plugin add` looks
+for:
+
+```
+opencode plugin add git+https://github.com/PedValme/foreman.git
+```
+
+It installs the package into OpenCode's cache and adds it to your global `opencode.json` (OpenCode's `plugin add`
+always writes there). Seen on OpenCode 2.3.2 with `XDG_CONFIG_HOME` (and the cache, data and state folders) set to
+temporary ones, from a copy of this repository served as a git remote on the machine itself
+(`git+http://127.0.0.1:<port>/PedValme/foreman.git`): "Plugin … installed and added to <that folder>/opencode/
+opencode.json"; the cache held only `adapters/`, `plugin/foreman/`, `package.json`, `README.md` and `LICENSE`; in the
+TUI (`opencode --standalone`) typing `/foreman` listed both parts, and `/foreman help` and `/foreman` showed their
+replies in the TUI part's dialog, with no model turn. The github.com form is read in OpenCode's source (its
+`plugin add` takes an npm or git package specifier), not run. Seen too: `opencode plugin list --standalone` printed
+"No plugins found" while its own log showed the plugin loading, and `opencode plugin update <that specifier>`
+answered "Plugin is not configured"; to update, remove it and add it again. The installed copy is Foreman's whole
+(the agent cannot edit it), and removing its entry from `opencode.json` is refused to the agent like `"-foreman"`.
+Do not combine it with a folder or file link below (both load the server part under one id).
+
+**From a clone.** Use a clone you are not working in (Foreman keeps the agent out of the clone's `adapters/` and
+`plugin/`). There are two forms; use one of them, not both (both load the server part twice under one id).
 
 **The folder (both parts; the one to use).** OpenCode's TUI loads a plugin's TUI part only from a folder in a
 `plugins` folder (it takes `tui.ts` from it, and OpenCode's server takes `server.ts`), so link the clone's

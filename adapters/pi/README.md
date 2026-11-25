@@ -8,9 +8,26 @@ gate itself is the Hermes plugin's (`plugin/foreman/`); pi's own words and guard
 Needs pi 1.5.0 or newer, Python 3.9 or newer as `python3` (another interpreter: set `FOREMAN_PYTHON` before you
 start pi), and git. No npm dependency and no build step: pi loads the TypeScript file as it is.
 
+## Install it
+
+Not published yet. From the repository, as the pi package `foreman-gate` (the root `package.json` names this
+extension):
+
+```
+pi install git:github.com/PedValme/foreman        # for your user (pi's settings.json)
+pi install -l git:github.com/PedValme/foreman     # for one project (.pi/settings.json)
+```
+
+Seen on pi 1.5.0 with a temporary `PI_CODING_AGENT_DIR`, from a copy of this repository served as a git remote on
+the machine itself (`git:http://127.0.0.1:<port>/PedValme/foreman.git`): "Installed git:…", pi cloned it into
+`<pi's folder>/git/127.0.0.1/PedValme/foreman`, `pi list` showed it, and in a throwaway repository `pi -p "/foreman
+help"` and `pi -p "/foreman"` (the board) answered with no model turn. The github.com form is read in pi's
+documentation (`docs/packages.md`), not run. pi keeps a git package as a full clone, so the copy is Foreman's whole:
+the agent cannot edit it (its `package.json` included), wherever `PI_CODING_AGENT_DIR` puts it.
+
 ## Try it
 
-Not published yet. From a clone, without installing anything into pi:
+From a clone, without installing anything into pi:
 
 ```
 pi -e /path/to/foreman/adapters/pi/foreman.ts
@@ -140,5 +157,6 @@ Each of these was seen in a real session on pi 1.5.0 (macOS, the default model, 
   finds, and at most three times in all where the review at the end of every turn is on.
 - pi runs each `bash` call in the session's directory: a `cd` does not carry to the next call, and Foreman inspects
   the session's directory.
-- Not seen: Windows (`powershell`, `python3` may be missing there: set `FOREMAN_PYTHON`), a pi package
-  installation (`pi install`), and the dialog for an `ask` in a real session (it is exercised by the tests).
+- Not seen: Windows (`powershell`, `python3` may be missing there: set `FOREMAN_PYTHON`), an installation from npm
+  (`pi install npm:foreman-gate`: not published), and the dialog for an `ask` in a real session (it is exercised by
+  the tests).

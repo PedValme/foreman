@@ -1,12 +1,38 @@
 # Foreman for Codex
 
-Not published yet, and not a Codex plugin yet: Codex's plugin manifest could not be tried here without installing
-it, so this folder ships only the hooks.
+Not published yet.
 
 Needs Python 3.9 or newer as `python3`, and git. Outside Hermes, Foreman keeps its state (what waits for you,
 each session's turn) in `~/.foreman`.
 
-## Try it from a clone
+## Install it as a plugin
+
+The repository is a Codex marketplace named `foreman-gate` holding the plugin `foreman`
+(`.codex-plugin/plugin.json`, whose hooks are `plugin-hooks.json` in this folder):
+
+```
+codex plugin marketplace add PedValme/foreman
+codex plugin add foreman@foreman-gate
+```
+
+Then open Codex and trust Foreman's hooks with `/hooks`: Codex skips a plugin's hooks until you review them (its
+documentation), and again after an update that changes them.
+
+Seen on Codex CLI 0.171.0 with a temporary `CODEX_HOME`, from a copy of this repository served as a git remote on
+the machine itself: "Added marketplace `foreman-gate`", "Added plugin `foreman` from marketplace `foreman-gate`",
+copied to `plugins/cache/foreman-gate/foreman/0.1.0`, and `codex plugin list` showed it "installed, enabled". With
+the trust step skipped for that one run (`codex exec --dangerously-bypass-hook-trust`), the prompt `foreman help`
+was blocked before any model turn (no tokens used), so the plugin's `UserPromptSubmit` hook ran with Codex's
+dialect. The trust step with `/hooks`, the gate on a real tool call and the `owner/repo` form were not tried
+(`owner/repo` is read in Codex's documentation).
+
+Why `.codex-plugin/`: Codex 0.171.0 also reads Claude Code's `.claude-plugin/marketplace.json` and `plugin.json`
+(that is how the marketplace above is found). Without `.codex-plugin/plugin.json` it installed the plugin from
+Claude Code's manifest and ran Claude Code's hooks, the wrong dialect (seen: `/foreman:help` was blocked as a
+command); with it, Codex takes `.codex-plugin`. Removing the marketplace (`codex plugin marketplace remove
+foreman-gate`) left the installed plugin and its hooks working (seen).
+
+## Try it from a clone, or install it by hand
 
 Nothing is installed and nothing under `~/.codex` changes: the hooks are given for one session on the command line.
 From the repository you want to work in:

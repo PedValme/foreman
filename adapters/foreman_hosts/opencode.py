@@ -65,6 +65,8 @@ _HOME = r"(?:~|\$home|\$\{home\})"
 _XDG = r"(?:\$xdg_config_home|\$\{xdg_config_home\})"
 _PLUGIN_HOMES = re.compile(r"(?:(?:^|/)\.opencode|^%s/\.config/opencode|^%s/opencode|^%s/\.config)(?:/plugins?)?$"
                            % (_HOME, _XDG, _HOME))
+# A package specifier that loads Foreman, as `opencode plugin add` writes it: npm's name or the repository's git URL.
+_PACKAGE_ENTRY = re.compile(r"[\"'](?!-)[^\"'\s]*(?:foreman-gate|/foreman(?:\.git)?)(?:[@#][^\"'\s]*)?[\"']", re.I)
 _DEFINES = re.compile(r"\bid\s*:\s*[\"']%s[\"']" % re.escape(PLUGIN_ID))
 
 
@@ -193,13 +195,24 @@ def _config_off(before: str, after: str) -> bool:
     before, after = before or "", after or ""
     if len(_REMOVES.findall(after)) > len(_REMOVES.findall(before)):
         return True
+    # The entry `opencode plugin add` wrote (`"foreman-gate"`, `"git+https://github.com/PedValme/foreman.git"`)
+    # dropped from the list: the package is no longer loaded.
+    if len(_PACKAGE_ENTRY.findall(after)) < len(_PACKAGE_ENTRY.findall(before)):
+        return True
     return bool(_DEFINES.search(before)) and not _DEFINES.search(after)
 
 
-def _program_dirs() -> tuple:
-    """The clone's folders with code: OpenCode loads the plugin from `adapters/opencode`, which runs
-    `adapters/hook.py`, which runs `plugin/foreman`. The rest of that repository stays workable."""
-    return tuple(os.path.join(ROOT, d) for d in ("adapters", "plugin"))
+_PACKAGE_COPY = re.compile(r"(?i)/node_modules/foreman-gate/?$")
+
+
+def _program_dirs(root: str = None) -> tuple:
+    """Where Foreman's code is. A package OpenCode installed (`opencode plugin add`, under its cache's
+    `npm/…/node_modules/foreman-gate`) is Foreman's whole: its `package.json` names the server and TUI parts OpenCode
+    loads. In a clone only the folders with code are: OpenCode loads the plugin from `adapters/opencode`, which runs
+    `adapters/hook.py`, which runs `plugin/foreman`; the rest of that repository stays workable."""
+    root = ROOT if root is None else root
+    whole = (root,) if _PACKAGE_COPY.search(root.replace("\\", "/")) else ()
+    return whole + tuple(os.path.join(root, d) for d in ("adapters", "plugin"))
 
 
 def _short(text: str, limit: int = 300) -> str:

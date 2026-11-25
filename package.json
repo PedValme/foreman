@@ -1,0 +1,25 @@
+{
+  "name": "foreman-gate",
+  "version": "0.1.0",
+  "description": "A green check the agent did not rig: Foreman's deterministic gate (no model) for pi and OpenCode. It blocks a commit, push or pull request that skips, deletes or moves tests, edits what the check runs, bypasses hooks or carries a secret, and an agent-run merge.",
+  "keywords": ["pi-package", "opencode", "plugin", "git", "testing", "security", "hooks"],
+  "homepage": "https://github.com/PedValme/foreman",
+  "bugs": "https://github.com/PedValme/foreman/issues",
+  "repository": {"type": "git", "url": "git+https://github.com/PedValme/foreman.git"},
+  "license": "MIT",
+  "author": "PedValme",
+  "type": "module",
+  "files": [
+    "adapters/",
+    "plugin/foreman/",
+    "!**/__pycache__/",
+    "!**/*.py[co]"
+  ],
+  "exports": {
+    "./server": "./adapters/opencode/server.ts",
+    "./tui": "./adapters/opencode/tui.ts"
+  },
+  "pi": {
+    "extensions": ["./adapters/pi/foreman.ts"]
+  }
+}
