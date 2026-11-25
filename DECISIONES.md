@@ -76,9 +76,9 @@ the owner confirms it. An option the owner turned down is a decision too and sta
 - 2026-11-10 · A public demo repository, `PedValme/foreman-demo`, made from the cart example, for the video's board
   and merge shots · Pedro: «crea el repo foreman-demo y empecemos con telegram».
 - 2026-11-10 · The catalog entry: a short description (the full disclosure stays in the README and the pull request
-  text), category `automation`, and a real-app capture of the panel first among the screenshots; the credit line
-  links to https://aqpintelligence.com, in that closing line only · Pedro, to the four proposals: «sí a las cuatro,
-  la web es correcta».
+  text), category `automation`, and a real-app capture of the panel first among the screenshots · Pedro, to the
+  four proposals: «sí a las cuatro, la web es correcta». Its fourth, the credit line linking to the company's
+  website, was replaced on 2026-11-25 (below).
 - 2026-11-10 · The catalog pull request is opened when the work is finished, not before · Pedro: «El PR primero
   terminemos».
 - 2026-11-10 · Nothing is recorded or submitted until every function of the plugin has been tried end to end and
@@ -158,6 +158,12 @@ the owner confirms it. An option the owner turned down is a decision too and sta
   conflicts, and the branch that follows the base branch itself (`git checkout -b topic origin/main`) pushed
   before it is rebased, both refused for the base branch's own change to a test; then `action.yml` and the README
   by level, as decided the same day.
+- 2026-11-25 · The credit is his personal brand · Pedro: «que quede todo asociado anmi marca personal @pedvalme»,
+  in full: «quiero que quitemos el "by aqp intelligence" o la referencia esa que pusimos que quede todo asociado
+  anmi marca personal @pedvalme o sea Pedro Valencia». Replaces the credit line of 2026-11-10 (the company's). Ajustes del agente: the closing line of
+  both READMEs reads "Built by Pedro Valencia (@pedvalme)" and links to his GitHub profile, the one address of
+  his this repository already names; the `author` fields and the licence already say `PedValme` and stay. The
+  page in Hermes's catalog shows the plugin's README at the pinned commit, so it changes with the catalog update.
 - 2026-11-24 · The root README announces the adapters · Pedro: «ok al readme», to the section he read ("In Claude
   Code, Codex, pi and OpenCode": the install command from git for each, what each gives, where the limits are).
   npm, OpenCode's page, Anthropic's directory and the issue to Hermes still wait for his yes, one by one.
