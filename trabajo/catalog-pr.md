@@ -72,8 +72,8 @@ https://github.com/PedValme/foreman/compare/ce9b01a2904edb2aadefcb4ae7111d5dc976
   `--no-replace-objects`.
 - The core now reads three optional attributes of the context it was registered with
   (`foreman_host_label`, `foreman_review_before_merge`, `foreman_finish_review`). Hermes's context has none of
-  them, so in Hermes they do nothing; they are how the same core runs in other harnesses from the repository's
-  `adapters/` folder, which Hermes does not install.
+  them, so in Hermes they do nothing; they serve the adapters for other harnesses that are under construction in
+  the repository's `adapters/` folder, which Hermes does not install.
 
 ### Validation
 - `hermes plugins validate plugin --install-deps` at the new pin: passed; security scan safe; the one warning
