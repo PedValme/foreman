@@ -17,7 +17,7 @@ import re
 import time
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Iterable, Optional
+from typing import Callable, Iterable, Optional
 
 from . import detector, grants
 from .detector import MARKER, Finding, GitError, Repo
@@ -791,8 +791,11 @@ def evaluate(act: Action, deadline: Optional[float] = None) -> Outcome:
     try:
         if act.kind == "commit":
             staged_only, untracked = _commit_scope(act)
-            report = detector.scan_worktree(repo, staged_only=staged_only, include_untracked=untracked,
-                                            extra_messages=_commit_message(act), scope="commit")
+
+            def scan(against="HEAD"):
+                return detector.scan_worktree(repo, staged_only=staged_only, include_untracked=untracked,
+                                              extra_messages=_commit_message(act), scope="commit", against=against)
+            report = _merge_conclusion(repo, scan(), scan)
         elif act.kind == "push":
             report = _push_report(repo, act, out)
         elif act.kind == "pr-create":
@@ -806,6 +809,59 @@ def evaluate(act: Action, deadline: Optional[float] = None) -> Outcome:
     except GitError as e:
         out.errors.append(str(e))
     return out
+
+
+def _merging(repo: Repo) -> Optional[str]:
+    """The one commit a merge in progress brings in; None with no merge in progress, or with several (an octopus)."""
+    path = repo.try_git("rev-parse", "--git-path", "MERGE_HEAD")
+    if not path:
+        return None
+    try:
+        with open(os.path.join(repo.root, path), encoding="utf-8", errors="replace") as fh:
+            heads = fh.read().split()
+    except OSError:
+        return None
+    if len(heads) != 1:
+        return None
+    return repo.try_git("rev-parse", "--verify", "-q", heads[0] + "^{commit}")
+
+
+def _merge_conclusion(repo: Repo, report, scan: Callable):
+    """``report`` (the commit's change against HEAD) for a commit that concludes a merge: what the resolution does.
+
+    Read against HEAD alone, the commit that concludes a merge is everything the other side brings: once the base
+    branch is merged into a branch and the merge stops on a conflict, someone else's change to a test reads as this
+    commit's, and the agent is told to undo it. So the tree is read against both sides (``scan(commit)`` reads it
+    against another commit), and a finding counts by whose file it is in:
+
+    - a file only this side changed since the two parted, or neither did: against HEAD, as before;
+    - a file only the other side changed: against the other side, so its own change does not count and what the
+      resolution does to it does (a test it brought, dropped here);
+    - a file both changed: only what shows against both, which is what the resolution added to either.
+
+    Only when a remote already has what comes in: a local branch can carry a rig made where the gate did not see
+    it, and a merge must not be the way to bring that in unread. Anything else (no merge, an octopus, sides with
+    no common commit) is read against HEAD as before."""
+    theirs = _merging(repo)
+    if not theirs or repo.try_git("rev-list", "-1", theirs, "--not", "--remotes") != "":
+        return report
+    parted = repo.try_git("merge-base", "HEAD", theirs)
+    if not parted:
+        return report
+
+    def changed(side):
+        return set(repo.git("diff", "--no-renames", "--name-only", parted, side).splitlines())
+
+    def key(f):
+        return f.rule, f.file, f.line, f.message
+
+    their_files, our_files = changed(theirs), changed("HEAD")
+    other = scan(theirs)
+    against_ours, against_theirs = {key(f) for f in report.findings}, {key(f) for f in other.findings}
+    report.findings = ([f for f in report.findings if f.file not in their_files or key(f) in against_theirs]
+                       + [f for f in other.findings if f.file not in our_files and key(f) not in against_ours])
+    report.errors += [e for e in other.errors if e not in report.errors]
+    return report
 
 
 def _push_report(repo: Repo, act: Action, out: Outcome):

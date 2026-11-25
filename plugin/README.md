@@ -480,6 +480,9 @@ a quoted string or a comment does not, except in the files that run the check (C
   narrows what is inspected (a wildcard refspec, a
   configured `remote.<name>.push`, `remote.<name>.mirror` or `push.default=matching`, also given with `git -c`, asks
   you; a local branch as upstream is ignored);
+- the commit that concludes a merge is read for what the resolution itself does when a remote already has the
+  commits that come in: their own changes are not that commit's (a merge of commits no remote has is read whole,
+  as any commit). A `MERGE_HEAD` left or written by hand has the same effect as the merge it names;
 - a push is read against what the remote already has of the branch. Once the base branch came into the branch (a
   rebase onto it, a merge of it), it is read from where the branch leaves the base branch, and what changed since
   the branch's last push still counts except in the files the base branch's own incoming commits touched. When the

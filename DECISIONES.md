@@ -153,6 +153,11 @@ the owner confirms it. An option the owner turned down is a decision too and sta
   speaks by level, then publish what is already built (each publication with his own yes, as before); the generic
   host, the terminal command with `status` and Foreman's own installer of git's hooks, not now (nobody has asked
   for Foreman on a harness it does not cover: 28 stars, no issue from outside).
+- 2026-11-25 · Two more false refusals of the gate first · Pedro: «sí, arregla primero los dos rechazos falsos»,
+  to the proposal he read: before `action.yml`, the `git commit` that concludes a merge of the base branch with
+  conflicts, and the branch that follows the base branch itself (`git checkout -b topic origin/main`) pushed
+  before it is rebased, both refused for the base branch's own change to a test; then `action.yml` and the README
+  by level, as decided the same day.
 - 2026-11-24 · The root README announces the adapters · Pedro: «ok al readme», to the section he read ("In Claude
   Code, Codex, pi and OpenCode": the install command from git for each, what each gives, where the limits are).
   npm, OpenCode's page, Anthropic's directory and the issue to Hermes still wait for his yes, one by one.
