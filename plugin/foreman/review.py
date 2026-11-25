@@ -347,8 +347,9 @@ def _one_line_each(record: dict) -> None:
             for key in ("title", "why", "fix"):
                 if isinstance(finding.get(key), str):
                     finding[key] = _one_line(finding[key])
-    if isinstance(record.get("summary"), str):
-        record["summary"] = _one_line(record["summary"])
+    for key in ("summary", "error"):  # the error quotes an answer that was not JSON
+        if isinstance(record.get(key), str):
+            record[key] = _one_line(record[key])
 
 
 def verify(findings: Any, sent: list) -> tuple:
