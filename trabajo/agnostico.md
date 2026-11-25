@@ -131,8 +131,11 @@ session that did not write the code, the Hermes plugin untouched until one subst
 - Whether the Hermes catalog's scanner reads outside `subdir`: unknown; nothing binary is committed anywhere.
 - Names and distribution (marketplace, npm, how Codex's hooks are installed): the owner, T7.
 
-## Any agent: the evaluation of 2026-11-25 (a proposal; nothing is built before the owner's yes)
-The owner's question: what Foreman needs to be usable whatever the harness, even in a narrower form.
+## Any agent: the evaluation of 2026-11-25
+The owner's question: what Foreman needs to be usable whatever the harness, even in a narrower form. What he
+decided of the proposal below (DECISIONES, 2026-11-25): the gate's false refusal after a rebase first (#83), then
+`action.yml` and a README by level, then publishing what is built; the `generic` host, the terminal command and
+the installer of git's hooks, not now.
 - Measured, in throwaway repositories on macOS, with the detector imported by a probe that was not kept:
   - As git's `pre-commit` hook (`detector.scan_worktree`, staged only) it refuses a commit that switches a test
     off, with the file and line on git's own error output, in about 60 ms; as `pre-push` (`detector.scan_range`)
