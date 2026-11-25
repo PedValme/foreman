@@ -224,6 +224,7 @@ def host(env=None, data=None) -> core.Host:
         name=NAME, label="Codex", person=lambda sub: "foreman " + sub, program_dirs=_program_dirs(roots),
         cli=CLI, switches_off=_switches_off, is_config=_is_config, config_off=_config_off,
         fresh_session=_fresh_session(env), efforts=EFFORTS, session=session, reviewer_caveat=REVIEWER_CAVEAT,
+        turn_review=True,  # the Stop hook waits ten minutes (adapters/codex/hooks.json)
     )
 
 

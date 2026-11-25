@@ -82,8 +82,9 @@ Each of these was seen in a real session on pi 1.5.0 (macOS, the default model, 
 - **The review at the end of every turn**, only if you turn it on: `/foreman reviewer every-turn on` (`off` to
   stop; off by default). When the agent is about to settle after a run that changed code and the gate finds
   nothing, Foreman starts the reviewer on the change itself, and a verified BLOCKING or HIGH finding sends the
-  agent back with it: never twice for the same diff, at most three times in one run. It costs one more pi session
-  on each such run, on your account, and the run waits for it. Seen on pi 1.5.0 with `-p`: asked to loosen
+  agent back with it: never twice for the same diff, at most twice in one run besides the gate's own once, and
+  for one change until three send-backs or four reviews (then it waits for you: `/foreman review` reviews it and
+  gives the four back). It costs one more pi session on each such run, on your account, and the run waits for it. Seen on pi 1.5.0 with `-p`: asked to loosen
   `assert total() == 2` to `assert total()`, the agent did; the review sent the change back (`/foreman pipeline`:
   "Review sent it back (1 blocking), bounce 1/3"), and the agent put the exact value back before it finished.
 

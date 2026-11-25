@@ -27,7 +27,7 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
-from foreman import detector, grants, review
+from foreman import detector, grants, pipeline, review
 
 from . import core
 
@@ -75,7 +75,10 @@ def _save_setting(host: core.Host, model: str, effort: str) -> None:
 
 
 def each_turn(host: core.Host) -> bool:
-    """The person turned on the review at the end of every turn, for this harness (off unless they did)."""
+    """The person turned on the review at the end of every turn, for this harness (off unless they did, and
+    always off where the harness's end-of-turn hook does not wait for a review)."""
+    if not host.turn_review or host.fresh_session is None:
+        return False
     chosen = _config().get("each_turn")
     return isinstance(chosen, dict) and chosen.get(host.name) is True
 
@@ -324,16 +327,29 @@ def run(host: core.Host, args: str, cwd: str) -> str:
     finish(host, p, record)
     try:
         review.record_in_pipeline(record)
+        ref = review._pipeline_ref(record)
+        if ref is not None:  # a person reviewed this change: the per-turn review's budget for it starts again
+            pipeline.reset_model_calls(ref)
     except Exception:
         logger.warning("foreman: cannot record the review", exc_info=True)
     return _present(review.format_review(record, "cli"), host, p, record)
 
 
 def finish(host: core.Host, p: Plan, record: dict) -> None:
-    """What every review record gets here before anyone reads it: its findings on one line each, and who reviewed."""
-    if isinstance(record, dict):
-        _one_line_each(record)
-        _keep_the_reviewer(host, p, record)
+    """What every review record gets here before anyone reads it: its findings on one line each, and who reviewed.
+    A record the review has just made is stored again as finished, in its cache too: the core reads the cache when
+    it sends a change back (``finish.step``), and what it sends must be lines the review wrote."""
+    if not isinstance(record, dict):
+        return
+    _one_line_each(record)
+    _keep_the_reviewer(host, p, record)
+    key = record.get("cache_key")
+    if isinstance(key, str) and key and not record.get("cached") and isinstance(record.get("target"), dict) \
+            and record.get("verdict") != review.NOT_REVIEWED:
+        try:
+            review.cache_save(key, record)
+        except Exception:
+            logger.warning("foreman: cannot store the finished review", exc_info=True)
 
 
 def who(host: core.Host, p: Plan, record: dict) -> list:
@@ -401,9 +417,13 @@ def bound(host: core.Host, p: Plan, level: str = ""):
 def when(host: core.Host) -> str:
     """One line: when the review runs in this harness."""
     usual = "when you ask" + (" and before a merge" if "merge" in host.board else "")
+    if not host.turn_review:
+        return "It reviews %s." % usual
     if each_turn(host):
-        return ("It reviews %s, and at the end of every turn that changed code (`%s off` stops that)."
-                % (usual, host.person("reviewer " + EACH_TURN)))
+        return ("It reviews %s, and at the end of every turn that changed code, until it has sent one change back "
+                "%d times or reviewed it %d times: then it waits for you, and `%s` reviews it again (`%s off` stops "
+                "the review at the end of a turn)." % (usual, pipeline.max_bounces(), pipeline.review_budget(),
+                                                        host.person("review"), host.person("reviewer " + EACH_TURN)))
     return ("It reviews %s. `%s on` also reviews at the end of every turn that changed code: one more session of "
             "%s each time, on your account." % (usual, host.person("reviewer " + EACH_TURN), host.label))
 
@@ -416,7 +436,12 @@ def turn_end(host: core.Host, changed: list, session: str, attempt: int) -> Opti
     BLOCKING and HIGH findings, never twice for the same diff, at most ``max_bounces`` times."""
     from foreman import finish as loop
     from foreman import gate
-    with bound(host, plan(host), "finish"):
+    try:
+        p = plan(host)
+    except Exception:  # whatever is wrong with the review, the gate's own end of turn still runs
+        logger.warning("foreman: the review at the end of the turn failed", exc_info=True)
+        return gate.on_pre_verify(coding=True, attempt=attempt, changed_paths=changed, session_id=session)
+    with bound(host, p, "finish"):
         try:
             roots, blockers = gate._scan_changed(changed, time.monotonic() + gate.HOOK_BUDGET_SECONDS, session)
             if roots and not blockers:
@@ -444,6 +469,9 @@ def configure(host: core.Host, args: str) -> str:
         return "\n".join(lines + ["Effort levels: %s. `%s default` goes back to the default."
                                   % (levels, host.person("reviewer")), when(host)])
     if words[0].lower() == EACH_TURN:
+        if not host.turn_review:
+            return ("Foreman: the review at the end of every turn is not available in %s yet: its end-of-turn hook "
+                    "does not wait long enough for a review. %s" % (host.label, when(host)))
         choice = words[1].lower() if len(words) == 2 else ""
         if choice not in ("on", "off"):
             return "Foreman: `%s on` or `%s off`.\n%s" % (host.person("reviewer " + EACH_TURN),

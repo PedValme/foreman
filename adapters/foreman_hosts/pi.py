@@ -183,6 +183,7 @@ def host(request: Optional[dict] = None, env=None) -> core.Host:
         fresh_session=_fresh_session(env), efforts=EFFORTS, session=lambda: neutral.session(request),
         # Merge and reject too: pi runs the person's command with no model turn, and its own selector asks them.
         board=core.BOARD_READS + core.BOARD_WRITES,
+        turn_review=True,  # the extension gives the end of a run a command's time
     )
 
 

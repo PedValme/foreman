@@ -88,6 +88,10 @@ class Host:
     # The board's subcommands this harness answers (standin.py): "board", "verdict", "use"… () when it has none.
     # Only a harness whose own command mechanism runs Foreman's command with no model turn lists any.
     board: tuple = ()
+    # The harness's end-of-turn hook waits long enough for a review (minutes): only then can the person turn on
+    # the review at the end of every turn. Where it does not, that review would be started and cut off each turn:
+    # a session paid for and never read.
+    turn_review: bool = False
 
 
 class Asking(BaseException):

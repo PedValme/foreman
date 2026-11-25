@@ -95,13 +95,16 @@ BLOCKED with the line quoted, and the same review asked again returned the store
 **At the end of every turn, only if you turn it on** (`reviewer every-turn on`; off by default, per harness; in
 Codex it is set in Foreman's `config.json`, like the reviewer itself). Then, when the agent is about to finish a
 turn that changed code and the gate finds nothing, Foreman itself starts the reviewer on the change, and a
-verified BLOCKING or HIGH finding sends the agent back with it: never twice for the same diff, at most three times
-in one turn and three times for one change (the core's own loop and limits, `plugin/foreman/finish.py`); after
-that the turn ends and `pipeline` shows that the change waits for you. A review that could not run does not hold
-the turn. It costs one more session of the harness on each such turn, on your account, and the turn waits for it
-(minutes, with nothing shown). The agent cannot switch it through a nested harness. Seen on pi 1.5.0: the agent
-loosened an assertion, the review sent it back once and the agent put the exact value back. In Claude Code and
-Codex it was run in the tests and not seen in a session; OpenCode's plugin does not wait long enough for it yet.
+verified BLOCKING or HIGH finding sends the agent back with it: never twice for the same diff, and in one turn at
+most twice besides the gate's own once (the core's own loop and limits, `plugin/foreman/finish.py`). For one
+change it stops after three send-backs or four reviews: from then on that change is not reviewed at the end of a
+turn, `reviewer` says so, and your own `review` reviews it and gives the four reviews back (on pi, `pipeline`
+shows the change waiting for you). A review that could not run does not hold the turn. It costs one more session
+of the harness on each such turn, on your account, and the turn waits for it (minutes, with nothing shown). The
+agent cannot switch it through a nested harness. Seen on pi 1.5.0: the agent loosened an assertion, the review
+sent it back once and the agent put the exact value back. In Claude Code and Codex it was run in the tests,
+through their `Stop` hooks, and not seen in a session. OpenCode does not offer it: its plugin stops waiting for
+the end of a turn after thirty seconds, so a review started there would be paid for and never read.
 
 | | Claude Code | Codex | pi | OpenCode |
 |---|---|---|---|---|
