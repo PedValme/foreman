@@ -4,87 +4,44 @@
 
 <!-- pic-method: next-session -->
 ## Next session
-- Done this session (the owner: «empecemos con la evaluacion acordada como promera tarea, usa el protocolo de
-  delegscion si consideras que es util o agentes adversariales»): the evaluation of Foreman for any harness
-  (his question of 2026-11-25: «¿Qué necesitaríamos para que sea una herramienta agnóstica del arnés? […] aunque
-  sea una versión un poco más acotada o limitada […] pero para cualquier agente»). Read-only, nothing built: two
-  research passes (documentation), probes in throwaway repositories, and an adversarial review of the proposal by
-  an agent that did not write it. What was measured and read, and the proposal as it stands after that review:
-  `trabajo/agnostico.md`, "Any agent: the evaluation of 2026-11-25".
-- What the owner decided on it (DECISIONES, 2026-11-25; he asked «antes de hacerlo, valenla pena???» and the
-  answer was that not all of it is: nobody has asked for Foreman on a harness it does not cover). In this order:
-  1. Done, #83: the gate no longer refuses a push for what came with the base branch (a rebase onto it, a
-     merge of it), a defect of today's gate the evaluation found. Reviewed in three passes by an agent that did
-     not write it; the first version loosened the control and was reworked. It is in the core, so Hermes users
-     get it with the catalog update. With it, the OpenCode TUI tests stopped depending on the runner's speed
-     (CI had failed three times on Windows that day).
-  2. Done, #84 and #85 (his «sí, arregla primero los dos rechazos falsos»): two more refusals for the base
-     branch's own change to a test. #84: the `git commit` that concludes a merge that stopped on a conflict is
-     read for what the resolution does, when a remote already has what comes in. #85: a branch that follows the
-     base branch itself (`git checkout -b topic origin/main`), pushed to a branch of its own, is read against
-     that branch on the remote, only when the command leaves no doubt about where the push goes. Each reviewed
-     by an agent that did not write it; #85's first version let `git push -f origin topic` through with
-     `push.default=upstream`, which writes the base branch, and was closed before it merged.
-  3. In this change, waiting for the owner's reading of the README (his «sigue con action.yml y el readme por
-     niveles (como es de cara al publico sometelo tambien a jucio de agentes)»): `action.yml` at the root, the
-     check in CI as a GitHub Action, and a README that says what Foreman holds by where it runs: in the agent (a
-     hook: it stops the shortcut, not an attack) and in CI (a lock once four conditions hold: the check required,
-     the workflows protected, the rules binding the agent's account, Foreman in a job of its own). Three agents
-     judged the README (truth and security, wording, positioning). Asked of him with it: whether a marked finding
-     fails the check by default in the action (`strict`, recommended: yes).
-     Found on the way and fixed: the CI command the documents gave (`python -m` from the checkout) let a pull
-     request bring its own detector in a folder named `foreman` (in this change: the action loads it isolated,
-     the example and the plugin's README run it from Foreman's own folder); and #88, a git attribute that hid a
-     test switched off or a secret from every reading (reviewed in three passes).
-  4. Then, in this order (his «OK con tu recomendación», DECISIONES): the Hermes catalog update, tried first in
-     the `foremandev` profile of his Hermes machine (his yes to connect, asked when it starts) and sent to the
-     catalog under his account after he sees the text; only then an announcement, which tells whoever copied the
-     old CI example to update it; and the stores, each with his own yes (below). In the README Hermes Agent
-     comes first, by his word.
-  Not now: the `generic` host, a terminal command with `status`, Foreman's own installer of git's hooks. Never
-  proposed to build: an MCP server, a shim in front of `git` and `gh`, a sandbox, a `reference-transaction` hook.
-- Done on 2026-11-25, #86 and #87: both READMEs credit Foreman to Pedro Valencia (@pedvalme), linking to his
-  X profile, instead of to the company (DECISIONES); the catalog's page changes with the catalog update.
-- Done on 2026-11-25, #57, the first pull request from outside (by `sys-dev-git`), with the owner's «3. ok»: a
-  value that is nothing but a history scrubber's marker (REMOVED or REDACTED between asterisks) is a placeholder,
-  not a secret. The spelling asked of it on 2026-11-23 went as a commit of ours on its author's branch, after a
-  comment there; reviewed by an agent that did not write it; merged by squash as its author's. Left as it was,
-  and true of every placeholder before it: a real value written right after the marker behind a `#` or a `;`,
-  where the captured value stops, is not read.
+- Next action: the one Hermes catalog update, which the owner put before any announcement (DECISIONES,
+  2026-11-25: «OK con tu recomendación»). It carries everything on `main` since the pin ce9b01a: the gate's fixes
+  (#83, #84, #85), what a git attribute could hide (#88), the scrubber's marker (#57), the credit line (#86,
+  #87), and what waited for it before (the one line in `review.verify`, the three seams the stand-in wraps, the
+  native model picker of `trabajo/model-picker.md`, `board.candidates` on Windows). Two things in it are his and
+  are asked when it starts, each with its own yes: connecting to his Hermes machine to try it in the `foremandev`
+  profile, and the pull request to the catalog under his account after he sees its text.
+- Then the announcement, his: Foreman in Hermes, in Claude Code, Codex, pi and OpenCode, and in CI for any agent.
+  It tells whoever copied `examples/foreman-check.yml` before 2026-11-25 to update it (below). Then the stores,
+  each with his own yes: `npm publish` as `foreman-gate` (his npm account; it lists it in pi's catalog), the pull
+  request to OpenCode's ecosystem page, Anthropic's directory for Claude Code (an icon, a review), GitHub's
+  Marketplace for the action, and the focused issue to Hermes for a public accessor of the terminal's directory
+  (text shown to him first; `trabajo/hermes-issue-seams.md`).
+- Done on 2026-11-25, all merged, each change to a control reviewed by an agent that did not write it:
+  - The evaluation the owner asked for, of Foreman for any agent (`trabajo/agnostico.md`). He asked whether all
+    of it was worth building and the answer was no: nobody has asked for a harness Foreman does not cover. Not
+    built, by his decision: a `generic` host, a terminal command with `status`, an installer of git's hooks.
+  - Three refusals for someone else's change to a test: a push after the base branch came in (#83), the commit
+    that concludes a merge that stopped on a conflict (#84), a branch that follows the base branch itself (#85).
+  - Two holes: a git attribute hid a test switched off or a secret from every reading (#88); and the CI command
+    the documents gave, `python -m` run from the checkout, let a pull request bring its own detector in a folder
+    named `foreman` (#89: the action loads it isolated, the example and the plugin's README run it from
+    Foreman's own folder).
+  - `action.yml` (#89): the check in CI as a GitHub Action, a marked finding failing by default. Seen on GitHub
+    in this repository's CI on Ubuntu and Windows: this pull request itself CLEAN with the default base, a clean
+    branch CLEAN, a rigged one BLOCKED with a fake detector planted where the action runs.
+  - The README says what Foreman holds by where it runs (#89): in the agent, and in CI as a lock once four
+    conditions hold. Three agents judged it before the owner read it; Hermes Agent comes first, by his word.
+  - The first pull request from outside (#57, by `sys-dev-git`), finished by us on its author's branch and merged
+    as theirs; the credit to Pedro Valencia (@pedvalme), linking to his X profile (#86, #87).
 - Proposed to the owner and not answered: try the Claude Code adapter on Copilot CLI, after its dialect knows
   the other harnesses' tool names (none is installed here; it needs his account).
-- Then T7's remaining steps, each with the owner's yes (below), and the one Hermes catalog update.
-  `trabajo/agnostico.md`, "Next step", lists what an agent can do meanwhile without him.
-- Decided on 2026-11-24 (DECISIONES): the public name in every store is `foreman-gate`, and `foreman` stays as the
-  command, the plugin's name inside Claude Code, OpenCode's plugin id and the Hermes catalog entry. Done for it,
-  with nothing published: a root `package.json` under that name (pi's manifest, OpenCode's entrypoints), the Claude
-  Code marketplace renamed, a Codex plugin manifest (`.codex-plugin/`: Codex 0.171.0 also reads `.claude-plugin/`
-  and was installing Claude Code's hooks). Each installation was seen from a local git server into a redirected
-  configuration directory: pi (`pi install git:…`, the board with no model turn), OpenCode (`opencode plugin add
-  git+https://…`, both parts and the TUI dialog), Claude Code (marketplace add, install, enabled; no session, it
-  needs a login) and Codex (installed, and `foreman help` answered by its dialect). Then the same commands were
-  run against GitHub (#80 merged), each into a temporary configuration directory: the four installed it. The root
-  README announces the adapters since the owner's «ok al readme» (#81). Each harness's README has what was seen.
-- Next for publication, each with the owner's yes and none given yet: `npm publish` as `foreman-gate` (his npm
-  account), which lists it in pi's catalog; the pull request to OpenCode's ecosystem page; Anthropic's directory
-  for Claude Code (it wants an icon and has a review); the focused issue to Hermes for a public accessor of the
-  terminal's directory (text shown to him first).
-- With the owner, open (asked on 2026-11-24; he wanted both evaluated before deciding, and they were, read-only):
-  - Where to publish. Read in each harness's documentation and help, not tried: pi installs from git with a root
-    `package.json` (`pi install git:…`) and lists in its catalog any npm package with the keyword `pi-package`;
-    OpenCode has no store, `opencode plugin add github:…` (the entrypoints a `package.json` must name were not
-    confirmed) and an ecosystem page kept by pull request; Claude Code: this repository is already its own
-    marketplace (`.claude-plugin/marketplace.json`), and Anthropic's directory takes submissions with a review;
-    Codex has git marketplaces, but its public directory excludes plugins with hooks. On npm, `foreman` and
-    `opencode-foreman` are other people's packages. His to decide: the name, npm or not, each submission.
-  - The first Hermes seam (a public accessor for the terminal's directory). Checked upstream: v0.23.0 to v0.23.4
-    do not add it, the private function is unchanged, no roadmap was found; #153841's "not planned" was a triage
-    of its security label, and its maintainer asked for one focused issue or a pull request against
-    `hermes_cli/data/plugin_api.json` per seam (#148311, the same kind of request, was completed). Foreman still
-    needs it: it is the only source that follows the agent's `cd` between terminal calls.
 - Hermes: Foreman is in its catalog at the pin ce9b01a (NousResearch/hermes-agent#153851); a plugin change reaches
-  users only through the one substantial catalog update, tried first in the `foremandev` profile (DECISIONES,
-  2026-11-22 and 2026-11-24). First place in the Hermes Agent Plugin Hackathon; promotion is another project's.
+  users only through the catalog update, tried first in the `foremandev` profile. Checked upstream on 2026-11-24:
+  v0.23.0 to v0.23.4 add no public accessor for the terminal's directory, and its maintainer asked for one
+  focused issue or pull request per seam (#153841, #148311).
+- Where each adapter can be published, read on 2026-11-24 and not tried: `trabajo/agnostico.md` and each
+  harness's README. On npm, `foreman` and `opencode-foreman` are other people's packages.
 - What waits for Pedro lives in OmniBrain: `omnibrain_esperas` with repo `foreman`, or «Te espera» in the panel.
 
 ## Delivered
@@ -93,27 +50,32 @@
   installable from this repository as `foreman-gate` and announced in the root README; in no store yet: the gate,
   the person's commands and the review on request; on pi and in OpenCode's TUI also the board, merge and reject;
   in Claude Code, Codex and pi the review at the end of every turn when turned on.
+- In CI for any agent: `action.yml` (used by commit SHA from this repository; not in GitHub's Marketplace) and
+  the workflow to copy, `examples/foreman-check.yml`.
 - `PedValme/foreman-demo` (public) as the demo repository; the README as one page with the real capture and the GIF.
 
 ## In progress
-- Foreman for any harness: of T7, the name, the packaging and the README are done; the stores (npm, OpenCode's
-  page, Anthropic's directory) and the one Hermes catalog update are left, each with the owner's yes.
+- Nothing is half-built. What is left of "Foreman for any harness" (`trabajo/agnostico.md`, T7) is the catalog
+  update and the publications, each with the owner's yes.
 
 ## Next steps
-1. `action.yml` and the README by level (decided, "Next session" above). Then T7's stores and the one Hermes
-   catalog update, which now also carries the gate's fixes of #83, #84 and #85, the scrubber's marker of #57
-   and the new credit line (`trabajo/agnostico.md`, "Next step"; `trabajo/model-picker.md`).
+1. The Hermes catalog update, then the announcement, then the stores ("Next session", above).
 2. Without the owner: the per-turn review seen in a real Claude Code and Codex session; OpenCode's end of turn
    given the long wait so the per-turn review can be offered there; a rejection and `allow` seen in OpenCode's TUI.
 3. Propose the Hermes seams one by one (#153841's advice): first the terminal cwd accessor.
 4. Clean up the rest of the hackathon's throwaways, with the owner's yes: `~/cart`, `~/foreman-demo` and
    `/tmp/fm-battery*` on the owner's Hermes machine; the unpushed local branch `claude/minimal-child-env` (kept as
-   `windows/claude/minimal-child-env` in one clone). Done on 2026-11-24 with his «ok»: the demo repository's
-   pull requests #6, #7, #12, #13, #14 closed and its `t/*` branches deleted (it keeps #3, #4 and #15).
+   `windows/claude/minimal-child-env` in one clone).
 5. Whether the private voice-plugins test repository becomes a project; whether only the owner merges here;
    register the demo repository in the owner's environment as outside the factory.
 
 ## Known issues
+- Unresolved (whoever copied the workflow to copy before 2026-11-25): their `examples/foreman-check.yml` runs the
+  detector from the checkout, where a pull request can bring its own. Nothing tells them: the announcement must.
+- Unresolved (git's attributes, after #88; disclosed in the plugin's README): a file under a binary's name
+  (`.bin`, `.png`…) is left as git shows it; a clean filter the base already had stores a pointer in place of a
+  file it newly matches; a pull request that is not in the clone is `INCOMPLETE` where GitHub shows a file as
+  binary; the diff the second model reviews leaves such a file out.
 - Unresolved (core; what is left of the refusals for the base branch's own change, each disclosed in the plugin's
   README): a cherry-pick or a revert that stops on a conflict is still read against HEAD alone; a branch that
   follows the base branch is read against the base's tip whenever the command leaves a doubt about where the push
