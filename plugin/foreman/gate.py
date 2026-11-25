@@ -855,9 +855,46 @@ def _push_report(repo: Repo, act: Action, out: Outcome):
                          ).startswith("refs/remotes/"):
         upstream = None
     if upstream:
-        return detector.scan_range(repo, upstream, head, scope="push", base_label=head + "@{upstream}")
+        return _published_push_report(repo, head, upstream)
     base, label = repo.base_ref(head)
     return detector.scan_range(repo, base, head, scope="push", base_label=label)
+
+
+def _is_ancestor(repo: Repo, older: str, newer: str) -> bool:
+    return repo.try_git("merge-base", "--is-ancestor", older, newer) is not None
+
+
+def _published_push_report(repo: Repo, head: str, tip: str):
+    """What a push of ``head`` changes, for a branch the remote already has at ``tip`` (its upstream).
+
+    A push is read against what the remote has of the branch: ``tip..head``. That holds while the base branch (the
+    remote's default branch) did not come into the branch in between. Once it did (a rebase onto it, a merge of
+    it), the difference from that tip carries the base branch's own commits: other people's changes, which the
+    agent would be told to undo. Then the branch is read from where it now leaves the base branch, as the pull
+    request shows it, and the difference from the old tip still counts for every file the base branch's incoming
+    commits did not touch: a test the branch had already pushed and dropped on the way is one of those.
+
+    The base branch is read from the remote's branches only (never a local branch, which the agent can move). When
+    none can be named the old range stands. The old range is never replaced: it is added to, and a finding leaves
+    it only for a file git names among the base's incoming ones (a list git cannot give is an error; a part of it
+    git cannot give is left out, which keeps more findings)."""
+    def scan(base, label):
+        return detector.scan_range(repo, base, head, scope="push", base_label=label)
+
+    tip_label = head + "@{upstream}"
+    fork, label = repo.base_ref(head, remote_only=True)
+    if not fork or _is_ancestor(repo, fork, tip):
+        return scan(tip, tip_label)
+    report, before = scan(fork, label), scan(tip, tip_label)
+    theirs = set(repo.git("log", "--no-renames", "--name-only", "--format=", "%s..%s" % (tip, fork)).splitlines())
+    left = repo.try_git("merge-base", tip, fork)
+    if left:
+        theirs.update(repo.git("diff", "--no-renames", "--name-only", left, fork).splitlines())
+    seen = {(f.rule, f.file, f.line, f.message) for f in report.findings}
+    report.findings += [f for f in before.findings
+                        if f.file not in theirs and (f.rule, f.file, f.line, f.message) not in seen]
+    report.errors += [e for e in before.errors if e not in report.errors]
+    return report
 
 
 def _pr_create_report(repo: Repo, act: Action):

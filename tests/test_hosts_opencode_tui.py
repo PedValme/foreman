@@ -81,9 +81,16 @@ print(json.dumps({"reply": "late"}))
 """
 
 
-def kinds(shown):
-    """What the TUI showed, without the dialog's size: ["select", "alert", …]."""
-    return [entry[0] for entry in shown if entry[0] != "set"]
+WORKING = "Foreman is working on "
+
+
+def kinds(shown, working=False):
+    """What the TUI showed, without the dialog's size: ["select", "alert", …]. The notice that Foreman is working
+    is left out unless ``working``: the plugin shows it whenever an answer takes longer than a second and a half,
+    which on a slow machine is any answer (CI on Windows on 2026-11-25: three runs failed on it), so only the test
+    about that notice counts it. Every other toast still shows."""
+    return [entry[0] for entry in shown
+            if entry[0] != "set" and (working or not (entry[0] == "toast" and WORKING in str(entry[1])))]
 
 
 def alerts(shown):
@@ -164,7 +171,7 @@ class Reads(TuiCase):
 
     def test_a_slow_answer_shows_that_foreman_is_working(self):
         out = self.drive("slow", self.hook(SLOW_HOOK))
-        self.assertEqual(kinds(out["slow"]), ["toast", "alert"])
+        self.assertEqual(kinds(out["slow"], working=True), ["toast", "alert"])
         self.assertIn("Foreman is working on /foreman status", out["slow"][0][1])
         self.assertEqual(alerts(out["slow"]), ["late"])
 

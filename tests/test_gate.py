@@ -435,6 +435,208 @@ class TerminalGate(GitRepoCase):
         self.assertIsNone(terminal("git commit -m x", outside))
 
 
+class _PushedBranch(GitRepoCase):
+    """A repository with a remote: the base branch pushed, and a branch `feature` with one commit, pushed too."""
+
+    BASE = "main"
+
+    def setUp(self):
+        super().setUp()
+        self.remote = os.path.join(self.tmp, "remote.git")
+        self.git("init", "-q", "--bare", self.remote, cwd=self.tmp)
+        self.git("remote", "add", "origin", self.remote)
+        if self.BASE != "main":
+            self.git("branch", "-m", self.BASE)
+        self.write("app.py", "x = 1\n")
+        self.write("tests/test_app.py", "def test_x():\n    assert True\n")
+        self.commit("base")
+        self.git("push", "-q", "-u", "origin", self.BASE)
+        self.git("checkout", "-q", "-b", "feature")
+        self.write("app.py", "x = 2\n")
+        self.commit("feature: its own change")
+        self.git("push", "-q", "-u", "origin", "feature")
+
+    def someone_else_changes_a_test_on_the_base(self, back_to="feature"):
+        self.git("checkout", "-q", self.BASE)
+        self.write("tests/test_other.py", SKIP + "\ndef test_y():\n    assert True\n")
+        self.commit("someone else's test, already on the base branch")
+        self.git("push", "-q", "origin", self.BASE)
+        self.git("checkout", "-q", back_to)
+
+    def rig(self):
+        self.write("tests/test_app.py", SKIP + "\ndef test_x():\n    assert True\n")
+
+    def rig_pushed_by_hand(self):
+        self.rig()
+        self.git("add", "-A")
+        self.git("commit", "-qm", "a rig, pushed by hand")
+        self.git("push", "-q", "origin", "feature")
+
+
+class PushAfterTheBaseCameIn(_PushedBranch):
+    """A push is read for what the branch itself changes. Found on 2026-11-25: the range ran from the branch's old
+    tip on the remote, so once the base branch had come into the branch (a rebase, a merge) with someone else's
+    change to a test, the push was refused for that change and the agent was told to undo another person's line."""
+
+    def test_a_rebased_branch_is_not_refused_for_what_came_with_the_base(self):
+        self.someone_else_changes_a_test_on_the_base()
+        self.git("rebase", "-q", self.BASE)
+        for command in ("git push --force-with-lease origin feature", "git push --force-with-lease", "git push -f"):
+            self.assertIsNone(terminal(command, self.root), command)
+
+    def test_a_branch_the_base_was_merged_into_is_not_refused_for_what_came_with_it(self):
+        self.someone_else_changes_a_test_on_the_base()
+        self.git("merge", "-q", "--no-edit", self.BASE)
+        for command in ("git push origin feature", "git push"):
+            self.assertIsNone(terminal(command, self.root), command)
+
+    def test_what_the_branch_itself_rigs_is_still_refused_after_a_rebase_or_a_merge(self):
+        self.someone_else_changes_a_test_on_the_base()
+        self.rig()
+        self.commit("rig")
+        self.git("rebase", "-q", self.BASE)
+        d = terminal("git push --force-with-lease origin feature", self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertIn("tests/test_app.py", d["message"])
+        self.assertNotIn("tests/test_other.py", d["message"])  # the other person's line is not the branch's
+        self.git("reset", "-q", "--hard", "origin/feature")
+        self.git("merge", "-q", "--no-edit", self.BASE)
+        self.rig()
+        self.commit("rig after the merge")
+        d = terminal("git push origin feature", self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertIn("tests/test_app.py", d["message"])
+        self.assertNotIn("tests/test_other.py", d["message"])
+
+    def test_a_rig_already_pushed_and_carried_through_a_rebase_is_refused(self):
+        # The whole branch is new commits after a rebase: what it changed before the rebase counts again.
+        self.rig_pushed_by_hand()
+        self.someone_else_changes_a_test_on_the_base()
+        self.git("rebase", "-q", self.BASE)
+        d = terminal("git push --force-with-lease origin feature", self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertIn("tests/test_app.py", d["message"])
+
+    def test_a_plain_push_still_reads_only_the_commits_the_remote_does_not_have(self):
+        self.rig_pushed_by_hand()
+        self.write("app.py", "x = 3\n")
+        self.commit("the agent's clean commit")
+        self.assertIsNone(terminal("git push origin feature", self.root))
+        self.rig()
+        self.write("tests/test_more.py", SKIP + "\ndef test_z():\n    assert True\n")
+        self.commit("the agent's rig")
+        d = terminal("git push", self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertIn("tests/test_more.py", d["message"])
+
+    def a_test_the_branch_already_pushed(self):
+        self.write("tests/test_new.py", "def test_new():\n    assert True\n")
+        self.commit("feature: a new test")
+        self.git("push", "-q", "origin", "feature")
+
+    # Found in the review of this fix: reading from where the branch leaves the base whenever its history was
+    # rewritten let these three through, because that tree never had what the branch pushed before.
+
+    def test_a_pushed_test_dropped_by_rewriting_history_is_refused(self):
+        self.a_test_the_branch_already_pushed()
+        self.git("reset", "-q", "--hard", "HEAD~1")
+        self.write("app.py", "x = 5\n")
+        self.commit("feature: the same change, without the test")
+        d = terminal("git push -f origin feature", self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertIn("tests/test_new.py", d["message"])
+
+    def test_the_base_branch_pushed_over_someone_elses_commit_is_refused(self):
+        self.someone_else_changes_a_test_on_the_base(back_to=self.BASE)
+        self.write("tests/test_theirs.py", "def test_theirs():\n    assert True\n")
+        self.commit("someone else's second test")
+        self.git("push", "-q", "origin", self.BASE)
+        self.git("reset", "-q", "--hard", "HEAD~1")
+        self.write("app.py", "x = 6\n")
+        self.commit("the agent's commit in its place")
+        d = terminal("git push -f origin " + self.BASE, self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertIn("tests/test_theirs.py", d["message"])
+
+    def test_a_pushed_test_dropped_while_rebasing_onto_the_moved_base_is_refused(self):
+        self.a_test_the_branch_already_pushed()
+        self.someone_else_changes_a_test_on_the_base()
+        self.git("reset", "-q", "--hard", "HEAD~1")  # leaves the new test's commit behind
+        self.git("rebase", "-q", self.BASE)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "tests", "test_new.py")))
+        self.write("app.py", "x = 7\n")
+        self.commit("feature: goes on")
+        d = terminal("git push --force-with-lease origin feature", self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertIn("tests/test_new.py", d["message"])
+        self.assertNotIn("tests/test_other.py", d["message"])
+
+    def test_rewriting_history_does_not_bring_back_what_was_already_on_the_remote(self):
+        self.rig_pushed_by_hand()
+        self.write("app.py", "x = 8\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "--amend", "-m", "a rig, pushed by hand, and one more line of code")
+        self.assertIsNone(terminal("git push -f origin feature", self.root))
+
+    def test_a_branch_that_follows_the_base_is_read_against_the_bases_tip(self):
+        # `git checkout -b topic origin/main` follows origin/main. Pushed onto the base branch itself, what the
+        # base has and the branch lacks would be gone from the remote, so the base's tip stays the base of the
+        # reading, whichever way the command names the destination (found in the review of this fix: reading where
+        # the push goes from the command let `topic:heads/main` and a flag with a value through).
+        self.git("checkout", "-q", "-b", "topic", "origin/" + self.BASE)
+        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "topic@{upstream}").strip(), "origin/" + self.BASE)
+        self.write("app.py", "x = 9\n")
+        self.commit("topic: its own change")
+        self.someone_else_changes_a_test_on_the_base(back_to="topic")
+        for command in ("git push -f origin topic:" + self.BASE, "git push -f origin HEAD:refs/heads/" + self.BASE,
+                        "git push -f origin topic:heads/" + self.BASE):
+            d = terminal(command, self.root)
+            self.assertEqual(d["action"], "block", command)
+            self.assertIn("tests/test_other.py", d["message"], command)
+        self.git("config", "push.default", "upstream")
+        for command in ("git push -f", "git push -f -o ci.skip origin"):
+            d = terminal(command, self.root)
+            self.assertEqual(d["action"], "block", command)
+            self.assertIn("tests/test_other.py", d["message"], command)
+
+
+class PushWithNoBaseBranchToName(_PushedBranch):
+    """The remote's default branch is not `main` or `master` and the clone has no `origin/HEAD` (a repository made
+    with `git init` and `git remote add`): Foreman cannot name the base branch, so it reads the push as before,
+    from the branch's old tip on the remote."""
+
+    BASE = "trunk"
+
+    def test_the_old_range_stands_so_what_came_with_the_base_is_still_refused(self):
+        self.someone_else_changes_a_test_on_the_base()
+        self.git("rebase", "-q", self.BASE)
+        self.assertEqual(terminal("git push --force-with-lease origin feature", self.root)["action"], "block")
+
+    def test_what_the_branch_itself_rigs_is_refused(self):
+        self.someone_else_changes_a_test_on_the_base()
+        self.rig()
+        self.commit("rig")
+        self.git("rebase", "-q", self.BASE)
+        d = terminal("git push --force-with-lease origin feature", self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertIn("tests/test_app.py", d["message"])
+
+    def test_a_local_main_moved_onto_rewritten_history_is_not_the_base(self):
+        self.rig()
+        self.git("add", "-A")
+        self.git("commit", "-q", "--amend", "-m", "feature: rewritten, with a rig")
+        self.git("branch", "-f", "main", "HEAD")
+        d = terminal("git push --force-with-lease origin feature", self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertIn("tests/test_app.py", d["message"])
+
+    def test_with_the_remotes_head_known_the_base_is_found(self):
+        self.git("remote", "set-head", "origin", self.BASE)
+        self.someone_else_changes_a_test_on_the_base()
+        self.git("rebase", "-q", self.BASE)
+        self.assertIsNone(terminal("git push --force-with-lease origin feature", self.root))
+
+
 class SessionDirectory(GitRepoCase):
     """Real sessions: the process runs in the user's repository, Hermes's configured directory is the home folder
     or the Hermes home, and the Hermes home may itself be a git repository."""
