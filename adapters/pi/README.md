@@ -10,7 +10,7 @@ start pi), and git. No npm dependency and no build step: pi loads the TypeScript
 
 ## Install it
 
-Not published yet. From the repository, as the pi package `foreman-gate` (the root `package.json` names this
+Under construction: still being tested, not published. From the repository, as the pi package `foreman-gate` (the root `package.json` names this
 extension):
 
 ```

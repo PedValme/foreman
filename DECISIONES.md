@@ -213,3 +213,11 @@ the owner confirms it. An option the owner turned down is a decision too and sta
   the prize stage to close, and so do the stores (the line of 2026-11-24 on `foreman-gate`). The catalog update
   to 0.2.0 goes ahead; its trial on his Hermes machine and its pull request under his account still need his
   own yes each. Va en: this repository's AGENTS.md (the index).
+- 2026-11-25 · The new adapters are shown as under construction · Pedro: «pongámoslo como en construcción todo»,
+  in full: «deja el ritmo y como está, pero pongámoslo como en construcción todo osea todo lo nuevo, todo lo
+  relativo a los adaptadores nuevos», and why: «ni siquiera lo hemos terminado de probar, tiene que estar en
+  construcción […] en el caso de que me digan que no, ya pues se quita, ya ahí si queda el historial que lo
+  estuvimos trabajando». Acota «ok al readme» (2026-11-24): the root README keeps its section and its commands,
+  marked as work in progress, not released. Ajustes del agente: the mark is in the README's opening, its "Start
+  here" and its "In the agent" section, and at the top of `adapters/README.md` and of each harness's guide; the
+  check in CI is not an adapter and stays as it was. Va en: this repository's AGENTS.md (the index).

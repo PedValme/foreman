@@ -45,6 +45,9 @@ Read the index below, then ESTADO.md, its "Next session" first (where the last s
     the hackathon's prize stage; the Hermes plugin's own improvements and fixes go to the catalog meanwhile —
     Nous's reply named no exclusivity terms, but the prize money had not been communicated yet, and the owner
     chose to wait for it (DECISIONES.md, 2026-11-25).
+  - Until then, whatever the public reads about the adapters for other harnesses says "under construction" —
+    they are not fully tested or released, and if Nous objects they are withdrawn and the history shows work in
+    progress, not a product (DECISIONES.md, 2026-11-25).
 - Operation: see "This repository".
 - Known pitfalls: the Hermes on the Windows development PC has no model provider, so a real session can only run
   on the owner's Hermes machine; `hermes plugins install --ref` needs the full 40-character commit; with a gateway running, a slash
