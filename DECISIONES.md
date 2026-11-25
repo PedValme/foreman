@@ -172,8 +172,8 @@ the owner confirms it. An option the owner turned down is a decision too and sta
   where Foreman runs, in the agent and in CI, and leaves out git's own hooks, which are not built; what the truth
   review found in the detector and in the CI command was fixed before the README could say "lock" (#88 and this
   change); the text is shown to him before it merges.
-- 2026-11-25 · The README's text, and a marked finding fails the action by default · Pedro: «sí a ambos, sube el
-  PR», to the two things asked of him: the README he was shown (the opening, the two places and what each
+- 2026-11-25 · The README's text, and `strict` on by default · Pedro: «sí a ambos, sube el PR», to the two
+  things asked of him: the README he was shown (the opening, the two places and what each
   guarantees, the four conditions for the check in CI, what it does not see, Claude Code first in the install
   table, the award kept on top, the outside contributor named), and `strict` on by default in `action.yml`
   (recommended to him: where nobody reviews the pull request the agent's own mark would pass alone; its cost,
