@@ -483,6 +483,11 @@ a quoted string or a comment does not, except in the files that run the check (C
 - the commit that concludes a merge is read for what the resolution itself does when a remote already has the
   commits that come in: their own changes are not that commit's (a merge of commits no remote has is read whole,
   as any commit). A `MERGE_HEAD` left or written by hand has the same effect as the merge it names;
+- a branch that follows the base branch itself (`git checkout -b topic origin/main`) and is pushed to a branch of
+  its own is read against that branch on the remote, or from where it leaves the base branch when the remote has
+  none. That holds only for a command that leaves no doubt about where the push goes (one local branch, a plain
+  destination, no flag or setting that moves it); any other, and a forced push to a branch the remote does not
+  have, is read against the base branch's tip, where what the base gained since reads as the branch's doing;
 - a push is read against what the remote already has of the branch. Once the base branch came into the branch (a
   rebase onto it, a merge of it), it is read from where the branch leaves the base branch, and what changed since
   the branch's last push still counts except in the files the base branch's own incoming commits touched. When the

@@ -729,6 +729,137 @@ class CommitThatConcludesAMerge(_PushedBranch):
         self.assertIn("tests/test_other.py", d["message"])
 
 
+class BranchThatFollowsTheBase(_PushedBranch):
+    """`git checkout -b topic origin/main` makes a branch that follows the base branch itself. Found on 2026-11-25:
+    its push was read against the base's tip, so once the base moved, what the base had gained read as the
+    branch's doing (someone's new test as a test the branch deleted). Pushed to a branch of its own, it is read
+    against that branch on the remote, or from where it leaves the base when the remote has none; whenever the
+    command leaves a doubt about where the push goes, the base's tip stays the reading."""
+
+    def setUp(self):
+        super().setUp()
+        self.git("checkout", "-q", "-b", "topic", "origin/" + self.BASE)
+        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "topic@{upstream}").strip(), "origin/" + self.BASE)
+        self.write("app.py", "x = 20\n")
+        self.commit("topic: its own change")
+
+    def the_base_moves(self):
+        self.someone_else_changes_a_test_on_the_base(back_to="topic")
+
+    def test_pushed_to_a_branch_of_its_own_it_is_not_refused_for_what_the_base_gained(self):
+        self.the_base_moves()
+        for command in ("git push origin topic", "git push -u origin topic", "git push origin HEAD",
+                        "git push origin topic:topic", "git push origin refs/heads/topic:refs/heads/topic",
+                        "git push --set-upstream origin topic"):
+            self.assertIsNone(terminal(command, self.root), command)
+        self.git("config", "push.default", "current")
+        self.assertIsNone(terminal("git push", self.root))
+        self.assertIsNone(terminal("git push origin", self.root))
+
+    def test_what_the_branch_itself_rigs_is_refused(self):
+        self.the_base_moves()
+        self.git("rm", "-q", "tests/test_app.py")
+        self.commit("topic: deletes a test")
+        for command in ("git push origin topic", "git push -u origin topic", "git push origin HEAD"):
+            d = terminal(command, self.root)
+            self.assertEqual(d["action"], "block", command)
+            self.assertIn("tests/test_app.py", d["message"], command)
+            self.assertNotIn("tests/test_other.py", d["message"], command)
+
+    def test_pushed_onto_the_base_branch_it_is_read_against_the_bases_tip(self):
+        self.the_base_moves()
+        base = self.BASE
+        for command in ("git push -f origin topic:" + base, "git push origin topic:" + base,
+                        "git push -f origin HEAD:refs/heads/" + base, "git push -f origin topic:heads/" + base,
+                        "git push -f origin +topic:" + base, "git push origin +HEAD:" + base,
+                        "git push origin topic:refs/heads/" + base, "git -c push.default=upstream push -f",
+                        "git -c push.default=tracking push"):
+            d = terminal(command, self.root)
+            self.assertIn(d["action"], ("block", "approve"), command)
+            self.assertIn("tests/test_other.py", d["message"], command)
+        self.git("config", "push.default", "upstream")
+        for command in ("git push -f", "git push", "git push origin", "git push -f -o ci.skip origin"):
+            d = terminal(command, self.root)
+            self.assertEqual(d["action"], "block", command)
+            self.assertIn("tests/test_other.py", d["message"], command)
+
+    def test_a_command_that_leaves_a_doubt_is_read_against_the_bases_tip(self):
+        self.the_base_moves()
+        for command in ("git push -f origin topic",             # forced, and the remote has no such branch to force
+                        "git push --force-with-lease origin topic", "git push origin +topic",
+                        "git push origin topic:heads/topic",     # a destination git expands by its own rules
+                        "git push origin topic:refs/for/topic",  # not a branch
+                        "git push origin topic:",                # no destination at all
+                        "git push --repo origin",                # the remote given by a flag
+                        "git -c push.default=current push",      # where it goes, set for this one command
+                        "git push --tags origin topic",          # a flag this reading does not know
+                        "git push --push-option=ci.skip origin topic"):
+            d = terminal(command, self.root)
+            self.assertIsNotNone(d, command)
+            self.assertIn("tests/test_other.py", d["message"], command)
+        for command in ("git push -o ci.skip origin topic", "git push origin topic other"):
+            self.assertIsNotNone(terminal(command, self.root), command)  # as before: a person, or a refusal
+
+    def test_with_the_branch_already_on_the_remote_it_is_read_against_its_own_tip(self):
+        self.write("tests/test_new.py", "def test_new():\n    assert True\n")
+        self.commit("topic: a new test")
+        self.git("push", "-q", "origin", "topic")  # by hand: the branch still follows the base
+        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "topic@{upstream}").strip(), "origin/" + self.BASE)
+        self.the_base_moves()
+        self.write("app.py", "x = 21\n")
+        self.commit("topic: goes on")
+        self.assertIsNone(terminal("git push origin topic", self.root))
+        self.git("reset", "-q", "--hard", "HEAD~2")
+        self.write("app.py", "x = 22\n")
+        self.commit("topic: the same, without its test")
+        for command in ("git push -f origin topic", "git push --force-with-lease origin topic"):
+            d = terminal(command, self.root)
+            self.assertEqual(d["action"], "block", command)
+            self.assertIn("tests/test_new.py", d["message"], command)
+            self.assertNotIn("tests/test_other.py", d["message"], command)
+
+    def test_a_setting_that_sends_the_named_branch_onto_the_base_is_a_doubt(self):
+        # Found in the review of this fix: with push.default=upstream, `git push -f origin topic` writes the
+        # branch its upstream names, the base branch, and a configured remote.<name>.push maps it there too.
+        self.git("push", "-q", "origin", "topic:topic")
+        self.the_base_moves()
+        self.write("app.py", "x = 23\n")
+        self.commit("topic: goes on")
+        base = self.BASE
+        for key, value in (("push.default", "upstream"), ("push.default", "tracking"), ("push.default", "nothing"),
+                           ("remote.origin.push", "refs/heads/topic:refs/heads/" + base),
+                           ("remote.origin.mirror", "true")):
+            self.git("config", key, value)
+            for command in ("git push -f origin topic", "git push origin topic", "git push origin HEAD"):
+                d = terminal(command, self.root)
+                self.assertEqual(d["action"], "block", (key, value, command))
+                self.assertIn("tests/test_other.py", d["message"], (key, value, command))
+            self.git("config", "--unset", key)
+        self.assertIsNone(terminal("git push origin topic", self.root))  # with none of them, read as its own
+        for name in (base.upper(), base.capitalize()):  # a remote that folds case writes the base branch
+            d = terminal("git push -f origin topic:" + name, self.root)
+            self.assertIsNotNone(d, name)
+            self.assertIn("tests/test_other.py", d["message"], name)
+
+    def test_pushed_to_a_remote_given_by_its_address_it_is_read_from_where_it_leaves_the_base(self):
+        self.the_base_moves()
+        address = self.remote.replace(os.sep, "/")
+        self.assertIsNone(terminal('git push "%s" topic' % address, self.root))
+        self.git("rm", "-q", "tests/test_app.py")
+        self.commit("topic: deletes a test")
+        d = terminal('git push "%s" topic' % address, self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertIn("tests/test_app.py", d["message"])
+
+    def test_the_base_branch_itself_is_read_as_before(self):
+        self.git("checkout", "-q", self.BASE)
+        self.write("tests/test_app.py", SKIP + "\ndef test_x():\n    assert True\n")
+        self.commit("a rig on the base branch")
+        d = terminal("git push origin " + self.BASE, self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertIn("tests/test_app.py", d["message"])
+
+
 class SessionDirectory(GitRepoCase):
     """Real sessions: the process runs in the user's repository, Hermes's configured directory is the home folder
     or the Hermes home, and the Hermes home may itself be a git repository."""

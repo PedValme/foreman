@@ -346,7 +346,12 @@ def _requote(word: str) -> str:
 
 # Settings that change which refs a push sends or where (found in review: `git -c remote.origin.push=rig:main push`).
 _PUSH_CONFIG = re.compile(r"(?i)((remote\.[^=]+\.(push|mirror)|remote\.pushdefault|branch\.[^=]+\.(remote|pushremote|"
-                          r"merge))=|push\.default=matching$)")
+                          r"merge))=|push\.default=)")
+# Of those, the ones that only say where the current branch goes: they widen nothing, so nobody is asked for them.
+_PUSH_DEFAULT_ONE_BRANCH = re.compile(r"(?i)push\.default=(?!matching$)")
+# The flags of `git push` that change neither what is pushed nor where, and the ones that force it.
+_PUSH_PLAIN_FLAG = re.compile(r"^(-[uqv]+|--set-upstream|--quiet|--verbose|--progress|--atomic)$")
+_PUSH_FORCE_FLAG = re.compile(r"^(-[uqv]*f[uqvf]*|--force|--force-if-includes|--force-with-lease(=.*)?)$")
 
 
 def _parse_git(words: list, cwd: str, git_add_seen: bool, located: bool):
@@ -881,7 +886,7 @@ def _push_report(repo: Repo, act: Action, out: Outcome):
     unresolved = [] if deleting else [r for r in positional[1:] if "*" in r or (r.lstrip("+").split(":", 1)[0] and not
                                       repo.try_git("rev-parse", "--verify", "-q",
                                                    r.lstrip("+").split(":", 1)[0] + "^{commit}"))]
-    configured = list(act.inline_config)
+    configured = [c for c in act.inline_config if not _PUSH_DEFAULT_ONE_BRANCH.match(c)]
     if len(positional) <= 1 and not configured:
         remote = positional[0] if positional else (repo.try_git("config", "--get", "branch.%s.remote" % (
             repo.branch() or "")) or "origin")
@@ -905,13 +910,15 @@ def _push_report(repo: Repo, act: Action, out: Outcome):
     if not repo.try_git("rev-parse", "--verify", "-q", head + "^{commit}"):
         return None  # nothing to push
     upstream = repo.try_git("rev-parse", "--verify", "-q", head + "@{upstream}^{commit}")
+    upstream_ref = repo.try_git("rev-parse", "--symbolic-full-name", head + "@{upstream}") or ""
     # Only a remote-tracking upstream is a base: a local branch set as upstream (`git branch -u rig2`) at HEAD would
     # make the range empty (found in the final review).
-    if upstream and not (repo.try_git("rev-parse", "--symbolic-full-name", head + "@{upstream}") or ""
-                         ).startswith("refs/remotes/"):
+    if upstream and not upstream_ref.startswith("refs/remotes/"):
         upstream = None
     if upstream:
-        return _published_push_report(repo, head, upstream)
+        doubt = bool(unresolved or configured or act.inline_config)
+        own = None if doubt else _follows_the_base_report(repo, act.args, positional, head, upstream_ref)
+        return own or _published_push_report(repo, head, upstream)
     base, label = repo.base_ref(head)
     return detector.scan_range(repo, base, head, scope="push", base_label=label)
 
@@ -920,7 +927,79 @@ def _is_ancestor(repo: Repo, older: str, newer: str) -> bool:
     return repo.try_git("merge-base", "--is-ancestor", older, newer) is not None
 
 
-def _published_push_report(repo: Repo, head: str, tip: str):
+def _local_branch(repo: Repo, name: str) -> str:
+    """``name`` as a local branch's short name (``topic``, ``refs/heads/topic``, ``HEAD`` on a branch); "" when it
+    is anything else: a commit id, a tag, an expression, a detached HEAD."""
+    if name in ("HEAD", "@"):
+        name = repo.branch()
+    elif name.startswith("refs/heads/"):
+        name = name[len("refs/heads/"):]
+    if not name or repo.try_git("show-ref", "--verify", "-q", "refs/heads/" + name) is None:
+        return ""
+    return name
+
+
+def _follows_the_base_report(repo: Repo, args: list, positional: list, head: str, upstream_ref: str):
+    """What a push changes when the branch follows the base branch itself and goes to a branch of its own; None
+    for every other push, which is then read against its upstream as before.
+
+    ``git checkout -b topic origin/main`` leaves ``topic`` following ``origin/main``. Read against that tip, what
+    the base branch gained since reads as the branch's doing: someone's new test, as a test the branch deleted.
+    The branch's place on the remote is its own branch there (``origin/topic``): it is read against that, and from
+    where it leaves the base branch when the remote has none.
+
+    That reading holds only for a push that cannot land on the base branch, where what the base has and the branch
+    lacks would be gone from the remote. So it is taken only when the command leaves no doubt about where the push
+    goes: one local branch, to a branch named in full or by a plain name that is not the base's (whatever its
+    case), on one remote, with no flag beyond the ones known to change nothing (or to force it), ``push.default``
+    unset, ``simple`` or ``current``, and no ``remote.<name>.push`` or ``.mirror`` for that remote, in the
+    configuration or in the command. A forced push to a branch the remote does not have is a doubt too."""
+    fork, label = repo.base_ref(head, remote_only=True)
+    if not fork or upstream_ref != "refs/remotes/" + label or len(positional) > 2:
+        return None
+    forced = False
+    for flag in (a for a in args if a.startswith("-")):
+        if _PUSH_FORCE_FLAG.match(flag):
+            forced = True
+        elif not _PUSH_PLAIN_FLAG.match(flag):
+            return None
+    if len(positional) == 2:
+        spec = positional[1]
+        if spec.startswith("+"):
+            forced, spec = True, spec[1:]
+        src, colon, dst = spec.partition(":")
+        branch = _local_branch(repo, src)
+        if colon and dst.startswith("refs/heads/"):
+            dst = dst[len("refs/heads/"):]
+        elif not colon:
+            dst = branch
+        if dst.split("/")[0] in ("refs", "heads", "tags", "remotes", "HEAD", "@") or re.search(r"[^\w./-]", dst):
+            return None
+    else:
+        branch = dst = _local_branch(repo, "HEAD")
+    if not branch or not dst or dst.lower() == label.split("/", 1)[-1].lower():
+        return None
+    remote = positional[0] if positional else next(
+        (r for r in (repo.try_git("config", "--get", key) for key in (
+            "branch.%s.pushRemote" % branch, "remote.pushDefault", "branch.%s.remote" % branch)) if r), "origin")
+    # A setting can send even a branch named in the command somewhere else: with push.default=upstream a refspec
+    # without a destination goes to the branch's upstream, which here is the base branch (found in the review of
+    # this change), and remote.<name>.push or .mirror maps it as they say.
+    if (repo.try_git("config", "--get", "push.default") or "simple").strip().lower() not in ("simple", "current") \
+            or repo.try_git("config", "--get-all", "remote.%s.push" % remote) \
+            or repo.try_git("config", "--get", "remote.%s.mirror" % remote):
+        return None
+    tip = None
+    if remote in (repo.try_git("remote") or "").split():
+        tip = repo.try_git("rev-parse", "--verify", "-q", "refs/remotes/%s/%s^{commit}" % (remote, dst))
+    if tip:
+        return _published_push_report(repo, head, tip, "%s/%s" % (remote, dst))
+    if forced:
+        return None
+    return detector.scan_range(repo, fork, head, scope="push", base_label=label)
+
+
+def _published_push_report(repo: Repo, head: str, tip: str, tip_label: str = ""):
     """What a push of ``head`` changes, for a branch the remote already has at ``tip`` (its upstream).
 
     A push is read against what the remote has of the branch: ``tip..head``. That holds while the base branch (the
@@ -937,7 +1016,7 @@ def _published_push_report(repo: Repo, head: str, tip: str):
     def scan(base, label):
         return detector.scan_range(repo, base, head, scope="push", base_label=label)
 
-    tip_label = head + "@{upstream}"
+    tip_label = tip_label or head + "@{upstream}"
     fork, label = repo.base_ref(head, remote_only=True)
     if not fork or _is_ancestor(repo, fork, tip):
         return scan(tip, tip_label)
