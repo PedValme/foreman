@@ -201,3 +201,15 @@ the owner confirms it. An option the owner turned down is a decision too and sta
 - 2026-11-24 · The root README announces the adapters · Pedro: «ok al readme», to the section he read ("In Claude
   Code, Codex, pi and OpenCode": the install command from git for each, what each gives, where the limits are).
   npm, OpenCode's page, Anthropic's directory and the issue to Hermes still wait for his yes, one by one.
+- 2026-11-25 · Foreman for other harnesses is not published until the hackathon's prize stage closes; the
+  plugin's own improvements and fixes go up now · Pedro: «mejor esperamos hasta que se cierre la etapa de
+  premiación antes de publicar Foreman para otros arneses», in full: «ayer ya me contestaron por "x" si lo viste,
+  no mencionan nada de terminos de exclusividad, pero falta la comunicación sobre el premio económico, entonces
+  mejor esperamos hasta que se cierre la etapa de premiación antes de publicar Foreman para otros arneses, lo que
+  si podemos ir haciendo es subir las mejoras y correciones del propio plugin que hemos ejecutado.» He said it
+  after reading that the hackathon's public rules (Nous's announcement of 2026-11-04, the winners' closing post,
+  the catalog's rules) ask for no exclusivity and that the prize message had not been read. Acota the line of the
+  same day «Que hermes siga arriba…», where the announcement followed the catalog update: it now also waits for
+  the prize stage to close, and so do the stores (the line of 2026-11-24 on `foreman-gate`). The catalog update
+  to 0.2.0 goes ahead; its trial on his Hermes machine and its pull request under his account still need his
+  own yes each. Va en: this repository's AGENTS.md (the index).

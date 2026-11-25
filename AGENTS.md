@@ -41,6 +41,10 @@ Read the index below, then ESTADO.md, its "Next session" first (where the last s
   - Nothing is announced that the listed Hermes plugin does not have yet: the catalog update comes before an
     announcement — announcing what `main` has while the catalog lists an older plugin promises Hermes users
     more than they get (DECISIONES.md, 2026-11-25).
+  - Foreman for other harnesses is not published (the announcement, npm and the other stores) until Nous closes
+    the hackathon's prize stage; the Hermes plugin's own improvements and fixes go to the catalog meanwhile —
+    Nous's reply named no exclusivity terms, but the prize money had not been communicated yet, and the owner
+    chose to wait for it (DECISIONES.md, 2026-11-25).
 - Operation: see "This repository".
 - Known pitfalls: the Hermes on the Windows development PC has no model provider, so a real session can only run
   on the owner's Hermes machine; `hermes plugins install --ref` needs the full 40-character commit; with a gateway running, a slash
