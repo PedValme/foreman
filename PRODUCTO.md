@@ -69,18 +69,23 @@ to 25; ESTADO.md says which ones exist today). Rules 1 to 21 are written for Her
     the model cannot type them (a command the person types; never a tool, never the agent's shell), an agent that
     runs them is blocked, and with nobody attending they do nothing. A harness that gives no sound sign that a
     person typed the command does not offer `allow` at all (Codex today): the finding is fixed, or the person
-    commits it themselves.
+    commits it themselves. Outside Hermes a merge, a comment or a close is Foreman's own `gh` process (no shell,
+    those three commands only), started only for such a command; a question to the person goes through the
+    harness's own dialog, and an answer counts only for the very question asked.
 25. **Outside Hermes the reviewer is a fresh session that did not write the code.** Foreman launches it (never the
     writing agent), without tools, with the diff, and verifies its answer as rule 8's review does. The user picks
     its model and effort; with nothing picked, the same model one effort level up, and the verdict says so. It
-    reviews when someone asks to merge; on every turn only if the user turns it on. What the review says about its
+    reviews when someone asks to merge; on every turn only if the user turns it on (off by default, per harness,
+    with rule 16's limits), and only where the harness's end-of-turn hook waits for a review: one started and cut
+    off is paid for and never read. Here it is "the review", never "the second model". What the review says about its
     own reviewer is part of the verdict's truth: it names the session's model only when the harness names it, never
     claims another model, and states what its session could still see or do where the harness leaves no way to
     close it. Nothing the author of the diff controls can become the answer (a schema the harness enforces, or a
     seal made for that one request).
 26. **Full where the harness allows it.** pi and OpenCode (its v2 plugin API) get the gate, `/foreman` and the
     reviewer; Claude Code and Codex get the gate, the person's commands and the reviewer. Phone notifications and
-    the Desktop panel are Hermes's.
+    the Desktop panel are Hermes's. Outside Hermes `/foreman` is the Hermes plugin's own board, run unchanged on a
+    stand-in for Hermes's context, so the two cannot drift apart.
 
 ## Out of this delivery
 Publishing GitHub checks from the agent, the owner's decisions and pending items, rework metrics. Buttons on the

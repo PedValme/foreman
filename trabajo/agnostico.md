@@ -29,6 +29,17 @@ session that did not write the code, the Hermes plugin untouched until one subst
 - The repository root is the package a harness installs (`.claude-plugin/` today); Hermes installs only `plugin/`.
 - A change the core does need (wording such as `/foreman merge`, the reviewer's effort setting) lands on `main` with
   the tests green and waits for the one catalog update. None was needed so far.
+- The board outside Hermes is `plugin/foreman/board.py` as it is, on a stand-in for Hermes's context
+  (`foreman_hosts/standin.py`). Foreman's program answers one request and ends, so a question to the person is an
+  answer (`question`): the extension asks in the harness's own dialog and sends the command again with the pick,
+  which counts only for the same question (`neutral.py`). Hermes's terminal tool is Foreman's own `gh` there, only
+  for `gh pr merge`, `comment` and `close`, only attended. For one command the stand-in wraps three functions of
+  the core (`board._review_for_merge`, `board.reject_comment`, `review.run_review`) instead of editing them: three
+  seams worth asking the core for at the catalog update (who reviewed, in the host's words; the comment's footer;
+  a record finished before it is stored).
+- The review at the end of every turn is the core's own `finish` loop (`plugin/foreman/finish.py`): Foreman calls
+  what in Hermes is the agent's `foreman_review` tool, then the gate's end of turn reads the stored review
+  (`reviewer.turn_end`). Only where `Host.turn_review` says the end-of-turn hook waits minutes.
 
 ## What each harness gives (measured in real sessions on 2026-11-24 unless marked "read")
 - **Claude Code 2.1.331.** `PreToolUse` deny holds under `bypassPermissions` and its reason reaches the model;
@@ -79,9 +90,15 @@ session that did not write the code, the Hermes plugin untouched until one subst
 - [x] The reviewer in the four, when the person asks: a fresh session launched by Foreman, its model and effort the
   user's choice, each finding verified against the diff; seen in a real session in each (a loosened assertion the
   gate calls CLEAN came back BLOCKED with the line quoted; the second time, the stored result).
-- [ ] The review when someone asks to merge, and on every turn when the user turns it on (the owner's decision of
-  2026-11-24): needs `/foreman merge` outside Hermes (T6) and a long-running end-of-turn hook.
-- [ ] pi and OpenCode: `/foreman` board, verdict, review, merge, reject, allow and pipeline.
+- [x] The review when someone asks to merge (pi #75, OpenCode's TUI #77: both seen) and on every turn when the user
+  turns it on (#76: seen on pi; Claude Code and Codex tested through their `Stop` hooks, not seen in a session).
+  The review at the end of every turn is not offered in OpenCode: its end-of-turn hook stops waiting after 30
+  seconds.
+- [x] pi: `/foreman` board, verdict, review, merge, reject, allow and pipeline (#74, #75; a throwaway pull request
+  of the demo repository merged by Foreman from pi's terminal UI, another rejected and closed).
+- [x] OpenCode: the same line through its TUI plugin (#77): the board in a dialog, `use` in the select, a
+  throwaway pull request merged by Foreman from the TUI; a rejection carried out and `allow` through the TUI were
+  tested, not seen. Through the server command (apps, HTTP API) merge and reject answer "nobody is attending".
 - [x] `plugin/` unchanged by the adapters; `hermes plugins validate plugin` and the tests green throughout.
 
 ## Open questions and risks
@@ -89,7 +106,16 @@ session that did not write the code, the Hermes plugin untouched until one subst
   writes for a subagent or from a resumed session. Settling it needs an interactive Codex session in a folder Codex
   trusts, which writes to the owner's `~/.codex`: the owner's to try, or to allow.
 - OpenCode decides "a person approved" by a permission prompt and time (a yes within a second is nobody); a late
-  automatic yes is not detected. Its end-of-turn nudge depends on a hook OpenCode marks experimental.
+  automatic yes is not detected. Its end-of-turn nudge depends on a hook OpenCode marks experimental. Measured on
+  2026-11-24 (OpenCode 2.3.2's source, and two short runs): every auto mode answers a permission request as a
+  client, after the plugin's `evaluate` hook, and the reply says nothing about who answered; a server command's
+  `execute` cannot tell a typed command from one sent through the HTTP API, the SDK or `opencode api`. The sound
+  sign of a person is a TUI plugin (a folder with `tui.ts`: its own slash command, registered with `mode: "global"`,
+  runs in the TUI before any server command, and its `dialog.select` and `dialog.prompt` are answered by no auto
+  mode and have no route from the model). Read, not seen: with OpenCode's background service (its default) the
+  agent's shell can reach `opencode api`, whose password is in a readable state file, and so answer a permission
+  prompt or call the server `/foreman`: that weakens today's `allow` there. A `{"plugins": ["-*", …]}` project
+  configuration does not keep a user-level TUI plugin out of a trial.
 - In every harness the hooks and Foreman's state are files (same debt as Hermes's state guard), and a second agent
   started without Foreman (`pi -ne`, a harness run with its hooks off) is outside the gate: CI stays the control.
 - The reviewer in Claude Code is the account's default model, not necessarily the session's: Claude Code names the
@@ -97,7 +123,11 @@ session that did not write the code, the Hermes plugin untouched until one subst
   instructions and declares a few tools with no switch. None of the four was tried on Windows.
 - The Hermes plugin's own review keeps line breaks in a finding's text (ESTADO, known issues): one line in
   `review.verify`, for the catalog update.
-- T6 on OpenCode: a command can answer only through an error notice, so the board needs another surface there.
+- T6 on OpenCode: a server command can answer only through an error notice; the TUI plugin has dialogs and toasts.
+- A merge outside Hermes runs the command twice (ask, then answer), so its gate, review and "waiting" lines are
+  twice in the pipeline; a review that failed on the first run is tried once more on the second.
+- The review at the end of every turn stops for one change after three send-backs or four reviews, and in Claude
+  Code and Codex nothing shows that change waiting (they have no `pipeline`); only `reviewer` states the limits.
 - Whether the Hermes catalog's scanner reads outside `subdir`: unknown; nothing binary is committed anywhere.
 - Names and distribution (marketplace, npm, how Codex's hooks are installed): the owner, T7.
 
@@ -108,28 +138,35 @@ session that did not write the code, the Hermes plugin untouched until one subst
 - [x] T4 OpenCode v2 plugin (#65).
 - [x] T5 The reviewer as a fresh session, in the four, when the person asks (#67 the neutral half and Claude Code,
   #68 Codex, #69 pi, #70 OpenCode).
-- [ ] T6 `/foreman` complete on pi and OpenCode, and with `/foreman merge` the review at merge time (the plan the
+- [x] T6 `/foreman` complete on pi and OpenCode, and with `/foreman merge` the review at merge time (the plan the
   owner agreed to on 2026-11-24, «ok»; before the Hermes catalog update, so that there is only one):
-  - [ ] T6.1 The shared base, one pull request: a stand-in for Hermes's context so `plugin/foreman/board.py` runs
-    unchanged, and the commands that only read (`board`, `verdict`, `pipeline`, `prs`, `issues`) on pi and OpenCode.
-  - [ ] T6.2 pi: `merge` and `reject`, asked through pi's own confirmation dialog, with the review before the merge.
-  - [ ] T6.3 OpenCode: measure first whether a plugin can ask the person something the model cannot answer. With
-    no sound sign of a person, rule 24 applies: `board`, `verdict` and `reject`, and `merge` runs nothing and prints
-    the command for the person.
-  - [ ] T6.4 Each piece reviewed by an agent that did not write it before it merges (a merge is a permission).
-  - [ ] T6.5 Seen in a real session: a throwaway pull request in `foreman-demo` merged by Foreman from pi; few and
-    short sessions. Then the documents.
-- [ ] T6b The review on every turn, where the user turns it on (after T6).
+  - [x] T6.1 The shared base (#74): a stand-in for Hermes's context so `plugin/foreman/board.py` runs unchanged,
+    and the commands that only read (`board`, `verdict`, `pipeline`, `prs`, `issues`, `use`) on pi and OpenCode.
+  - [x] T6.2 pi: `merge` and `reject`, asked through pi's own selector, with the review before the merge (#75).
+  - [x] T6.3 OpenCode (#77). Measured: a sound sign of a person exists, through a TUI plugin only (above). So the
+    full line there is that plugin (`adapters/opencode/tui.ts`, installed as a folder with `server.ts`): `/foreman`
+    typed in the TUI is handled by it (replies in a dialog, questions in its select, `attended` true), while the
+    server command keeps refusing `merge` and `reject`. Left open, in its README's limits: plugin code the agent
+    plants in a plugin folder is loaded by OpenCode with the same powers (guarding the folders would block a
+    project's own plugin work); a reply longer than the terminal is cut off (the dialog does not scroll).
+  - [x] T6.4 Each piece reviewed by an agent that did not write it before it merged: #74 (nothing blocking), #75
+    (one blocking finding, the "second-model" wording on pi; fixed), #76 (one, OpenCode's short end-of-turn wait;
+    fixed by not offering the option there).
+  - [x] T6.5 Seen in a real session: throwaway pull request #19 of the demo repository merged by Foreman from pi's
+    terminal UI, #20 rejected and closed.
+- [x] T6b The review on every turn, where the user turns it on (#76): Claude Code, Codex and pi.
 - [ ] T7 READMEs, names and publication (owner's yes); the one Hermes catalog update with what the core needed.
 
 ## Next step
-T6.1. Read in `plugin/foreman/board.py` on 2026-11-24, not run outside Hermes yet: it keeps the context with
-`bind(ctx)` and asks it for two things, `ask_choice` (in `_confirm`, for `merge` and `reject --close`, and in
-`cmd_use`) and `dispatch_tool("terminal", …)` (in `_terminal`, which runs `gh pr merge`, the comment and the close);
-its commands take `(args, keys, platform)` and return text; `pipeline.py` reads `get_config`. As with the review
-(`foreman_hosts/reviewer.py`), give it a stand-in in `adapters/foreman_hosts/`: `ask_choice` becomes a question the
-harness's own extension shows the person (`neutral.py` needs it: the Python side answers "ask this", the extension
-asks and sends a second request with the answer; never a callback), and the terminal becomes Foreman's own `gh`
-process, started only after that answer. The agent's own `gh pr merge` stays refused by the gate. Start with the
-commands that only read; `merge` last, with the review before it (rule 16, `auto_review: merge`). If the board
-needs anything changed in `plugin/`, it is noted here for the catalog update and not edited for the adapter.
+T7, which starts with the owner: the names of the packages, where each adapter is published (Claude Code's
+marketplace, npm for pi and OpenCode, how Codex's hooks are installed) and what the root README says about them.
+Until then nothing is published and the root README does not mention the adapters. With his answers: the READMEs,
+the publication of each harness whose end-to-end test passed (Claude Code, Codex, pi and OpenCode all have one;
+Windows nowhere), and the one Hermes catalog update with what waits for it: the one line in `review.verify`
+(a finding's words on one line), the three seams the stand-in wraps today (above, "How it is built"), the native
+model picker (`trabajo/model-picker.md`), the README's award, GIF and `/foreman notify on`.
+
+What an agent can do before that without the owner: see the per-turn review in a real Claude Code and a real Codex
+session (one short session each, in a throwaway repository, `claude --plugin-dir` and `codex -c hooks.…`); give
+OpenCode's end of turn the long wait and its session's model, so the per-turn review can be offered there
+(`Host.turn_review`); see a rejection and `allow` through OpenCode's TUI.
