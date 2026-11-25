@@ -19,9 +19,19 @@
 - Next action: T7, which starts with the owner's answers (names of the packages, where each adapter is published,
   what the root README says); then the one Hermes catalog update. `trabajo/agnostico.md`, "Next step", lists both
   and what an agent can do meanwhile without him.
-- Asked to the owner in the session of 2026-11-24, not answered yet: T7's three choices; closing the demo
-  repository's old throwaway pull requests #6, #7, #12, #13, #14 and deleting its `t/*` branches (the permission
-  classifier refused it without his explicit yes); proposing the first Hermes seam upstream.
+- With the owner, open (asked on 2026-11-24; he wanted both evaluated before deciding, and they were, read-only):
+  - Where to publish. Read in each harness's documentation and help, not tried: pi installs from git with a root
+    `package.json` (`pi install git:…`) and lists in its catalog any npm package with the keyword `pi-package`;
+    OpenCode has no store, `opencode plugin add github:…` (the entrypoints a `package.json` must name were not
+    confirmed) and an ecosystem page kept by pull request; Claude Code: this repository is already its own
+    marketplace (`.claude-plugin/marketplace.json`), and Anthropic's directory takes submissions with a review;
+    Codex has git marketplaces, but its public directory excludes plugins with hooks. On npm, `foreman` and
+    `opencode-foreman` are other people's packages. His to decide: the name, npm or not, each submission.
+  - The first Hermes seam (a public accessor for the terminal's directory). Checked upstream: v0.23.0 to v0.23.4
+    do not add it, the private function is unchanged, no roadmap was found; #153841's "not planned" was a triage
+    of its security label, and its maintainer asked for one focused issue or a pull request against
+    `hermes_cli/data/plugin_api.json` per seam (#148311, the same kind of request, was completed). Foreman still
+    needs it: it is the only source that follows the agent's `cd` between terminal calls.
 - External PR #57 (`***REDACTED***` as a placeholder in the detector): no push from its author since the changes
   asked on 2026-11-23. When it comes: re-read the whole diff, approve its held CI run, then decide the merge.
 - Hermes: Foreman is in its catalog at the pin ce9b01a (NousResearch/hermes-agent#153851); a plugin change reaches
@@ -44,9 +54,10 @@
 2. Without the owner: the per-turn review seen in a real Claude Code and Codex session; OpenCode's end of turn
    given the long wait so the per-turn review can be offered there; a rejection and `allow` seen in OpenCode's TUI.
 3. Propose the Hermes seams one by one (#153841's advice): first the terminal cwd accessor.
-4. Clean up the hackathon's throwaways, with the owner's yes: `~/cart`, `~/foreman-demo` and `/tmp/fm-battery*` on
-   the owner's Hermes machine; pull requests #6, #7, #12, #13, #14 and branches `t/*` in the demo repository; the
-   unpushed local branch `claude/minimal-child-env` (kept as `windows/claude/minimal-child-env` in one clone).
+4. Clean up the rest of the hackathon's throwaways, with the owner's yes: `~/cart`, `~/foreman-demo` and
+   `/tmp/fm-battery*` on the owner's Hermes machine; the unpushed local branch `claude/minimal-child-env` (kept as
+   `windows/claude/minimal-child-env` in one clone). Done on 2026-11-24 with his «ok»: the demo repository's
+   pull requests #6, #7, #12, #13, #14 closed and its `t/*` branches deleted (it keeps #3, #4 and #15).
 5. Whether the private voice-plugins test repository becomes a project; whether only the owner merges here;
    register the demo repository in the owner's environment as outside the factory.
 
