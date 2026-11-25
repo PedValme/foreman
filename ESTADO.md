@@ -13,8 +13,8 @@
   README's full list of git commands, and the three seams as names the core asks its context for
   (`foreman_host_label`, `foreman_review_before_merge`, `foreman_finish_review`), so the adapters wrap nothing.
 - The owner decided on 2026-11-25 (DECISIONES): the plugin's own improvements and fixes go up now, and Foreman
-  for other harnesses is not published until Nous closes the hackathon's prize stage (its reply to him named no
-  exclusivity terms; the prize money had not been communicated). So the update goes with what is built, without
+  for other harnesses is not announced or published until the hackathon closes, and is shown as under
+  construction meanwhile. So the update goes with what is built, without
   the native model picker (`trabajo/model-picker.md`; whether it is built later or asked of Hermes as a seam is
   still his to say, recommended: the seam). Asked of him in that session and open when it closed:
   - Done with his yes on 2026-11-25: the pin `c0aa24d` installed in the `foremandev` profile of his Hermes
@@ -26,10 +26,7 @@
     show Hermes's maintainer the other harnesses' work (the `adapters/` folder, the three names the core asks its
     context for), and the root README has said since 2026-11-24 that Foreman runs in Claude Code, Codex, pi and
     OpenCode: he was told, with the recommendation to send the update as it is and leave the README.
-- The hackathon's rules, read on 2026-11-25: Nous's announcement of 2026-11-04 (the rules live in that post on
-  X), the winners' closing post and the catalog's 20 rules ask for no exclusivity, give Nous no right over the
-  entry and condition nothing afterwards. The entry form is closed and was not read.
-- After the prize stage closes, his: the announcement (Foreman in Hermes, in Claude Code, Codex, pi and OpenCode,
+- After the hackathon closes, his: the announcement (Foreman in Hermes, in Claude Code, Codex, pi and OpenCode,
   and in CI for any agent; it tells whoever copied `examples/foreman-check.yml` before 2026-11-25 to update it),
   then the stores, each with his own yes: `npm publish` as `foreman-gate` (his npm account; it lists it in pi's
   catalog), the pull request to OpenCode's ecosystem page, Anthropic's directory for Claude Code (an icon, a
@@ -61,7 +58,7 @@
   focused issue or pull request per seam (#153841, #148311).
 - Where each adapter can be published, read on 2026-11-24 and not tried: `trabajo/agnostico.md` and each
   harness's README. On npm, `foreman` and `opencode-foreman` are other people's packages.
-- What waits for Pedro lives in OmniBrain: `omnibrain_esperas` with repo `foreman`, or «Te espera» in the panel.
+- What waits for the owner is kept in his own tracker, not in this file.
 
 ## Delivered
 - The Hermes plugin in `plugin/`, listed in the Hermes catalog at version 0.1.0 (pin ce9b01a); `main` has 0.2.0,
@@ -79,7 +76,7 @@
   update (`trabajo/catalog-pr.md`) and the publications, each with the owner's yes.
 
 ## Next steps
-1. The Hermes catalog update now; the announcement and the stores after the hackathon's prize stage closes
+1. The Hermes catalog update now; the announcement and the stores after the hackathon closes
    ("Next session", above).
 2. Without the owner: the per-turn review seen in a real Claude Code and Codex session; OpenCode's end of turn
    given the long wait so the per-turn review can be offered there; a rejection and `allow` seen in OpenCode's TUI.

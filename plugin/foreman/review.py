@@ -331,7 +331,7 @@ def _strip_prefixes(evidence: str) -> str:
     return "\n".join(l[1:] if l[:1] in ("+", "-") else l for l in evidence.splitlines())
 
 
-_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f  ]")
+_CONTROL = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029]")  # C0, C1, the line and paragraph separators
 
 
 def _one_line(value: Any) -> str:

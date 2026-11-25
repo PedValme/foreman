@@ -56,7 +56,7 @@ MAX_OPTIONS = 20
 _DISMISSED = "cancel"  # the option a dismissed dialog counts as, where the question has it
 
 
-_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f  ]")
+_CONTROL = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029]")  # C0, C1, the line and paragraph separators
 
 
 def _plain(text: str) -> str:
