@@ -1,6 +1,6 @@
 # Foreman for OpenCode
 
-Not published yet. A plugin for OpenCode's v2 plugin API, seen working on OpenCode 2.3.2 on macOS, in two parts:
+Under construction: still being tested, not published. A plugin for OpenCode's v2 plugin API, seen working on OpenCode 2.3.2 on macOS, in two parts:
 
 - **The server part** (`foreman.ts`; `server.ts` is the same code for the folder install): it runs inside OpenCode's
   server. The gate (the agent's shell commands and writes, the end of a turn) and `/foreman` as a server command,

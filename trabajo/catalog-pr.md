@@ -21,8 +21,8 @@ decided on 2026-11-24.
    commit …`): Hermes's Contributor Attribution check fails on an address it cannot map.
 6. The pull request goes out under the owner's account, after he has read the text below (DECISIONES, 2026-11-09
    and 2026-11-25). A first-time contributor's CI there waits for a maintainer.
-7. When it merges: `hermes plugins update foreman` in the owner's default profile (DECISIONES, 2026-11-14), and
-   only then the announcement (DECISIONES, 2026-11-25).
+7. When it merges: `hermes plugins update foreman` in the owner's default profile (DECISIONES, 2026-11-14). The
+   announcement and the stores wait for the hackathon's prize stage to close (DECISIONES, 2026-11-25).
 
 **Title:** `plugin-catalog: bump foreman to 0.2.0`
 

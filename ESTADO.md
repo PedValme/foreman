@@ -12,24 +12,26 @@
   writes on one line each and without control characters, `/foreman use` offering one repository once, the
   README's full list of git commands, and the three seams as names the core asks its context for
   (`foreman_host_label`, `foreman_review_before_merge`, `foreman_finish_review`), so the adapters wrap nothing.
-- Three things in it wait for the owner, asked in the session of 2026-11-25 and not answered when it closed:
-  - The native model picker (`trabajo/model-picker.md`, read again against Hermes v0.23.3). Recommended: not in
-    this update, and one focused issue to Hermes for the seam; a picker in Foreman's own page can only save
-    `reviewer_model`, which takes effect only with a grant the operator sets by hand, while Hermes's own
-    auxiliary picker works without one.
+- The owner decided on 2026-11-25 (DECISIONES): the plugin's own improvements and fixes go up now, and Foreman
+  for other harnesses is not published until Nous closes the hackathon's prize stage (its reply to him named no
+  exclusivity terms; the prize money had not been communicated). So the update goes with what is built, without
+  the native model picker (`trabajo/model-picker.md`; whether it is built later or asked of Hermes as a seam is
+  still his to say, recommended: the seam). Asked of him in that session and open when it closed:
   - His yes to connect to his Hermes machine and try the new pin in the `foremandev` profile.
-  - The pull request to the catalog under his account, after he reads its text.
-- The owner asked on 2026-11-25 whether the hackathon's rules forbid Foreman on other platforms. Read: Nous's
-  announcement of 2026-11-04 (the rules live in that post on X), the winners' closing post and the catalog's 20
-  rules: nothing asks for exclusivity, gives Nous any right over the entry or conditions what comes after. Not
-  read: the entry form (closed) and the prize message Nous sent him; he looks at that one before the
-  announcement.
-- Then the announcement, his: Foreman in Hermes, in Claude Code, Codex, pi and OpenCode, and in CI for any agent.
-  It tells whoever copied `examples/foreman-check.yml` before 2026-11-25 to update it (below). Then the stores,
-  each with his own yes: `npm publish` as `foreman-gate` (his npm account; it lists it in pi's catalog), the pull
-  request to OpenCode's ecosystem page, Anthropic's directory for Claude Code (an icon, a review), GitHub's
-  Marketplace for the action, and the focused issue to Hermes for a public accessor of the terminal's directory
-  (text shown to him first; `trabajo/hermes-issue-seams.md`).
+  - The pull request to the catalog under his account, after he reads its text. Its range and its disclosure
+    show Hermes's maintainer the other harnesses' work (the `adapters/` folder, the three names the core asks its
+    context for), and the root README has said since 2026-11-24 that Foreman runs in Claude Code, Codex, pi and
+    OpenCode: he was told, with the recommendation to send the update as it is and leave the README.
+- The hackathon's rules, read on 2026-11-25: Nous's announcement of 2026-11-04 (the rules live in that post on
+  X), the winners' closing post and the catalog's 20 rules ask for no exclusivity, give Nous no right over the
+  entry and condition nothing afterwards. The entry form is closed and was not read.
+- After the prize stage closes, his: the announcement (Foreman in Hermes, in Claude Code, Codex, pi and OpenCode,
+  and in CI for any agent; it tells whoever copied `examples/foreman-check.yml` before 2026-11-25 to update it),
+  then the stores, each with his own yes: `npm publish` as `foreman-gate` (his npm account; it lists it in pi's
+  catalog), the pull request to OpenCode's ecosystem page, Anthropic's directory for Claude Code (an icon, a
+  review), GitHub's Marketplace for the action. The focused issue to Hermes for a public accessor of the
+  terminal's directory is about the plugin and does not wait for it (text shown to him first;
+  `trabajo/hermes-issue-seams.md`).
 - Done on 2026-11-25, all merged, each change to a control reviewed by an agent that did not write it:
   - The evaluation the owner asked for, of Foreman for any agent (`trabajo/agnostico.md`). He asked whether all
     of it was worth building and the answer was no: nobody has asked for a harness Foreman does not cover. Not
@@ -73,10 +75,12 @@
   update (`trabajo/catalog-pr.md`) and the publications, each with the owner's yes.
 
 ## Next steps
-1. The Hermes catalog update, then the announcement, then the stores ("Next session", above).
+1. The Hermes catalog update now; the announcement and the stores after the hackathon's prize stage closes
+   ("Next session", above).
 2. Without the owner: the per-turn review seen in a real Claude Code and Codex session; OpenCode's end of turn
    given the long wait so the per-turn review can be offered there; a rejection and `allow` seen in OpenCode's TUI.
-3. Propose the Hermes seams one by one (#153841's advice): first the terminal cwd accessor.
+3. Propose the Hermes seams one by one (#153841's advice): first the terminal cwd accessor; the auxiliary model
+   field for a plugin's settings, if the owner prefers it to a picker of Foreman's own.
 4. Clean up the rest of the hackathon's throwaways, with the owner's yes: `~/cart`, `~/foreman-demo` and
    `/tmp/fm-battery*` on the owner's Hermes machine; the unpushed local branch `claude/minimal-child-env` (kept as
    `windows/claude/minimal-child-env` in one clone).
