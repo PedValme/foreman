@@ -172,10 +172,20 @@ the owner confirms it. An option the owner turned down is a decision too and sta
   where Foreman runs, in the agent and in CI, and leaves out git's own hooks, which are not built; what the truth
   review found in the detector and in the CI command was fixed before the README could say "lock" (#88 and this
   change); the text is shown to him before it merges.
+- 2026-11-25 · Hermes stays first in the README · Pedro: «Que hermes siga arriba, nacio para y dentro de hermes»,
+  in full: «Que hermes siga arriba, nacio para y dentro de hermes y todo el trafico inicial proviene de ahi además
+  de los ejemplos, del 2do para abajo ok con el orden. OK con tu recomendación.» Acota the line below of the same
+  day, where Claude Code came first in the install table: Hermes Agent heads "Start here" and that table, then
+  Claude Code, Codex, pi and OpenCode. The recommendation he accepts: nothing is announced until the action's
+  pull request has merged with its CI green and the Hermes catalog update is done (the listed plugin lacks this
+  session's fixes); then announce, telling whoever copied the old CI example to update it. The trial of that
+  update on his Hermes machine and the pull request to the catalog under his account each still need his own
+  yes. Va en: this repository's AGENTS.md (the index).
 - 2026-11-25 · The README's text, and `strict` on by default · Pedro: «sí a ambos, sube el PR», to the two
-  things asked of him: the README he was shown (the opening, the two places and what each
-  guarantees, the four conditions for the check in CI, what it does not see, Claude Code first in the install
-  table, the award kept on top, the outside contributor named), and `strict` on by default in `action.yml`
+  things asked of him: the README he was shown (the opening, the two places and what each guarantees, the four
+  conditions for the check in CI, what it does not see, the award kept on top, the outside contributor named;
+  its install table had Claude Code first, which he changed the same day, above), and `strict` on by default in
+  `action.yml`
   (recommended to him: where nobody reviews the pull request the agent's own mark would pass alone; its cost,
   that a legitimate marked finding in CI needs the cause removed or his administrator's merge). Ajustes del
   agente, after his yes, from the last check of the text against the code: the third condition says an account

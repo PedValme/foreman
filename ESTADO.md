@@ -36,7 +36,11 @@
      request bring its own detector in a folder named `foreman` (in this change: the action loads it isolated,
      the example and the plugin's README run it from Foreman's own folder); and #88, a git attribute that hid a
      test switched off or a secret from every reading (reviewed in three passes).
-  4. Then publish what is already built, each store with his own yes (below).
+  4. Then, in this order (his «OK con tu recomendación», DECISIONES): the Hermes catalog update, tried first in
+     the `foremandev` profile of his Hermes machine (his yes to connect, asked when it starts) and sent to the
+     catalog under his account after he sees the text; only then an announcement, which tells whoever copied the
+     old CI example to update it; and the stores, each with his own yes (below). In the README Hermes Agent
+     comes first, by his word.
   Not now: the `generic` host, a terminal command with `status`, Foreman's own installer of git's hooks. Never
   proposed to build: an MCP server, a shim in front of `git` and `gh`, a sandbox, a `reference-transaction` hook.
 - Done on 2026-11-25, #86 and #87: both READMEs credit Foreman to Pedro Valencia (@pedvalme), linking to his

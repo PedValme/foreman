@@ -23,9 +23,9 @@ agent  > git commit -am "Treat discount as a percentage"   (passes)
 
 **Start here**
 
+- **Hermes Agent:** where Foreman was born, and the plugin with everything: [its own guide](plugin/README.md).
 - **Claude Code, Codex, pi or OpenCode:** one or two commands, [in the agent](#in-the-agent).
 - **Any other agent, or one that works in the cloud:** a short workflow, [in CI](#in-ci-for-any-agent).
-- **Hermes Agent:** the plugin with everything, [its own guide](plugin/README.md).
 
 ## Two places it runs, and what each one guarantees
 
@@ -44,11 +44,11 @@ Use both. The hook corrects the agent while it works. The check in CI is the one
 
 | In | Install | What you get |
 |---|---|---|
+| Hermes Agent | `hermes plugins install PedValme/foreman/plugin --ref <commit SHA>`, then `hermes plugins enable foreman` | everything: the gate, the review, `/foreman`, notices to your phone and a panel in Hermes Desktop |
 | Claude Code | `claude plugin marketplace add PedValme/foreman`, then `claude plugin install foreman@foreman-gate` | the gate, the review, `/foreman:status` and `/foreman:allow` |
 | Codex | `codex plugin marketplace add PedValme/foreman`, then `codex plugin add foreman@foreman-gate` | the gate, the review and `foreman status` |
 | pi | `pi install git:github.com/PedValme/foreman` | the gate, the review and `/foreman` |
 | OpenCode | `opencode plugin add git+https://github.com/PedValme/foreman.git` | the gate, the review and `/foreman` in its terminal interface |
-| Hermes Agent | `hermes plugins install PedValme/foreman/plugin --ref <commit SHA>`, then `hermes plugins enable foreman` | everything: the gate, the review, `/foreman`, notices to your phone and a panel in Hermes Desktop |
 
 The words in that table, once:
 
@@ -64,11 +64,6 @@ The words in that table, once:
   from there with the reasons. The agent's own `gh pr merge` is always refused; where `/foreman` exists, merging
   is yours, through `/foreman merge`.
 
-Outside Hermes the package is called `foreman-gate` and needs Python 3.9 or newer as `python3`, and git; without
-that Python the agent goes on with no gate and shows the error. What each one does, what was seen in a real
-session and its limits are in [`adapters/README.md`](adapters/README.md). Each was tried on macOS, none on Windows
-yet.
-
 In Hermes Agent, the commit SHA is the one you reviewed on this repository's
 [commits page](https://github.com/PedValme/foreman/commits/main). Documentation, install options and the full
 disclosure of what it runs: [`plugin/README.md`](plugin/README.md). Try it on [`examples/cart`](examples/cart), a
@@ -77,6 +72,11 @@ tiny project with one bug and one failing test.
 ![Foreman's panel in Hermes Desktop](docs/screenshots/panel-real-app.png)
 
 *Foreman's panel in Hermes Desktop v0.23.0, with real data from the demo repository `PedValme/foreman-demo`: a pull request the second-model review refused, one blocked at the gate, one merged after the owner's approval.*
+
+Outside Hermes the package is called `foreman-gate` and needs Python 3.9 or newer as `python3`, and git; without
+that Python the agent goes on with no gate and shows the error. What each one does, what was seen in a real
+session and its limits are in [`adapters/README.md`](adapters/README.md). Each was tried on macOS, none on Windows
+yet.
 
 ## In CI, for any agent
 

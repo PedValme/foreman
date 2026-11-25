@@ -33,6 +33,14 @@ Read the index below, then ESTADO.md, its "Next session" first (where the last s
     Claude Code, OpenCode's plugin id and the Hermes catalog entry; each publication waits for the owner's yes —
     `foreman` is another project's package on npm, and inside Claude Code the plugin's name is the prefix of the
     person's commands (DECISIONES.md, 2026-11-24).
+  - Hermes Agent comes first wherever the harnesses are listed for the public (the README's "Start here", its
+    install table), whatever the others' audience — Foreman was born for and inside Hermes, and its first
+    traffic and its examples come from there (DECISIONES.md, 2026-11-25).
+  - Foreman is credited to Pedro Valencia (@pedvalme), linking to his X profile, never to the company — it is
+    his personal brand's work (DECISIONES.md, 2026-11-25).
+  - Nothing is announced that the listed Hermes plugin does not have yet: the catalog update comes before an
+    announcement — announcing what `main` has while the catalog lists an older plugin promises Hermes users
+    more than they get (DECISIONES.md, 2026-11-25).
 - Operation: see "This repository".
 - Known pitfalls: the Hermes on the Windows development PC has no model provider, so a real session can only run
   on the owner's Hermes machine; `hermes plugins install --ref` needs the full 40-character commit; with a gateway running, a slash
