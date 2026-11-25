@@ -65,8 +65,12 @@ _HOME = r"(?:~|\$home|\$\{home\})"
 _XDG = r"(?:\$xdg_config_home|\$\{xdg_config_home\})"
 _PLUGIN_HOMES = re.compile(r"(?:(?:^|/)\.opencode|^%s/\.config/opencode|^%s/opencode|^%s/\.config)(?:/plugins?)?$"
                            % (_HOME, _XDG, _HOME))
-# A package specifier that loads Foreman, as `opencode plugin add` writes it: npm's name or the repository's git URL.
-_PACKAGE_ENTRY = re.compile(r"[\"'](?!-)[^\"'\s]*(?:foreman-gate|/foreman(?:\.git)?)(?:[@#][^\"'\s]*)?[\"']", re.I)
+# A package specifier that loads Foreman, as `opencode plugin add` writes it: npm's name (with a version or not)
+# or the repository's git URL. Only those forms: a path that merely ends in `foreman` (another program's binary in
+# an MCP entry, a folder in an instructions path) is somebody's ordinary configuration.
+_PACKAGE_ENTRY = re.compile(
+    r"[\"'](?:foreman-gate(?:@[^\"'\s]*)?"
+    r"|(?:git\+|github:|https?://|ssh://|git@)[^\"'\s]*[/:]foreman(?:\.git)?(?:#[^\"'\s]*)?)[\"']", re.I)
 _DEFINES = re.compile(r"\bid\s*:\s*[\"']%s[\"']" % re.escape(PLUGIN_ID))
 
 

@@ -117,6 +117,9 @@ class Guards(OpenCodeCase):
             self.assertEqual(self.ask("write", path=config, old='"a"', new='"b"'), {}, entry)
         self.assertTrue(opencode._config_off('["foreman-gate"]', ""))  # the file deleted
         self.assertFalse(opencode._config_off('["foreman-gate"]', '["foreman-gate", "other"]'))
+        # a path that only ends in `foreman` is not Foreman's entry: removing it is ordinary work on the file
+        for other in ('{"mcp": {"proc": {"command": ["/usr/local/bin/foreman"]}}}', '{"instructions": ["~/src/foreman"]}'):
+            self.assertFalse(opencode._config_off(other, "{}"), other)
         for command in ("opencode plugin remove foreman-gate",
                         "opencode plugin remove git+https://github.com/PedValme/foreman.git"):
             self.assertEqual(self.ask("shell", command=command)["action"], "block", command)
