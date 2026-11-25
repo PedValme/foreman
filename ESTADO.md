@@ -32,8 +32,13 @@
   4. Then publish what is already built, each store with his own yes (below).
   Not now: the `generic` host, a terminal command with `status`, Foreman's own installer of git's hooks. Never
   proposed to build: an MCP server, a shim in front of `git` and `gh`, a sandbox, a `reference-transaction` hook.
+- Done on 2026-11-25, #86: both READMEs credit Foreman to Pedro Valencia (@pedvalme), linking to his GitHub
+  profile, instead of to the company (DECISIONES); the catalog's page changes with the catalog update.
 - Proposed to the owner and not answered: try the Claude Code adapter on Copilot CLI, after its dialect knows
-  the other harnesses' tool names (none is installed here; it needs his account).
+  the other harnesses' tool names (none is installed here; it needs his account). And, on his «creo que seria
+  bueno hacer las correcciones del PR externo dandole el credito al externo»: finish external PR #57 on its
+  author's own branch (it allows maintainers' edits), so it merges as theirs with ours as co-author, after a
+  comment that says so; the recommendation given, his yes pending.
 - Then T7's remaining steps, each with the owner's yes (below), and the one Hermes catalog update.
   `trabajo/agnostico.md`, "Next step", lists what an agent can do meanwhile without him.
 - Decided on 2026-11-24 (DECISIONES): the public name in every store is `foreman-gate`, and `foreman` stays as the
