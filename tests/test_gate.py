@@ -637,6 +637,98 @@ class PushWithNoBaseBranchToName(_PushedBranch):
         self.assertIsNone(terminal("git push --force-with-lease origin feature", self.root))
 
 
+class CommitThatConcludesAMerge(_PushedBranch):
+    """The commit that concludes a merge is read for what the resolution itself does. Found on 2026-11-25: the
+    staged tree was read against the branch's side only, so a merge of the base branch that stopped on a conflict
+    was refused, at its `git commit`, for the base branch's own change to a test."""
+
+    def the_base_moves(self, test="tests/test_other.py"):
+        """Someone else, on the base branch: a line of code the branch also changed, and a change to a test."""
+        self.git("checkout", "-q", self.BASE)
+        self.write("app.py", "x = 100\n")
+        self.write(test, SKIP + "\ndef test_y():\n    assert True\n")
+        self.commit("someone else: the code and a test, already on the base branch")
+        self.git("push", "-q", "origin", self.BASE)
+        self.git("checkout", "-q", "feature")
+
+    def merge_stops_on_the_conflict(self, other=None):
+        with self.assertRaises(AssertionError):
+            self.git("merge", "--no-edit", other or self.BASE)
+        self.write("app.py", "x = 102\n")  # the resolution
+        self.git("add", "-A")
+
+    def test_what_came_with_the_base_branch_is_not_the_commits_doing(self):
+        self.the_base_moves()
+        self.merge_stops_on_the_conflict()
+        for command in ("git commit --no-edit", "git commit -m merged", "git commit -a --no-edit"):
+            self.assertIsNone(terminal(command, self.root), command)
+
+    def test_what_the_resolution_itself_rigs_is_refused(self):
+        self.the_base_moves()
+        self.merge_stops_on_the_conflict()
+        self.write("tests/test_app.py", SKIP + "\ndef test_x():\n    assert True\n")
+        self.git("add", "-A")
+        d = terminal("git commit --no-edit", self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertIn("tests/test_app.py", d["message"])
+        self.assertNotIn("tests/test_other.py", d["message"])
+
+    def test_a_test_of_the_branch_dropped_in_the_resolution_is_refused(self):
+        self.write("tests/test_new.py", "def test_new():\n    assert True\n")
+        self.commit("feature: a new test")
+        self.the_base_moves()
+        self.merge_stops_on_the_conflict()
+        self.git("rm", "-q", "tests/test_new.py")
+        d = terminal("git commit --no-edit", self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertIn("tests/test_new.py", d["message"])
+
+    def test_a_test_of_the_base_branch_dropped_in_the_resolution_is_refused(self):
+        self.the_base_moves()
+        self.merge_stops_on_the_conflict()
+        self.git("rm", "-qf", "tests/test_other.py")
+        d = terminal("git commit --no-edit", self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertIn("tests/test_other.py", d["message"])
+
+    def test_a_file_both_sides_changed_counts_only_for_what_the_resolution_adds(self):
+        self.write("tests/test_app.py", "def test_x():\n    assert True\n\n\ndef test_mine():\n    assert True\n")
+        self.commit("feature: one more test")
+        self.the_base_moves(test="tests/test_app.py")  # the base rewrites the same file, with a skipped test
+        self.merge_stops_on_the_conflict()
+        both = SKIP + "\ndef test_y():\n    assert True\n\n\ndef test_mine():\n    assert True\n"
+        self.write("tests/test_app.py", both)  # the base's lines and the branch's: the marker is the base's
+        self.git("add", "-A")
+        self.assertIsNone(terminal("git commit --no-edit", self.root))
+        self.write("tests/test_app.py", both + "\n\n" + SKIP + "\ndef test_more():\n    assert True\n")
+        self.git("add", "-A")
+        d = terminal("git commit --no-edit", self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertIn("tests/test_app.py:%d" % (both.count("\n") + 3), d["message"])  # the resolution's own marker
+        self.assertNotIn("tests/test_app.py:1 ", d["message"])  # not the base's
+
+    def test_a_merge_of_commits_no_remote_has_is_read_as_before(self):
+        # What comes in is taken as someone else's only when a remote already has it: a local branch can carry a
+        # rig made where the gate did not see it (a script), and a merge must not be the way to bring it in.
+        self.git("checkout", "-q", "-b", "side", self.BASE)
+        self.write("app.py", "x = 100\n")
+        self.write("tests/test_other.py", SKIP + "\ndef test_y():\n    assert True\n")
+        self.commit("a rig on a local branch")
+        self.git("checkout", "-q", "feature")
+        self.merge_stops_on_the_conflict(other="side")
+        d = terminal("git commit --no-edit", self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertIn("tests/test_other.py", d["message"])
+
+    def test_a_commit_that_concludes_no_merge_is_read_as_before(self):
+        self.the_base_moves()
+        self.write("tests/test_other.py", SKIP + "\ndef test_y():\n    assert True\n")  # the same line, by hand
+        self.git("add", "-A")
+        d = terminal("git commit -m x", self.root)
+        self.assertEqual(d["action"], "block")
+        self.assertIn("tests/test_other.py", d["message"])
+
+
 class SessionDirectory(GitRepoCase):
     """Real sessions: the process runs in the user's repository, Hermes's configured directory is the home folder
     or the Hermes home, and the Hermes home may itself be a git repository."""

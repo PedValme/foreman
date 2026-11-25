@@ -1415,10 +1415,13 @@ def _untracked_diff(repo: Repo) -> tuple:
 
 def scan_worktree(repo: Repo, staged_only: bool = False, include_untracked: bool = True, check: Optional[str] = None,
                   extra_messages: str = "", scope: str = "worktree", sarif=(),
-                  sarif_threshold: Optional[float] = None, sarif_scope: Optional[str] = None) -> Report:
-    """The uncommitted changes against HEAD: staged and unstaged (or only staged), plus untracked files."""
+                  sarif_threshold: Optional[float] = None, sarif_scope: Optional[str] = None,
+                  against: str = "HEAD") -> Report:
+    """The uncommitted changes against HEAD: staged and unstaged (or only staged), plus untracked files. ``against``
+    reads them against another commit instead (the other side of a merge that is being concluded); the check
+    command and the SARIF reports are then that commit's too."""
     has_head = repo.has_head()
-    base = "HEAD" if has_head else repo.empty_tree
+    base = against if has_head else repo.empty_tree
     cached = ("--cached",) if staged_only else ()
     name_status = repo.git("diff", "--name-status", "-M", *cached, *_DIFF_OPTS, base)
     paths, deleted, renamed = paths_from_name_status(name_status)
@@ -1433,7 +1436,7 @@ def scan_worktree(repo: Repo, staged_only: bool = False, include_untracked: bool
     version_of = _versions(repo, staged=staged_only)
     findings = detect(diff, deleted, renamed=renamed, allowed_paths=allowed_paths, new_files=new_files,
                       version_of=version_of, deadline=repo.deadline)
-    head_rev = "HEAD" if has_head else None
+    head_rev = against if has_head else None
     check = check_command_at(repo, head_rev, check)
     if staged_only:
         new_text = lambda p: repo.try_git("show", ":" + p)
@@ -1453,7 +1456,7 @@ def scan_worktree(repo: Repo, staged_only: bool = False, include_untracked: bool
             pass  # deleted
     blockers, notes, errors = sarif_findings(repo, head_rev, sarif, sarif_threshold, newest, sarif_scope, paths,
                                              STALE_MARGIN_WORKTREE)
-    report = Report(repo.root, scope, repo.try_git("rev-parse", "HEAD") if has_head else None, "HEAD",
+    report = Report(repo.root, scope, repo.try_git("rev-parse", against) if has_head else None, against,
                     None, check, findings + blockers)
     report.notes, report.errors = notes, errors
     return report
