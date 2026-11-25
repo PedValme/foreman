@@ -48,7 +48,9 @@ https://github.com/PedValme/foreman/compare/ce9b01a2904edb2aadefcb4ae7111d5dc976
 - **A git attribute cannot hide a change.** A `.gitattributes` line in the same change (`tests/** -diff`) hid a
   test switched off, or a secret, from every reading. A file git shows as binary is read again as text unless
   its name says it is binary, and a line that hides files from the diff is itself a finding.
-- **A history scrubber's marker is not a secret** (`***REMOVED***`): the first pull request from outside.
+- **A history scrubber's marker is not a secret** (`***REMOVED***`): the first pull request from outside,
+  contributed by [sys-dev-git](https://github.com/sys-dev-git)
+  ([PedValme/foreman#57](https://github.com/PedValme/foreman/pull/57)).
 - **The second model cannot write a line of Foreman's own.** What it writes is shown on one line each and
   without control characters, so a diff that steers the reviewer cannot make `/foreman review` show "Foreman
   review: PASS" or redraw the terminal.
