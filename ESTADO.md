@@ -17,8 +17,12 @@
   exclusivity terms; the prize money had not been communicated). So the update goes with what is built, without
   the native model picker (`trabajo/model-picker.md`; whether it is built later or asked of Hermes as a seam is
   still his to say, recommended: the seam). Asked of him in that session and open when it closed:
-  - His yes to connect to his Hermes machine and try the new pin in the `foremandev` profile.
-  - The pull request to the catalog under his account, after he reads its text. Its range and its disclosure
+  - Done with his yes on 2026-11-25: the pin `c0aa24d` installed in the `foremandev` profile of his Hermes
+    machine (v0.23.4) and tried in real sessions: an edit and a `git commit` that switch off a test blocked, a
+    repository pinned through a link listed once, the board, and `/foreman review` answering BLOCKED for a
+    loosened assertion. The profile stays on 0.2.0; the throwaway branch and link were removed.
+  - The pull request to the catalog under his account: he was shown its text (`trabajo/catalog-pr.md`) in the
+    session and his yes to send it was still open when it closed. Its range and its disclosure
     show Hermes's maintainer the other harnesses' work (the `adapters/` folder, the three names the core asks its
     context for), and the root README has said since 2026-11-24 that Foreman runs in Claude Code, Codex, pi and
     OpenCode: he was told, with the recommendation to send the update as it is and leave the README.
