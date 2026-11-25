@@ -5,6 +5,27 @@ provider or subscription and any model, the ones already configured first (2026-
 Desktop → Settings → Models → Auxiliary → "Foreman review" (Hermes's own picker; works), and Foreman's settings page
 shows only two free-text fields. Research of 2026-11-11 against Hermes v0.23.x (`2bd378ed1b`), read-only:
 
+## Read again on 2026-11-25 against Hermes v0.23.3 (`caafe5389a`): asked of the owner before building
+The plan below still holds in its parts: `ModelCatalogMenu`, `ModelMenuController` and `ModelMenuCloseContext` are
+exported (`apps/desktop/src/sdk/index.ts:1654-1669`, source only), the menu fetches `model.options` by itself, the
+working example moved to `apps/desktop/src/plugins/kanban/model-override.tsx`, `ctx.registerSettingsPage` and
+`plugins.manage` with `action: 'settings'` are as described, a plugin reads its own settings from `plugins.manage`
+with `action: 'list'` (`settings_schema[].value`) and hears `plugin.foreman.settings.changed`. There is still no
+public write to `auxiliary.<task>` (`config.set` answers 4002, "unknown config key") and no `config_schema` field
+of a model type.
+
+What that means for the person, which the plan understated: the pick this page can save is Foreman's own
+`reviewer_model`, and `review.choose_model` uses it only when the operator has granted
+`plugins.entries.foreman.llm.allow_model_override` (and `allow_provider_override` for another provider). Without
+the grant the review runs on the host's model and says so in a note. So on a default install a picker that looks
+native would not take effect, while Models → Auxiliary → "Foreman review" does, with no grant.
+
+Recommended to the owner on 2026-11-25, and waiting for his answer: not in the catalog update to 0.2.0; one
+focused issue to Hermes for the seam below (it is section 6 of #153841, whose maintainer asked for one issue per
+seam), sent under his account after he reads it. The alternatives he was given: a light page (which model
+reviews now and where the pick comes from, with a button to the native picker), or the plan below as it is, with
+a warning when the grant is missing.
+
 ## What exists (evidence in the Hermes clone)
 - `ModelCatalogMenu` + `ModelMenuController` + `ModelMenuCloseContext` are exported by `@hermes/plugin-sdk`
   (`apps/desktop/src/sdk/index.ts:1656-1667`; the bundled kanban plugin uses them in `plugins/kanban/
