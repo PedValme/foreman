@@ -92,6 +92,14 @@ class Host:
     # the review at the end of every turn. Where it does not, that review would be started and cut off each turn:
     # a session paid for and never read.
     turn_review: bool = False
+    # Where the person goes to type a command that needs them there, as the end of "Type `…` in …" (no final full
+    # stop). "" says "an interactive <label> session" (attend_here).
+    attended_where: str = ""
+
+
+def attend_here(host: "Host") -> str:
+    """Where a command that needs a person attending can be typed in this harness."""
+    return host.attended_where or "an interactive %s session" % host.label
 
 
 class Asking(BaseException):
@@ -965,7 +973,7 @@ def _run_person(host: Host, name: str, rest: str, cwd: str, session: str = "",
     if name == "allow":
         if rest and not host.attended():
             return ("Foreman: allowing a finding needs a person at the session, and nobody is attending this one. "
-                    "Type `%s` in an interactive %s session." % (host.person("allow " + rest.split()[0]), host.label))
+                    "Type `%s` in %s." % (host.person("allow " + rest.split()[0]), attend_here(host)))
         return commands.cmd_allow(rest)
     if name == "help":
         return _help(host)
@@ -993,6 +1001,9 @@ def _help(host: Host) -> str:
     from foreman.detector import MARKER
     lines = ["Foreman: a green check the agent did not rig.", "", "In %s:" % host.label]
     lines += ["  %-18s %s" % (host.person(name), doc) for name, doc in person_subcommands(host).items()]
+    writes = [host.person(n + " <pr>") for n in BOARD_WRITES if n in host.board]
+    if host.attended_where and writes:
+        lines += ["", "%s work only in %s." % (" and ".join(writes), host.attended_where)]
     lines += ["", "Verdicts:", verdicts.table(), "",
               "Foreman blocks git commit, git push and gh pr create when the change skips, deletes or moves tests, "
               "edits or weakens what the check runs, bypasses hooks or carries a secret; an agent-run gh pr merge is "

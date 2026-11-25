@@ -17,7 +17,7 @@ understands. It adds no rule and loosens none (PRODUCTO.md, rules 22 to 26).
 | `claude-code/` | Claude Code's hooks and commands, named by `.claude-plugin/plugin.json` at the repository root |
 | `codex/` | Codex's `hooks.json` and its [README](codex/README.md) |
 | `pi/` | pi's extension (`foreman.ts`) and its [README](pi/README.md) |
-| `opencode/` | OpenCode's plugin (`foreman.ts`) and its [README](opencode/README.md) |
+| `opencode/` | OpenCode's plugin: its server part (`foreman.ts`, `server.ts`), its TUI part (`tui.ts`) and its [README](opencode/README.md) |
 
 A new harness is one dialect module (its `core.Host` and a `main`), its own folder here with what the harness loads,
 and its tests. A harness that runs a command hook with JSON reads `claude_code.py` as its model; one whose extension
@@ -37,12 +37,12 @@ OpenCode 2.3.2); each harness's own README says exactly what was seen, what was 
 | A write that switches off a test | `Write`, `Edit` | `apply_patch` | `write`, `edit` | `write`, `edit`, `patch` |
 | A turn that left one behind is sent back once | `Stop` | `Stop` | `agent_before_settle` | `experimental.idle` |
 | Your commands, no model turn | `/foreman:status` | `foreman status` as a prompt | `/foreman status` | `/foreman status` (TUI, apps) |
-| The board (`/foreman`, `verdict`, `pipeline`, `prs`, `issues`, `use`) | no | no | yes | yes, as an error notice |
-| Merge and reject with reasons (`/foreman merge`, `reject`) | no | no | yes, confirmed in pi's selector | not yet |
-| Allowing a marked finding | typed in an interactive session | not available yet | at pi's interface | approved in OpenCode's permission prompt |
+| The board (`/foreman`, `verdict`, `pipeline`, `prs`, `issues`, `use`) | no | no | yes | yes: in a dialog in the TUI (its TUI part), as an error notice elsewhere |
+| Merge and reject with reasons (`/foreman merge`, `reject`) | no | no | yes, confirmed in pi's selector | in the TUI only (its TUI part), confirmed in its select dialog |
+| Allowing a marked finding | typed in an interactive session | not available yet | at pi's interface | confirmed in a TUI dialog (tested, not seen); elsewhere, approved in OpenCode's permission prompt |
 | When Foreman must ask you | the permission prompt | refused with the reason | pi's dialog | the permission prompt |
 | With nobody attending | refused | refused | refused | refused |
-| To try it from a clone | `claude --plugin-dir` | `codex -c hooks.…` | `pi -e` | a link in `.opencode/plugins` |
+| To try it from a clone | `claude --plugin-dir` | `codex -c hooks.…` | `pi -e` | a link in `.opencode/plugins` (to the folder, for the TUI part) |
 
 The same everywhere: the gate is the Hermes plugin's, on the agent's own machine, so the independent control stays
 the required check in CI (`examples/foreman-check.yml`); Foreman's hooks and state are files, guarded against the
@@ -55,12 +55,14 @@ issues they close, each change's stages. With it come `verdict [pr|branch]`, `pi
 (pin the repository for the conversation). It is `plugin/foreman/board.py` as it is, run on a stand-in for Hermes's
 context (`foreman_hosts/standin.py`). When a command needs you to choose (which repository), Foreman's program
 cannot ask, because it answers one request and ends: it answers with the question, the harness's extension shows it
-in its own dialog and sends the command again with your pick (`neutral.py`, "question"). pi has that dialog;
-OpenCode's plugin does not yet, so there the command prints the list and what to type. Seen on pi 1.5.0 in real
-sessions: without a model turn (`pi -p "/foreman"`, `verdict`, `pipeline`, `use`), on a repository without a GitHub
-remote and on one with ten open pull requests. Not yet seen in OpenCode's TUI. Claude Code and Codex have no board.
+in its own dialog and sends the command again with your pick (`neutral.py`, "question"). pi has that dialog, and so
+has OpenCode's TUI through Foreman's TUI part (`opencode/tui.ts`); OpenCode's server command has none, so there the
+command prints the list and what to type. Seen on pi 1.5.0 in real sessions: without a model turn (`pi -p
+"/foreman"`, `verdict`, `pipeline`, `use`), on a repository without a GitHub remote and on one with ten open pull
+requests. Seen in OpenCode 2.3.2's TUI: the board of the demo repository (eight open pull requests) in a dialog, and
+`use` in its select dialog. Claude Code and Codex have no board.
 
-## Merge and reject, on pi
+## Merge and reject, on pi and in OpenCode's TUI
 
 `/foreman merge <pr>` and `/foreman reject <pr> [--close] [note]` are the board's own commands too, and they write
 to GitHub as you. What Hermes gives the board for that is its terminal tool behind its approval; here it is
@@ -82,7 +84,15 @@ notes). So each merge leaves its gate, review and "waiting for your decision" li
 Seen on pi 1.5.0 in its terminal UI, on throwaway pull requests of the demo repository: `/foreman merge 19` reviewed
 it, asked in pi's selector with the commit and the command it would run, and merged it by squash; `/foreman reject
 20 --close <note>` asked first (closing the selector with Escape posted nothing), then posted the reasons signed
-"from pi" and closed it; with `-p` both answered "nobody is attending" and did nothing. OpenCode has neither yet.
+"from pi" and closed it; with `-p` both answered "nobody is attending" and did nothing.
+
+In OpenCode they live in its TUI only: a TUI plugin's slash command runs in the TUI process for what a person typed
+at its prompt, and no auto-approve mode answers its dialogs, while OpenCode's server command cannot tell a person
+from the HTTP API, the SDK or `opencode api`; through it both answer "nobody is attending". Seen in OpenCode 2.3.2's
+TUI on the demo repository: `/foreman reject 3 --close` asked in the select dialog (closed with Escape: nothing
+posted), `/foreman merge 3` refused a BLOCKED pull request before any review, and through the server command
+`/foreman merge 7` answered "nobody is attending". A merge carried out to the end was only tested, with a fake `gh`
+and a fake reviewer (`tests/test_hosts_opencode_tui.py`); see [opencode/README.md](opencode/README.md).
 
 ## The review in the four
 
