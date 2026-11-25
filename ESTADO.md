@@ -18,16 +18,22 @@
      not write it; the first version loosened the control and was reworked. It is in the core, so Hermes users
      get it with the catalog update. With it, the OpenCode TUI tests stopped depending on the runner's speed
      (CI had failed three times on Windows that day).
-  2. Next: `action.yml` at the root (the check in CI as a GitHub Action instead of a copied workflow) and a
+  2. Done, #84 and #85 (his «sí, arregla primero los dos rechazos falsos»): two more refusals for the base
+     branch's own change to a test. #84: the `git commit` that concludes a merge that stopped on a conflict is
+     read for what the resolution does, when a remote already has what comes in. #85: a branch that follows the
+     base branch itself (`git checkout -b topic origin/main`), pushed to a branch of its own, is read against
+     that branch on the remote, only when the command leaves no doubt about where the push goes. Each reviewed
+     by an agent that did not write it; #85's first version let `git push -f origin topic` through with
+     `push.default=upstream`, which writes the base branch, and was closed before it merged.
+  3. Next: `action.yml` at the root (the check in CI as a GitHub Action instead of a copied workflow) and a
      README that says what Foreman promises by level: locked (the required check in CI, any agent, with the
      workflow protected, the agent unable to merge alone, and marked findings failing or behind a required
      review), guarded (a harness's hook, the five of today), early warning (git's own hooks: not built).
-  3. Then publish what is already built, each store with his own yes (below).
+  4. Then publish what is already built, each store with his own yes (below).
   Not now: the `generic` host, a terminal command with `status`, Foreman's own installer of git's hooks. Never
   proposed to build: an MCP server, a shim in front of `git` and `gh`, a sandbox, a `reference-transaction` hook.
-- Proposed to the owner and not answered: fix the two false refusals that are left (Known issues, the first
-  two), as the next change to the gate; try the Claude Code adapter on Copilot CLI, after its dialect knows the
-  other harnesses' tool names (none is installed here; it needs his account).
+- Proposed to the owner and not answered: try the Claude Code adapter on Copilot CLI, after its dialect knows
+  the other harnesses' tool names (none is installed here; it needs his account).
 - Then T7's remaining steps, each with the owner's yes (below), and the one Hermes catalog update.
   `trabajo/agnostico.md`, "Next step", lists what an agent can do meanwhile without him.
 - Decided on 2026-11-24 (DECISIONES): the public name in every store is `foreman-gate`, and `foreman` stays as the
@@ -78,8 +84,8 @@
 
 ## Next steps
 1. `action.yml` and the README by level (decided, "Next session" above). Then T7's stores and the one Hermes
-   catalog update, which now also carries #83's fix of the gate (`trabajo/agnostico.md`, "Next step";
-   `trabajo/model-picker.md`).
+   catalog update, which now also carries the gate's fixes of #83, #84 and #85 (`trabajo/agnostico.md`, "Next
+   step"; `trabajo/model-picker.md`).
 2. Without the owner: the per-turn review seen in a real Claude Code and Codex session; OpenCode's end of turn
    given the long wait so the per-turn review can be offered there; a rejection and `allow` seen in OpenCode's TUI.
 3. Propose the Hermes seams one by one (#153841's advice): first the terminal cwd accessor.
@@ -91,19 +97,17 @@
    register the demo repository in the owner's environment as outside the factory.
 
 ## Known issues
-- Unresolved (core, every harness, Hermes included; seen on 2026-11-25 through the adapters' protocol in a
-  throwaway repository): the `git commit` that concludes a merge of the base branch with conflicts is refused for
-  the base branch's own change to a test, because the staged tree is read against the branch's side only. The
-  agent is then told to undo another person's line. Which side a merge is read against is a decision about the
-  control (a test dropped in the resolution shows only against the other side): its own change, reviewed.
-- Unresolved (core; reasoned and pinned by a test, not seen in a session): a branch that follows the base branch
-  itself (`git checkout -b topic origin/main`) and is pushed before it is rebased is read against the base's tip,
-  so what the base gained since reads as the branch's doing (someone's new test as a test deleted). Reading it
-  rightly needs to know where the push goes, and guessing that from the command opened two holes in the review of
-  #83 (`topic:heads/main`, a flag with a value): it needs the push's arguments parsed properly first.
-- Unresolved (the push after the base came in, #83; disclosed in the plugin's README): what the branch changed
-  since its last push is not read in the files the base's incoming commits touched too, and a clone that cannot
-  name the remote's default branch (no `origin/HEAD`, `main` or `master`) is read as before the fix.
+- Unresolved (core; what is left of the refusals for the base branch's own change, each disclosed in the plugin's
+  README): a cherry-pick or a revert that stops on a conflict is still read against HEAD alone; a branch that
+  follows the base branch is read against the base's tip whenever the command leaves a doubt about where the push
+  goes (a flag Foreman does not know, `push.default` other than `simple` or `current`, a forced push to a branch
+  the remote does not have); a merge of commits no remote has is read whole; a clone that cannot name the
+  remote's default branch (no `origin/HEAD`, `main` or `master`) is read as before #83.
+- Unresolved (#83, #84; disclosed there too): after the base came into a branch, what the branch changed since
+  its last push is not read in the files the base's incoming commits touched; a test function dropped from a
+  file both sides of a merge changed is not seen (the detector sees files and markers, not single functions).
+- Unresolved (core, before these fixes too): `git push -o <value> …` and the other flags of `git push` that take
+  a value are read with the value as an argument, so such a push goes to a person as "more than one branch".
 - Unresolved (Claude Code's dialect, if it is ever run by another harness that reads Claude Code's hooks): a tool
   name it does not know is let through with no notice (`claude_code._pre_tool`), and Cursor and Droid name their
   shell `Shell` and `Execute` (read in their documentation): there the gate would be off and silent.
