@@ -1,6 +1,6 @@
 {
   "name": "foreman",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A green check the agent did not rig: a deterministic gate (no model) that blocks git commit, git push and gh pr create when the change skips, deletes or moves tests, edits what the check runs, bypasses hooks or carries a secret, always blocks an agent-run gh pr merge, and sends the agent back before it finishes a turn that left one of those behind.",
   "author": {"name": "PedValme", "url": "https://github.com/PedValme"},
   "homepage": "https://github.com/PedValme/foreman",

@@ -544,6 +544,28 @@ a quoted string or a comment does not, except in the files that run the check (C
 **The review** can miss things, and an exact quote can still back a wrong conclusion: read the findings. The
 same-model warning compares with the main model in your config, not one you switched to inside a session.
 
+## What changed in 0.2.0
+
+- **Fewer refusals for someone else's change.** The gate no longer refuses a push after the base branch came into
+  yours (a rebase onto it, a merge of it), the commit that concludes a merge of the base branch that stopped on a
+  conflict, or the push of a branch that follows the base branch, for a change to a test that the base branch
+  brought. What is still read the old way is under *Known limits*.
+- **A git attribute cannot hide a change.** A `.gitattributes` line in the same change (`tests/** -diff`), or one
+  in `.git/info/attributes`, hid a test switched off or a secret from every reading. A file git shows as binary is
+  read again as text unless its name says it is binary, and a line that hides files from the diff is itself a
+  finding.
+- **A history scrubber's marker is not a secret.** A value that is nothing but `git-filter-repo`'s marker
+  (`***REMOVED***`, or `***REDACTED***`) counts as a placeholder. Contributed by
+  [sys-dev-git](https://github.com/sys-dev-git).
+- **The second model cannot write a line of Foreman's own.** What it writes (a finding's title, reason and fix,
+  its summary, the line it quotes, an answer that was not JSON) is shown on one line each and without control
+  characters, so a diff that steers the reviewer cannot make `/foreman review` show "Foreman review: PASS" or
+  redraw the terminal.
+- **`/foreman use` offers one repository once**, also when it is reached through a link or, on Windows, under a
+  folder's short name.
+- **CI mode runs from Foreman's own folder**, never from the repository it checks (see *CI mode*); on GitHub,
+  `uses: PedValme/foreman@<full commit SHA>` does it for you.
+
 ## Status
 
 Verified in real Hermes v0.23.0 sessions (macOS): the write gate and the commit gate blocking a skipped test (also

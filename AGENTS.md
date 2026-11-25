@@ -57,7 +57,10 @@ Read the index below, then ESTADO.md, its "Next session" first (where the last s
   names Hermes's own context does not have (`foreman_host_label`, `foreman_review_before_merge`,
   `foreman_finish_review`), for what only the host knows; a change to those calls, to the board's text or to
   `finish.py`'s messages is checked against the adapters' tests. A harness's terminal UI can be driven for a real-session test through
-  tmux (`tmux send-keys`, `capture-pane`): that is how pi's selector and its merge were seen.
+  tmux (`tmux send-keys`, `capture-pane`): that is how pi's selector and its merge were seen. The real-panel test
+  (`test_desktop_panel_sequences`) is skipped wherever Hermes's `node_modules` is not flat, which is every pnpm
+  install: set `FOREMAN_NODE_MODULES` to a folder that links `react`, `react-dom`, `scheduler` and `jsdom` from
+  `~/.hermes/hermes-agent/node_modules/.pnpm` and it runs.
 
 ## Where things are: one document per question
 | Question | Document | Who writes it |

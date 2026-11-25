@@ -4,29 +4,26 @@
 
 <!-- pic-method: next-session -->
 ## Next session
-- In progress on 2026-11-25, branch `claude/catalog-core-fixes` (two commits, not pushed, no pull request yet;
-  853 tests green, `hermes plugins validate` passed): what the core owed the catalog update, except the model
-  picker. A finding's words on one line in `review.verify`; `/foreman use` offering one repository once
-  (`board._same_place`); and the three seams, as names the core asks its context for (`foreman_host_label`,
-  `foreman_review_before_merge`, `foreman_finish_review`), so the adapters wrap nothing. It waits for the
-  verdict of a reviewer that did not write it; then its pull request. Still to build for the update: the native
-  model picker (`trabajo/model-picker.md`; its Desktop API is being read again against Hermes v0.23.3), the
-  plugin's version, and its README, whose list of git commands lacks `config --get`, `check-ignore` (both run
-  since before the pin) and `show-ref` (new). The real-panel test runs on this Mac with
-  `FOREMAN_NODE_MODULES` set to a folder that links `react`, `react-dom`, `scheduler` and `jsdom` from Hermes's
-  pnpm store (`~/.hermes/hermes-agent/node_modules/.pnpm`); Hermes's own `node_modules` is not flat there.
+- Next action: the one Hermes catalog update to 0.2.0, which the owner put before any announcement (DECISIONES,
+  2026-11-25: «OK con tu recomendación»). `main` is ready for it: the plugin is at version 0.2.0 with what
+  changed in its README, and `trabajo/catalog-pr.md` has the steps and the pull request's text. It carries
+  everything since the pin ce9b01a: the gate's fixes (#83, #84, #85), what a git attribute could hide (#88), the
+  scrubber's marker (#57), the credit line (#86, #87), and what the core owed it (#91): what the second model
+  writes on one line each and without control characters, `/foreman use` offering one repository once, the
+  README's full list of git commands, and the three seams as names the core asks its context for
+  (`foreman_host_label`, `foreman_review_before_merge`, `foreman_finish_review`), so the adapters wrap nothing.
+- Three things in it wait for the owner, asked in the session of 2026-11-25 and not answered when it closed:
+  - The native model picker (`trabajo/model-picker.md`, read again against Hermes v0.23.3). Recommended: not in
+    this update, and one focused issue to Hermes for the seam; a picker in Foreman's own page can only save
+    `reviewer_model`, which takes effect only with a grant the operator sets by hand, while Hermes's own
+    auxiliary picker works without one.
+  - His yes to connect to his Hermes machine and try the new pin in the `foremandev` profile.
+  - The pull request to the catalog under his account, after he reads its text.
 - The owner asked on 2026-11-25 whether the hackathon's rules forbid Foreman on other platforms. Read: Nous's
   announcement of 2026-11-04 (the rules live in that post on X), the winners' closing post and the catalog's 20
   rules: nothing asks for exclusivity, gives Nous any right over the entry or conditions what comes after. Not
   read: the entry form (closed) and the prize message Nous sent him; he looks at that one before the
   announcement.
-- Next action: the one Hermes catalog update, which the owner put before any announcement (DECISIONES,
-  2026-11-25: «OK con tu recomendación»). It carries everything on `main` since the pin ce9b01a: the gate's fixes
-  (#83, #84, #85), what a git attribute could hide (#88), the scrubber's marker (#57), the credit line (#86,
-  #87), and what waited for it before (the one line in `review.verify`, the three seams the stand-in wraps, the
-  native model picker of `trabajo/model-picker.md`, `board.candidates` on Windows). Two things in it are his and
-  are asked when it starts, each with its own yes: connecting to his Hermes machine to try it in the `foremandev`
-  profile, and the pull request to the catalog under his account after he sees its text.
 - Then the announcement, his: Foreman in Hermes, in Claude Code, Codex, pi and OpenCode, and in CI for any agent.
   It tells whoever copied `examples/foreman-check.yml` before 2026-11-25 to update it (below). Then the stores,
   each with his own yes: `npm publish` as `foreman-gate` (his npm account; it lists it in pi's catalog), the pull
@@ -61,7 +58,8 @@
 - What waits for Pedro lives in OmniBrain: `omnibrain_esperas` with repo `foreman`, or «Te espera» in the panel.
 
 ## Delivered
-- The Hermes plugin, version 0.1.0, in `plugin/`, listed in the Hermes catalog; CI on Linux, macOS and Windows.
+- The Hermes plugin in `plugin/`, listed in the Hermes catalog at version 0.1.0 (pin ce9b01a); `main` has 0.2.0,
+  not listed yet; CI on Linux, macOS and Windows.
 - In Claude Code, Codex, pi and OpenCode (`adapters/`, `package.json`, `.claude-plugin/`, `.codex-plugin/`),
   installable from this repository as `foreman-gate` and announced in the root README; in no store yet: the gate,
   the person's commands and the review on request; on pi and in OpenCode's TUI also the board, merge and reject;
@@ -72,7 +70,7 @@
 
 ## In progress
 - Nothing is half-built. What is left of "Foreman for any harness" (`trabajo/agnostico.md`, T7) is the catalog
-  update and the publications, each with the owner's yes.
+  update (`trabajo/catalog-pr.md`) and the publications, each with the owner's yes.
 
 ## Next steps
 1. The Hermes catalog update, then the announcement, then the stores ("Next session", above).
@@ -145,16 +143,16 @@
   running gateway, a slash command typed first in a CLI session cannot tell the repository (`/foreman use <path>`
   is the way around); one guarded private import makes `hermes plugins validate` warn; a pushed notification cannot
   carry buttons, Hermes shows no approval prompt for a plugin's command.
-- Unresolved (Hermes plugin; fixed in the adapters, not in `plugin/`): a finding the review verified keeps the line
-  breaks of its `title`, `why` and `fix`, so a diff that steers the reviewer can make `/foreman review` print a
-  line that reads as Foreman's own. One line in `review.verify`, for the catalog update.
+- Unresolved for whoever installs from the catalog, until its update (the listed plugin is 0.1.0; fixed on `main`
+  in #91): what the second model writes keeps its line breaks and control characters, so a diff that steers the
+  reviewer can make `/foreman review` print a line that reads as Foreman's own; and `/foreman use` lists one
+  repository twice when it is reached through a link or under a Windows short name (`RUNNER~1`).
+- Unresolved (core, after #91; from its review): `/foreman use` and every pin resolve each remembered repository's
+  real path, so one on a network share that does not answer can make them wait.
 - Unresolved (Claude Code, Codex): with the harness's home moved (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) the installed
   copy is guarded, but a write to the settings file in that moved home that disables the plugin is not recognised
   (the guards know `~/.claude` and `~/.codex`). OpenCode: `opencode plugin list` and `plugin update` misreport an
   installed git package (seen; remove and add again).
-- Unresolved (core, Windows; found by CI on 2026-11-24): `board.candidates` compares directories by spelling, so a
-  process started in a folder under its short name (`RUNNER~1`) lists one repository twice in `/foreman use`.
-  Compare canonical paths, at the catalog update.
 - Unresolved (debt from the reviews): state files are plain files behind a best-effort guard; a SARIF report
   replaced by a separate command is not noticed; `include`d makefiles and a new `GNUmakefile` are not covered; a
   merge through `gh api` or a direct push to the base branch is not blocked; the real-panel behaviour test runs only
