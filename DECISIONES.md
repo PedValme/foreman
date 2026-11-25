@@ -158,9 +158,9 @@ the owner confirms it. An option the owner turned down is a decision too and sta
   conflicts, and the branch that follows the base branch itself (`git checkout -b topic origin/main`) pushed
   before it is rebased, both refused for the base branch's own change to a test; then `action.yml` and the README
   by level, as decided the same day.
-- 2026-11-25 · Foreman is credited to the owner's personal brand, not to the company · Pedro: «quiero que
-  quitemos el "by aqp intelligence" o la referencia esa que pusimos que quede todo asociado anmi marca personal
-  @pedvalme o sea Pedro Valencia». Replaces the credit line of 2026-11-10. Ajustes del agente: the closing line of
+- 2026-11-25 · The credit is his personal brand · Pedro: «que quede todo asociado anmi marca personal @pedvalme»,
+  in full: «quiero que quitemos el "by aqp intelligence" o la referencia esa que pusimos que quede todo asociado
+  anmi marca personal @pedvalme o sea Pedro Valencia». Replaces the credit line of 2026-11-10 (the company's). Ajustes del agente: the closing line of
   both READMEs reads "Built by Pedro Valencia (@pedvalme)" and links to his GitHub profile, the one address of
   his this repository already names; the `author` fields and the licence already say `PedValme` and stay. The
   page in Hermes's catalog shows the plugin's README at the pinned commit, so it changes with the catalog update.
