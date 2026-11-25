@@ -476,9 +476,15 @@ a quoted string or a comment does not, except in the files that run the check (C
 - the gate reads the command as written: a git or gh call hidden behind an escape, a variable or `xargs` (`g\it`,
   `$G commit`, `… | xargs gh`), or a `gh` alias, is not recognised;
 - the base a push or pull request is compared with comes from the local remote-tracking refs and upstream: an agent
-  that moves them (`git update-ref refs/remotes/origin/main HEAD`) narrows what is inspected (a wildcard refspec, a
+  that moves them (`git update-ref refs/remotes/origin/main HEAD`, `git remote set-head origin <its own branch>`)
+  narrows what is inspected (a wildcard refspec, a
   configured `remote.<name>.push`, `remote.<name>.mirror` or `push.default=matching`, also given with `git -c`, asks
   you; a local branch as upstream is ignored);
+- a push is read against what the remote already has of the branch. Once the base branch came into the branch (a
+  rebase onto it, a merge of it), it is read from where the branch leaves the base branch, and what changed since
+  the branch's last push still counts except in the files the base branch's own incoming commits touched. When the
+  remote's default branch cannot be named (no `origin/HEAD`, `main` or `master` in the clone), the push is read
+  from the branch's last push only, and what came with the base branch is reported as the branch's;
 - test collection switched off through configuration other than the cases in the table (`pytest.ini` `addopts =
   --collect-only` or `python_files`, `collect_ignore` in `conftest.py`, a `load_tests` that returns nothing);
 - `core.hooksPath` written straight into `.git/config`, or the hook files deleted;

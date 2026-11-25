@@ -1080,9 +1080,11 @@ class Repo:
     def upstream(self) -> Optional[str]:
         return self.try_git("rev-parse", "--verify", "-q", "@{upstream}^{commit}")
 
-    def base_ref(self, head: str = "HEAD") -> tuple:
-        """(merge-base sha, label) with the remote's default branch; falls back to a local main/master. (None, None)
-        when there is no base: a repository with no remote and no main branch, or no commits."""
+    def base_ref(self, head: str = "HEAD", remote_only: bool = False) -> tuple:
+        """(merge-base sha, label) with the remote's default branch; falls back to a local main/master, unless
+        ``remote_only`` (a local branch is the agent's to move). (None, None) when there is no base: a repository
+        with no remote and no main branch, or no commits; with ``remote_only``, also one whose remotes have no
+        HEAD, ``main`` or ``master`` this clone knows."""
         remotes = (self.try_git("remote") or "").split()
         remotes.sort(key=lambda r: r != "origin")
         candidates = []
@@ -1091,7 +1093,8 @@ class Repo:
             if head_ref:
                 candidates.append(head_ref)
             candidates += ["refs/remotes/%s/main" % remote, "refs/remotes/%s/master" % remote]
-        candidates += ["refs/heads/main", "refs/heads/master"]
+        if not remote_only:
+            candidates += ["refs/heads/main", "refs/heads/master"]
         for ref in candidates:
             sha = self.try_git("merge-base", head, ref)
             if sha:

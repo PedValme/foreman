@@ -147,6 +147,12 @@ the owner confirms it. An option the owner turned down is a decision too and sta
   OpenCode's plugin id and the Hermes catalog entry. He saw with it: first the `package.json`, the marketplace
   renamed and the four installations tried from git, with nothing published; each publication (npm, OpenCode's
   page, Anthropic's directory) waits for his yes. Va en: this repository's AGENTS.md (the index).
+- 2026-11-25 · The push refused after a rebase is fixed first · Pedro: «sí, empieza por el arreglo del rebase»,
+  to the recommendation he read after asking, of the evaluation of Foreman for any agent (`trabajo/agnostico.md`),
+  «antes de hacerlo, valenla pena???»: fix that defect of today's gate, then `action.yml` with a README that
+  speaks by level, then publish what is already built (each publication with his own yes, as before); the generic
+  host, the terminal command with `status` and Foreman's own installer of git's hooks, not now (nobody has asked
+  for Foreman on a harness it does not cover: 28 stars, no issue from outside).
 - 2026-11-24 · The root README announces the adapters · Pedro: «ok al readme», to the section he read ("In Claude
   Code, Codex, pi and OpenCode": the install command from git for each, what each gives, where the limits are).
   npm, OpenCode's page, Anthropic's directory and the issue to Hermes still wait for his yes, one by one.
