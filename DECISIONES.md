@@ -139,11 +139,11 @@ the owner confirms it. An option the owner turned down is a decision too and sta
 - 2026-11-24 · The Hermes plugin stays as listed: changes to the core land on `main` and reach Hermes together, in
   one substantial catalog update · Pedro: «el plugin de hermes queda intacto salvo como dices que se haga una
   actuwlizacion mayor acumulada que sfecte el nucleo».
-- 2026-11-24 · The adapters are published under one public name, `foreman-gate`, in every store (npm and with it
-  pi's catalog, OpenCode's ecosystem page, the marketplaces of Claude Code and Codex, Anthropic's directory), from
-  this one repository; `foreman` stays where it is the name in use: the command `/foreman`, the plugin inside
-  Claude Code (its name is the prefix of `/foreman:status`), OpenCode's plugin id and the Hermes catalog
-  entry · Pedro: «por que no foreman-gate para todos y el nombre foreman se mantiene de fondo coml sugieres»,
-  and to that reading with its four exceptions, «si, confirmo, hazlo así». He saw with it: first the `package.json`, the
-  marketplace renamed and the four installations tried from git, with nothing published; each publication (npm,
-  OpenCode's page, Anthropic's directory) waits for his yes. Va en: this repository's AGENTS.md (the index).
+- 2026-11-24 · One public name in every store, `foreman-gate` · Pedro: «si, confirmo, hazlo así», to this reading
+  of his «por que no foreman-gate para todos y el nombre foreman se mantiene de fondo coml sugieres»: the adapters
+  are published as `foreman-gate` (npm and with it pi's catalog, OpenCode's ecosystem page, the marketplaces of
+  Claude Code and Codex, Anthropic's directory), from this one repository, and `foreman` stays where it is the name
+  in use: the command `/foreman`, the plugin inside Claude Code (its name is the prefix of `/foreman:status`),
+  OpenCode's plugin id and the Hermes catalog entry. He saw with it: first the `package.json`, the marketplace
+  renamed and the four installations tried from git, with nothing published; each publication (npm, OpenCode's
+  page, Anthropic's directory) waits for his yes. Va en: this repository's AGENTS.md (the index).
