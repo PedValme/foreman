@@ -7,6 +7,9 @@ PedValme/hermes-agent, branch add-foreman-plugin), at the pin `ce9b01a2904edb2aa
 decided on 2026-11-24.
 
 ## Steps, in order
+Done on 2026-11-25: steps 1 and 2, with the commit `c0aa24d99ac45b6f04dd66caf5d74b3148a7765e` (installed in
+`foremandev` at that pin, with the owner's yes; what was seen is under "Validation" below). A later commit that
+does not touch `plugin/` does not move the pin.
 1. The commit to pin is on `main` with CI green, and has `version: "0.2.0"` in `plugin/plugin.yaml`.
 2. Tried on the owner's Hermes machine, in the `foremandev` profile (DECISIONES, 2026-11-14), with the owner's yes
    for that connection: `hermes -p foremandev plugins install` at the full 40-character commit, then a short real
@@ -77,4 +80,8 @@ https://github.com/PedValme/foreman/compare/ce9b01a2904edb2aadefcb4ae7111d5dc976
   above.
 - `scripts/validate_plugin_catalog.py plugin-catalog/foreman.yaml`: OK.
 - The plugin's own CI: unit tests on Linux, macOS and Windows, and Foreman on its own pull requests.
-- Tried in a real Hermes session at the new pin before this pull request: <what was seen, filled in at step 2>.
+- Tried in real Hermes v0.23.4 sessions at the new pin, in a dedicated profile, before this pull request: an edit
+  that adds `@unittest.skip` was blocked and nothing was written; `git commit` with a skip already in the tree was
+  blocked and nothing was committed; `/foreman use` listed a repository pinned through a link once, marked as
+  pinned; the board; and `/foreman review` of a branch that loosened an assertion answered BLOCKED with the
+  finding on one line each, the reviewer picked in Hermes's auxiliary models.
