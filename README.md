@@ -58,4 +58,4 @@ tests, examples and working documents stay here. How the
 project is run: [PRODUCTO.md](PRODUCTO.md) (the product's rules), [DECISIONES.md](DECISIONES.md) (decisions) and
 [ESTADO.md](ESTADO.md) (state).
 
-MIT. Built by [AQP Intelligence](https://aqpintelligence.com).
+MIT. Built by Pedro Valencia ([@pedvalme](https://github.com/PedValme)).
