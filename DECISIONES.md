@@ -201,10 +201,9 @@ the owner confirms it. An option the owner turned down is a decision too and sta
 - 2026-11-24 · The root README announces the adapters · Pedro: «ok al readme», to the section he read ("In Claude
   Code, Codex, pi and OpenCode": the install command from git for each, what each gives, where the limits are).
   npm, OpenCode's page, Anthropic's directory and the issue to Hermes still wait for his yes, one by one.
-- 2026-11-25 · Other harnesses wait for the prize stage · Pedro: «mejor esperamos hasta que se cierre la etapa
-  de premiación antes de publicar Foreman para otros arneses»: Foreman for other harnesses is not published until
-  the hackathon's prize stage closes, and the plugin's own improvements and fixes go up now. In full: «ayer ya me
-  contestaron por "x" si lo viste,
+- 2026-11-25 · Other harnesses wait for the prize · Pedro: «esperamos hasta que se cierre la etapa de premiación»:
+  Foreman for other harnesses is not published until the hackathon's prize stage closes, and the plugin's own
+  improvements and fixes go up now. In full: «ayer ya me contestaron por "x" si lo viste,
   no mencionan nada de terminos de exclusividad, pero falta la comunicación sobre el premio económico, entonces
   mejor esperamos hasta que se cierre la etapa de premiación antes de publicar Foreman para otros arneses, lo que
   si podemos ir haciendo es subir las mejoras y correciones del propio plugin que hemos ejecutado.» He said it
