@@ -212,9 +212,10 @@ class Merge(WritesCase):
         self.assertIn("the stored review of this exact diff", " ".join(done["reply"].split()))
         self.assertEqual(self.gh.writes(), [MERGE])
 
-    def test_the_boards_line_about_its_reviewer_is_the_one_this_module_replaces(self):
-        # `standin._merge_review` rewrites the first line the board puts before a merge: this is that line, as
-        # the board itself writes it (if the core changes it, this fails and the rewrite is looked at again)
+    def test_without_the_stand_in_the_board_names_its_reviewer_in_its_own_words(self):
+        # The stand-in gives the board this harness's line about the review before a merge
+        # (`foreman_review_before_merge`). On a context without it, which is what Hermes's is, the board writes
+        # its own: this is that line.
         self.clean_pr()
         host = self.host({"attended": True})
         review.bind(standin.reviewer.context(host, standin.reviewer.plan(host)))
@@ -253,8 +254,9 @@ class Reject(WritesCase):
         self.assertTrue(body.endswith("<sub>Posted with `/foreman reject` from pi.</sub>"), body[-80:])
         self.assertIn(body, reply)  # what the person reads is what was posted
 
-    def test_the_boards_footer_is_still_the_one_this_module_replaces(self):
-        self.assertTrue(board.reject_comment({"blockers": [], "marked": []}, "note").endswith(standin.FOOTER))
+    def test_without_the_stand_in_the_comment_is_signed_with_hermes(self):
+        self.assertTrue(board.reject_comment({"blockers": [], "marked": []}, "note").endswith(
+            "<sub>Posted with `/foreman reject` from Hermes Agent.</sub>"))
 
     def test_closing_asks_first(self):
         self.blocked_pr()

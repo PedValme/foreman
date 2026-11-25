@@ -387,6 +387,33 @@ class ReviewCache(PipelineCase):
         self.assertEqual(self.run_review(llm)["verdict"], "PASS")
         self.assertEqual(len(llm.calls), 1)
 
+    def test_another_host_adds_who_reviewed_before_the_record_is_stored(self):
+        ctx = FakeCtx(FakeLlm(parsed=answer()))
+        seen = []
+
+        def finish(record):
+            seen.append((record["verdict"], record["cached"], "saved" in record))
+            record["reviewer"] = {"harness": "another"}
+        ctx.foreman_finish_review = finish
+        r1 = review.run_review("", ctx=ctx, where=self.root)
+        self.assertEqual(seen, [("PASS", False, False)])  # with its verdict, and before it is written anywhere
+        with open(r1["saved"], encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh)["reviewer"], {"harness": "another"})
+        self.assertEqual(review.cache_load(r1["cache_key"])["reviewer"], {"harness": "another"})
+        r2 = review.run_review("", ctx=ctx, where=self.root)  # the stored one: told too, and the model not called
+        self.assertEqual((seen[1][:2], len(ctx.llm.calls)), (("PASS", True), 1))
+        self.assertEqual(r2["reviewer"], {"harness": "another"})
+
+    def test_a_host_whose_addition_fails_does_not_cost_the_review(self):
+        ctx = FakeCtx(FakeLlm(parsed=answer()))
+
+        def finish(record):
+            raise RuntimeError("broken host")
+        ctx.foreman_finish_review = finish
+        with self.assertLogs("foreman.review", level="WARNING"):
+            r = review.run_review("", ctx=ctx, where=self.root)
+        self.assertEqual((r["verdict"], os.path.isfile(r["saved"])), ("PASS", True))
+
     def test_slash_fresh_is_parsed(self):
         review._CTX = FakeCtx(FakeLlm(parsed=answer()))
         board.pin(self.root)
@@ -476,6 +503,41 @@ class MergeWithReview(PipelineCase):
         self.assertIn("reviewed PR #7 at fffffff with the second model first", " ".join(out.split()))
         self.assertEqual(pipeline.get("acme/widgets#pr:7")["stage"], "merged")
         self.assertEqual([e["kind"] for e in self.sent], ["merged"])
+
+    def test_another_host_says_who_reviewed_and_the_board_drops_its_own_words(self):
+        llm = FakeLlm(parsed=answer())
+        ctx = FakeCtx(llm, choice="merge")
+        asked = []
+
+        def said(number, head, record):
+            asked.append((number, head, record["verdict"], record["cached"]))
+            return ["Foreman reviewed PR #%d at %s before the merge: %s." % (number, head, record["verdict"]),
+                    "Reviewer: this harness's own session"]
+        ctx.foreman_review_before_merge = said
+        review._CTX = ctx
+        board.bind(ctx)
+        out = commands.handle_slash("merge 7", session_key=KEYS[0])
+        self.assertEqual(asked, [(7, "fffffff", "PASS", False)])
+        self.assertIn("Foreman reviewed PR #7 at fffffff before the merge: PASS.\nReviewer: this harness's own "
+                      "session\n", out)
+        self.assertNotIn("second model", out)
+        self.assertNotIn(review.SAME_MODEL, ctx.asked[0][0])  # Hermes's note about its reviewer: not said here
+        self.assertIn("merged PR #7", out)
+
+    def test_a_host_that_cannot_say_who_reviewed_gets_a_line_that_names_nobody(self):
+        ctx = FakeCtx(FakeLlm(parsed=answer()), choice="merge")
+
+        def broken(number, head, record):
+            raise RuntimeError("no plan")
+        ctx.foreman_review_before_merge = broken
+        review._CTX = ctx
+        board.bind(ctx)
+        with self.assertLogs("foreman.board", level="WARNING"):
+            out = commands.handle_slash("merge 7", session_key=KEYS[0])
+        self.assertIn("Foreman reviewed PR #7 at fffffff before the merge: PASS.", " ".join(out.split()))
+        self.assertNotIn("second model", out)
+        self.assertNotIn("Hermes", out)
+        self.assertIn("merged PR #7", out)
 
     def test_could_not_run_is_the_first_line_and_a_person_decides(self):
         ctx, out = self.merge(FakeLlm(exc=TimeoutError("timed out")), choice="cancel")

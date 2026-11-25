@@ -52,7 +52,6 @@ DOCS = {
 }
 # What Foreman's own gh may be started for: the board's three writes, and nothing else it might be handed.
 GH_WRITES = (("pr", "merge"), ("pr", "comment"), ("pr", "close"))
-FOOTER = "<sub>Posted with `/foreman reject` from Hermes Agent.</sub>"  # the board's, at the end of its comment
 MAX_OPTIONS = 20
 _DISMISSED = "cancel"  # the option a dismissed dialog counts as, where the question has it
 
@@ -77,6 +76,27 @@ class _Context:
     def __init__(self, host: core.Host, cwd: str, answer: Optional[dict]):
         self.host, self.cwd = host, cwd
         self.answer = answer if isinstance(answer, dict) else {}
+        self.plan: Optional[reviewer.Plan] = None  # this harness's reviewer, where it has one (``_bound``)
+        self.foreman_host_label = host.label  # the board signs what it posts with it (``board.host_label``)
+
+    def foreman_review_before_merge(self, number: int, head: str, record: dict) -> Optional[list]:
+        """The board's lines about the review before a merge (``board._review_for_merge`` asks for them): what
+        was reviewed and, when a reviewer's session answered for this diff, who reviewed, in the words every
+        review in this harness uses (rule 25). The board's own lines name "the second model" and how Hermes
+        routed it: they are Hermes's."""
+        if self.plan is None:
+            return None
+        verdict = record.get("verdict")
+        if record.get("error"):  # it could not run, or there was nothing to review: nobody reviewed
+            first = "The review of PR #%d at %s: %s." % (number, head, verdict)
+        elif record.get("cached"):
+            first = ("Review of PR #%d at %s: %s (the stored review of this exact diff, %s; the reviewer was not "
+                     "started again)." % (number, head, verdict, record.get("time") or "earlier"))
+        else:
+            first = "Foreman reviewed PR #%d at %s before the merge: %s." % (number, head, verdict)
+        said = reviewer.who(self.host, self.plan, record) if isinstance(record.get("model"), dict) \
+            and not record.get("error") else []
+        return [board.wrap(first)] + said
 
     def session_cwd(self) -> str:
         # Spelt as the system spells this program's own directory (the extension starts it there), so that one
@@ -134,70 +154,22 @@ class _Context:
         return {"exit_code": code, "output": "\n".join(t.strip() for t in (out, err) if t and t.strip())}
 
 
-def _merge_review(host: core.Host, p: reviewer.Plan, original):
-    """The board's review before a merge (``board._review_for_merge``), in this harness. The step is the board's:
-    this runs it, with the record finished as every review here is (its findings on one line each, who reviewed
-    kept with it), and then replaces the sentences in which the board names its reviewer in Hermes's words."""
-    def run(root, number, v, keys, platform):
-        seen = []
-        inner = review.run_review
-
-        def run_review(*args, **kwargs):
-            record = inner(*args, **kwargs)
-            reviewer.finish(host, p, record)
-            seen.append(record)
-            return record
-
-        review.run_review = run_review
-        try:
-            out = original(root, number, v, keys, platform)
-        finally:
-            review.run_review = inner
-        record = seen[-1] if seen else {}
-        out["notes"] = [n for n in out.get("notes") or [] if n.strip() not in reviewer.HERMES_NOTES]
-        if out.get("pre"):  # the board's one line naming "the second model" and how Hermes routed it
-            head = str(v.get("head_oid") or "")[:7]
-            verdict = record.get("verdict")
-            if record.get("error"):  # it could not run, or there was nothing to review: nobody reviewed
-                first = "The review of PR #%d at %s: %s." % (number, head, verdict)
-            elif record.get("cached"):
-                first = ("Review of PR #%d at %s: %s (the stored review of this exact diff, %s; the reviewer was not "
-                         "started again)." % (number, head, verdict, record.get("time") or "earlier"))
-            else:
-                first = "Foreman reviewed PR #%d at %s before the merge: %s." % (number, head, verdict)
-            # who reviewed, only when a reviewer's session answered for this diff
-            said = reviewer.who(host, p, record) if isinstance(record.get("model"), dict) \
-                and not record.get("error") else []
-            out["pre"] = [board.wrap(first)] + said + out["pre"][1:]
-        return out
-    return run
-
-
-def _comment(host: core.Host, original):
-    """The comment ``reject`` posts (``board.reject_comment``), signed with this harness's name instead of Hermes's."""
-    def run(*args, **kwargs):
-        return original(*args, **kwargs).replace(FOOTER, FOOTER.replace("Hermes Agent", host.label))
-    return run
-
-
 @contextlib.contextmanager
 def _bound(host: core.Host, ctx: _Context):
     """The board, the gate and the review on this harness for one command; what they had before comes back after
     it (a test process runs many, and Hermes's own binding is never this module's to keep)."""
-    before = (board._CTX, gate._CTX, review._CTX, board._review_for_merge, board.reject_comment)
+    before = (board._CTX, gate._CTX, review._CTX)
     try:
         board.bind(ctx)
         gate.bind(ctx)
-        board.reject_comment = _comment(host, before[4])
         if host.fresh_session is not None:
             # The review reads its reviewer from its context: the one `/foreman review` uses here, so a pull
             # request reviewed with it is not sent to a model again at merge time.
-            p = reviewer.plan(host)
-            review.bind(reviewer.context(host, p))
-            board._review_for_merge = _merge_review(host, p, before[3])
+            ctx.plan = reviewer.plan(host)
+            review.bind(reviewer.context(host, ctx.plan))
         yield
     finally:
-        board._CTX, gate._CTX, review._CTX, board._review_for_merge, board.reject_comment = before
+        board._CTX, gate._CTX, review._CTX = before
 
 
 def _keys(session: str) -> tuple:

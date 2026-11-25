@@ -1058,6 +1058,7 @@ def run_review(args: str = "", keys: tuple = (), platform: Optional[str] = None,
         # the same diff may have been reviewed under another target (a branch, then its pull request)
         stored.update(repo=root, slug=target.slug, head=target.head or stored.get("head"),
                       target={"kind": target.kind, "ref": target.ref, "title": target.title, "base": target.base})
+        _finish(ctx, stored)
         return stored
     record = {"schema": SCHEMA_VERSION, "repo": root, "slug": target.slug,
               "target": {"kind": target.kind, "ref": target.ref, "title": target.title, "base": target.base},
@@ -1120,14 +1121,28 @@ def run_review(args: str = "", keys: tuple = (), platform: Optional[str] = None,
         record["error"] = error
         record["failures"] = failures + 1
         record["verdict"] = _final_verdict(record, target.det_blocked, b.complete)
+        _finish(ctx, record)
         record["saved"] = _save_both(record, key)
         return record
     kept, dropped = verify(parsed.get("findings", []), b.files)
     record.update(findings=kept, dropped_unverified=dropped, summary=_short(_one_line(parsed.get("summary", "")), 600),
                   model_verdict=str(parsed.get("verdict", ""))[:20])
     record["verdict"] = _final_verdict(record, target.det_blocked, b.complete)
+    _finish(ctx, record)
     record["saved"] = _save_both(record, key)
     return record
+
+
+def _finish(ctx: Any, record: dict) -> None:
+    """A review that a model answered, before it is stored (or a stored one, before it is returned): a host other
+    than Hermes adds who reviewed, in its own words (``foreman_finish_review`` on the context it bound). Hermes's
+    context has no such name, and there the record is the review's own."""
+    hook = getattr(ctx, "foreman_finish_review", None)
+    if callable(hook):
+        try:
+            hook(record)
+        except Exception:
+            logger.warning("foreman: the host could not add to the review's record", exc_info=True)
 
 
 def _save_both(record: dict, requested_key: str) -> Optional[str]:
