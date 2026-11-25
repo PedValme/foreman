@@ -439,6 +439,26 @@ class HooksFile(unittest.TestCase):
         self.assertEqual(matcher, "^(Bash|apply_patch|Edit|Write)$")
         self.assertEqual(set(matcher[2:-2].split("|")), codex.SHELL_TOOLS | codex.PATCH_TOOLS)
 
+    def test_the_plugin_codex_installs_runs_codexs_dialect_not_claude_codes(self):
+        # Codex 0.171.0 also reads `.claude-plugin/`: without `.codex-plugin/plugin.json` it ran Claude Code's hooks
+        # (seen). `.codex-plugin` wins, and names the same hooks as the hand installation with Codex's plugin root.
+        manifest = json.loads(self.read(".codex-plugin", "plugin.json"))
+        self.assertEqual(manifest["name"], "foreman")  # `codex plugin add foreman@foreman-gate`
+        self.assertEqual(manifest["version"], json.loads(self.read(".claude-plugin", "plugin.json"))["version"])
+        self.assertTrue(manifest["hooks"].startswith("./"))
+        plugin_hooks = json.loads(self.read(*manifest["hooks"][2:].split("/")))
+        by_hand = json.loads(self.read("adapters", "codex", "hooks.json"))
+        self.assertEqual(json.dumps(plugin_hooks).replace("${PLUGIN_ROOT}", "/path/to/foreman"), json.dumps(by_hand))
+
+    def test_a_copy_codex_installed_is_foremans_whole_wherever_its_home_is(self):
+        for home in (os.path.join(os.sep, "u", ".codex"), os.path.join(os.sep, "u", "moved-codex-home")):
+            installed = os.path.join(home, "plugins", "cache", "foreman-gate", "foreman", "0.1.0")
+            self.assertIn(installed, codex.host({"PLUGIN_ROOT": installed}).program_dirs, home)
+        clone = os.path.join(os.sep, "src", "foreman")
+        dirs = codex._program_dirs((clone,))
+        self.assertNotIn(clone, dirs)
+        self.assertIn(os.path.join(clone, ".codex-plugin"), dirs)
+
     def test_the_readme_try_command_matches_the_hooks_file(self):
         readme = self.read("adapters", "codex", "README.md")
         self.assertIn("^(Bash|apply_patch|Edit|Write)\\$", readme)

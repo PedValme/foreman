@@ -19,6 +19,18 @@
 - Next action: T7, which starts with the owner's answers (names of the packages, where each adapter is published,
   what the root README says); then the one Hermes catalog update. `trabajo/agnostico.md`, "Next step", lists both
   and what an agent can do meanwhile without him.
+- Decided on 2026-11-24 (DECISIONES): the public name in every store is `foreman-gate`, and `foreman` stays as the
+  command, the plugin's name inside Claude Code, OpenCode's plugin id and the Hermes catalog entry. Done for it,
+  with nothing published: a root `package.json` under that name (pi's manifest, OpenCode's entrypoints), the Claude
+  Code marketplace renamed, a Codex plugin manifest (`.codex-plugin/`: Codex 0.171.0 also reads `.claude-plugin/`
+  and was installing Claude Code's hooks). Each installation was seen from a local git server into a redirected
+  configuration directory: pi (`pi install git:…`, the board with no model turn), OpenCode (`opencode plugin add
+  git+https://…`, both parts and the TUI dialog), Claude Code (marketplace add, install, enabled; no session, it
+  needs a login) and Codex (installed, and `foreman help` answered by its dialect). Not run: the same commands
+  against GitHub's `owner/repo`. Each harness's README has the exact command and what was seen.
+- Next for publication, each with the owner's yes: `npm publish` (his npm account; the npm page would show the
+  root README, which is about the Hermes plugin), the pull request to OpenCode's ecosystem page, Anthropic's
+  directory (it wants an icon), and the root README's section about the adapters.
 - With the owner, open (asked on 2026-11-24; he wanted both evaluated before deciding, and they were, read-only):
   - Where to publish. Read in each harness's documentation and help, not tried: pi installs from git with a root
     `package.json` (`pi install git:…`) and lists in its catalog any npm package with the keyword `pi-package`;
@@ -96,6 +108,10 @@
 - Unresolved (Hermes plugin; fixed in the adapters, not in `plugin/`): a finding the review verified keeps the line
   breaks of its `title`, `why` and `fix`, so a diff that steers the reviewer can make `/foreman review` print a
   line that reads as Foreman's own. One line in `review.verify`, for the catalog update.
+- Unresolved (Claude Code, Codex): with the harness's home moved (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) the installed
+  copy is guarded, but a write to the settings file in that moved home that disables the plugin is not recognised
+  (the guards know `~/.claude` and `~/.codex`). OpenCode: `opencode plugin list` and `plugin update` misreport an
+  installed git package (seen; remove and add again).
 - Unresolved (core, Windows; found by CI on 2026-11-24): `board.candidates` compares directories by spelling, so a
   process started in a folder under its short name (`RUNNER~1`) lists one repository twice in `/foreman use`.
   Compare canonical paths, at the catalog update.

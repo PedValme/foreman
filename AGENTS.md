@@ -29,6 +29,10 @@ Read the index below, then ESTADO.md, its "Next session" first (where the last s
   - Each harness's adapter is published when its own end-to-end test in a real session passes, and its name and
     where it is published are the owner's — a gate announced before it was seen working is a promise the product
     does not keep (DECISIONES.md, 2026-11-24 and 2026-11-10).
+  - The public name in every store is `foreman-gate`; `foreman` stays as the command, the plugin's name inside
+    Claude Code, OpenCode's plugin id and the Hermes catalog entry; each publication waits for the owner's yes —
+    `foreman` is another project's package on npm, and inside Claude Code the plugin's name is the prefix of the
+    person's commands (DECISIONES.md, 2026-11-24).
 - Operation: see "This repository".
 - Known pitfalls: the Hermes on the Windows development PC has no model provider, so a real session can only run
   on the owner's Hermes machine; `hermes plugins install --ref` needs the full 40-character commit; with a gateway running, a slash

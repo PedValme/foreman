@@ -15,7 +15,7 @@ understands. It adds no rule and loosens none (PRODUCTO.md, rules 22 to 26).
 | `foreman_hosts/standin.py` | The board outside Hermes: `plugin/foreman/board.py` on a stand-in for Hermes's context |
 | `foreman_hosts/pi.py`, `opencode.py` | The dialects of those two: their guards and their words |
 | `claude-code/` | Claude Code's hooks and commands, named by `.claude-plugin/plugin.json` at the repository root |
-| `codex/` | Codex's `hooks.json` and its [README](codex/README.md) |
+| `codex/` | Codex's `hooks.json` (installed by hand), `plugin-hooks.json` (named by `.codex-plugin/plugin.json` at the repository root) and its [README](codex/README.md) |
 | `pi/` | pi's extension (`foreman.ts`) and its [README](pi/README.md) |
 | `opencode/` | OpenCode's plugin: its server part (`foreman.ts`, `server.ts`), its TUI part (`tui.ts`) and its [README](opencode/README.md) |
 
@@ -30,6 +30,27 @@ Needs Python 3.9 or newer as `python3`, and git. No other dependency. Outside He
 
 None is published yet. Each was seen in real sessions on macOS (Claude Code 2.1.331, Codex CLI 0.171.0, pi 1.5.0,
 OpenCode 2.3.2); each harness's own README says exactly what was seen, what was only read, and its limits.
+
+## Install from the repository
+
+The public name is `foreman-gate` everywhere it is installed; `foreman` stays as the command and the plugin's own
+name. The repository root is the package: `package.json` (pi and OpenCode), `.claude-plugin/` (Claude Code's
+marketplace and plugin) and `.codex-plugin/` (Codex's plugin, in the same marketplace).
+
+| Harness | Install from git |
+|---|---|
+| Claude Code | `claude plugin marketplace add PedValme/foreman`, then `claude plugin install foreman@foreman-gate` |
+| Codex | `codex plugin marketplace add PedValme/foreman`, then `codex plugin add foreman@foreman-gate`, then trust its hooks with `/hooks` in Codex |
+| pi | `pi install git:github.com/PedValme/foreman` (`-l` for one project) |
+| OpenCode | `opencode plugin add git+https://github.com/PedValme/foreman.git` |
+
+Seen on macOS on 2026-11-24 (Claude Code 2.1.332, Codex CLI 0.171.0, pi 1.5.0, OpenCode 2.3.2), each in a
+temporary configuration directory, from a copy of this repository served as a git remote on the machine itself
+(the same commands with that URL in place of GitHub's; nothing was pushed): each harness cloned it, installed it
+and listed it; pi answered `/foreman help` and `/foreman` with no model turn; OpenCode's TUI showed both parts
+(`/foreman help` and the board in its dialog); Codex blocked the prompt `foreman help` before any model turn,
+with its own dialect. Claude Code was not started (a session needs a login). The GitHub forms themselves are read in
+each tool's help or documentation, not run. Each harness's README has the details.
 
 | | Claude Code | Codex | pi | OpenCode |
 |---|---|---|---|---|
@@ -135,7 +156,23 @@ Each harness's README has the exact command line of its session and what was mea
 
 ## Claude Code
 
-Not published yet. To try it from a clone:
+Not published yet. To install it from the repository, as a marketplace named `foreman-gate` holding the plugin
+`foreman` (so its commands stay `/foreman:status` and the rest):
+
+```
+claude plugin marketplace add PedValme/foreman
+claude plugin install foreman@foreman-gate
+```
+
+Seen on Claude Code 2.1.332 with a temporary `CLAUDE_CONFIG_DIR`, from a copy of this repository served as a git
+remote on the machine itself: "Successfully added marketplace: foreman-gate", "Successfully installed plugin:
+foreman@foreman-gate (scope: user)", and `claude plugin list` showed it enabled at version 0.1.0, copied to
+`plugins/cache/foreman-gate/foreman/0.1.0`. The installed copy's hook answered `/foreman:help` when run by hand; a
+session was not started (it needs a login). `claude plugin marketplace remove foreman-gate` uninstalls the plugin
+with it, so Foreman refuses it to the agent. The `owner/repo` form is read in `claude plugin marketplace add
+--help`, not run.
+
+To try it from a clone instead:
 
 ```
 claude --plugin-dir /path/to/foreman

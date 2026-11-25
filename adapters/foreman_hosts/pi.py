@@ -94,12 +94,30 @@ def _config_off(before: str, after: str) -> bool:
     return loads_after < loads_before or excludes_after > excludes_before
 
 
-def _program_dirs(roots) -> tuple:
-    """Where Foreman's code is. A copy pi installed (under a ``.pi`` folder) is Foreman's whole; in a clone loaded
-    with ``pi -e`` only the folders with code are, so the rest of that repository stays workable."""
+def _installed(root: str, env) -> bool:
+    """A copy pi installed as a package (``pi install``): under a ``.pi`` folder (``~/.pi/agent/git``, ``npm``, a
+    project's ``.pi/git``), under ``PI_CODING_AGENT_DIR`` when pi's folder was moved, or an npm package
+    (``node_modules/foreman-gate``, pi's older global npm installs). Its ``package.json`` names the extension pi
+    loads, so the whole copy is Foreman's."""
+    path = root.replace("\\", "/").rstrip("/") + "/"
+    if _PI_DIR.search(path) or _NPM_COPY.search(path):
+        return True
+    agent = _agent_dir(env)
+    if not agent:
+        return False
+    base = os.path.abspath(agent).replace("\\", "/").rstrip("/") + "/"
+    return path.lower().startswith(base.lower())
+
+
+_NPM_COPY = re.compile(r"(?i)/node_modules/foreman-gate/$")
+
+
+def _program_dirs(roots, env=None) -> tuple:
+    """Where Foreman's code is. A copy pi installed is Foreman's whole; in a clone loaded with ``pi -e`` only the
+    folders with code are, so the rest of that repository stays workable."""
     out = []
     for root in roots:
-        if _PI_DIR.search(root.replace("\\", "/") + "/"):
+        if _installed(root, env):
             out.append(root)
         out += [os.path.join(root, d) for d in ("adapters", "plugin")]
     return tuple(out)
@@ -175,7 +193,7 @@ def host(request: Optional[dict] = None, env=None) -> core.Host:
     env = os.environ if env is None else env
     request = request if isinstance(request, dict) else {}
     return core.Host(
-        name=NAME, label="pi", person=lambda sub: "/foreman " + sub, program_dirs=_program_dirs((ROOT,)),
+        name=NAME, label="pi", person=lambda sub: "/foreman " + sub, program_dirs=_program_dirs((ROOT,), env),
         cli=CLI, switches_off=_switches_off(env), is_config=lambda path: _is_settings(path, env),
         config_off=_config_off,
         # The extension sends pi's ctx.hasUI. Only a real true counts.

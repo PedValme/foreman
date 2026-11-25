@@ -41,6 +41,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 # or in the system folder (/etc/codex).
 _SETTINGS = re.compile(r"(?i)(?:\.codex|/etc/codex)[/\\](?:config\.toml|hooks\.json|requirements\.toml)\b")
 _PLUGINS_DIR = re.compile(r"(?i)\.codex[/\\]plugins\b")
+_PLUGIN_CACHE = re.compile(r"(?i)/plugins/cache/[^/]+/foreman/[^/]+/?$")  # an installed copy, wherever its home is
 _FOREMAN = re.compile(r"(?i)\bforeman\b")
 _HOOKS_WORD = re.compile(r"(?i)hooks?\b|allow_managed_hooks_only")  # no leading \b: `printf '…\nhooks = false'`
 # In a settings file: every hook off, only managed hooks, or one hook entry switched off by the person's /hooks.
@@ -92,9 +93,11 @@ def _program_dirs(roots) -> tuple:
     a clone only the folders with code are, so the rest of that repository stays workable."""
     out = []
     for root in roots:
-        if _PLUGINS_DIR.search(root.replace("\\", "/")):
+        # `~/.codex/plugins/…`, or `<CODEX_HOME>/plugins/cache/foreman-gate/foreman/<version>` when Codex's home was
+        # moved (seen: `codex plugin add foreman@foreman-gate` copies the plugin there).
+        if _PLUGINS_DIR.search(root.replace("\\", "/")) or _PLUGIN_CACHE.search(root.replace("\\", "/")):
             out.append(root)
-        out += [os.path.join(root, d) for d in ("adapters", ".claude-plugin", "plugin")]
+        out += [os.path.join(root, d) for d in ("adapters", ".claude-plugin", ".codex-plugin", "plugin")]
     return tuple(out)
 
 

@@ -106,6 +106,34 @@ class Guards(OpenCodeCase):
         self.write("opencode.json", '{"plugins": ["foreman"]}')
         self.assertEqual(self.ask("write", path=config, old='"foreman"', new='"-foreman"')["action"], "block")
 
+    def test_dropping_the_package_entry_opencode_plugin_add_wrote_is_blocked(self):
+        config = os.path.join(self.root, "opencode.json")
+        for entry in ("foreman-gate", "foreman-gate@0.1.0", "git+https://github.com/PedValme/foreman.git",
+                      "git+https://github.com/PedValme/foreman.git#v0.1.0", "github:PedValme/foreman"):
+            listed = '{"plugins": ["other", "%s"], "model": "a"}' % entry
+            self.write("opencode.json", listed)
+            out = self.ask("write", path=config, content='{"plugins": ["other"], "model": "a"}')
+            self.assertEqual(out["action"], "block", entry)
+            self.assertEqual(self.ask("write", path=config, old='"a"', new='"b"'), {}, entry)
+        self.assertTrue(opencode._config_off('["foreman-gate"]', ""))  # the file deleted
+        self.assertFalse(opencode._config_off('["foreman-gate"]', '["foreman-gate", "other"]'))
+        # a path that only ends in `foreman` is not Foreman's entry: removing it is ordinary work on the file
+        for other in ('{"mcp": {"proc": {"command": ["/usr/local/bin/foreman"]}}}', '{"instructions": ["~/src/foreman"]}'):
+            self.assertFalse(opencode._config_off(other, "{}"), other)
+        for command in ("opencode plugin remove foreman-gate",
+                        "opencode plugin remove git+https://github.com/PedValme/foreman.git"):
+            self.assertEqual(self.ask("shell", command=command)["action"], "block", command)
+
+    def test_a_package_opencode_installed_is_foremans_whole(self):
+        # `opencode plugin add` installs into <cache>/opencode/npm/<key>/<generation>/node_modules/foreman-gate, and
+        # its package.json names the server and TUI parts: rewriting it switches Foreman off.
+        copy = os.path.join(self.tmp, "cache", "opencode", "npm", "git-foreman-1a2b", "17", "node_modules",
+                            "foreman-gate")
+        self.assertEqual(opencode._program_dirs(copy)[0], copy)
+        clone = os.path.join(self.tmp, "src", "foreman")
+        self.assertEqual(opencode._program_dirs(clone),
+                         (os.path.join(clone, "adapters"), os.path.join(clone, "plugin")))
+
     def test_what_the_person_switched_off_themselves_can_still_be_edited(self):
         self.write("opencode.jsonc", '{"plugins": ["-foreman"], "model": "a"}')
         config = os.path.join(self.root, "opencode.jsonc")
