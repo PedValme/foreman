@@ -735,12 +735,18 @@ def detect(diff: str, deleted: Iterable[str] = (), history: str = "", renamed: I
         f = _line_finding(path, line, text, new_files=new_files, before=before, after=after, version_of=version)
         if f:
             found.append(f)
+    found += _attribute_findings(rows, allowed_paths, version)
     at = {(f.file, f.line) for f in found}
     found += [f for f in _renamed_tests(rows, diff, deadline) if (f.file, f.line) not in at]
     for path in deleted:
         if is_test_code(path):
             found.append(finding("test-deleted", path, 0, allowed=path in allowed_paths, version="deleted"))
     for old, new in renamed:
+        # A .gitattributes moved to another folder brings its lines to bear on that folder's files with no line
+        # added: `git mv assets/.gitattributes tests/` hides, or sends to LFS, whatever it names there.
+        if _is_attributes_file(new) and old != new:
+            found.append(finding("check-changed", new, 0, "moved from %s: its attributes now apply here" % old,
+                                 allowed=new in allowed_paths, version=version(new)))
         # Out of the tests, or kept in them under a name the runner no longer collects (tests/test_a.py to
         # tests/a_check.py or tests/test_a.py.bak: found in the final review).
         if is_test_code(old) and (not TEST_PATH.search(new) or (
@@ -1020,6 +1026,80 @@ def child_env(tool: str, extra: Optional[dict] = None, environ: Optional[dict] =
 
 
 _DIFF_OPTS = ("--no-color", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/")
+# git answers "Binary files differ" for a file its attributes mark as having no diff (`tests/** -diff` in a
+# .gitattributes of the same change, of the base, or in .git/info/attributes), and a test switched off or a secret
+# in such a file was a change with nothing in it. So a file git shows as binary is read again as text unless its
+# name says it is binary (_shown_as_binary_reread), and the attribute line itself is a finding when it comes with
+# the change (_attribute_findings). Not every file is read as text: megabytes of real binaries would take the hook
+# past its time budget.
+_SCAN_OPTS = _DIFF_OPTS + ("--text",)
+_BINARY_ENTRY = re.compile(r"^Binary files (?:a/(.*?)|/dev/null) and (?:b/(.*)|/dev/null) differ$")
+# Names of files nobody reads as text. Marking those binary, or sending them to LFS, hides nothing; and one git shows
+# as binary is left as it is. (svg is text, so it is not here.)
+_BINARY_PATTERN = re.compile(r"(?i)\.(png|jpe?g|gif|ico|webp|bmp|tiff?|pdf|zip|gz|tgz|bz2|xz|7z|rar|jar|war|woff2?|"
+                             r"ttf|otf|eot|mp[34]|mov|avi|mkv|wav|ogg|flac|psd|ai|sketch|fig|bin|exe|dll|so|dylib|"
+                             r"class|pyc|db|sqlite3?|iso|dmg)$")
+
+
+def _binary_entries(diff: str) -> list:
+    """(path or None, line) for each file a diff shows as binary; None when the line could not be read (a quoted
+    path)."""
+    out = []
+    for line in (diff or "").splitlines():
+        if line.startswith("Binary files "):
+            m = _BINARY_ENTRY.match(line)
+            out.append(((m.group(2) or m.group(1)) if m else None, line))
+    return out
+
+
+def _shown_as_binary_reread(repo: "Repo", diff: str, *revs: str) -> str:
+    """The files ``diff`` shows as binary whose names do not say they are, as the text diff git would have given
+    without the attribute: a test, a source or configuration file, a .gitattributes itself (a line such as
+    ``* -diff`` hides that one along with everything else)."""
+    paths = sorted({p for p, _line in _binary_entries(diff) if p and not _BINARY_PATTERN.search(p)})
+    return "\n" + repo.git("diff", "-M", *_SCAN_OPTS, *revs, "--", *paths) if paths else ""
+
+
+def _is_attributes_file(path: str) -> bool:
+    return path == ".gitattributes" or path.endswith("/.gitattributes")
+
+
+def unread_in_diff(diff: str, changed_paths: Iterable[str]) -> list:
+    """Files a diff Foreman did not make itself (GitHub's, for a pull request that is not in the clone) shows as
+    binary, where it would have read text: those whose names do not say they are binary, and every such file when
+    the change also touches a ``.gitattributes``, which is what makes a text file read as binary. Nothing was read
+    of them."""
+    attributes = any(_is_attributes_file(p) for p in changed_paths)
+    return [path or line for path, line in _binary_entries(diff)
+            if path is None or attributes or not _BINARY_PATTERN.search(path)]
+
+
+# An attribute that makes git show no diff for a file, or store something other than the file (a clean filter, as
+# git-lfs uses, puts a pointer in the commit; whoever checks out with the filter gets the real content back).
+_HIDING_ATTRIBUTE = re.compile(r"(?:^|\s)(-diff|binary|diff=(\S+)|filter=\S+|working-tree-encoding=\S+)(?=\s|$)")
+# `diff=<name>` with one of git's own drivers only picks how hunks are headed (a configuration that makes one of
+# them binary is not in the change; a file it hides is read again as text all the same).
+_BUILTIN_DIFF_DRIVERS = frozenset("ada bash bibtex cpp csharp css dts elixir fortran fountain golang html java kotlin "
+                                  "markdown matlab objc pascal perl php python ruby rust scheme tex".split())
+
+
+def _attribute_findings(rows: list, allowed_paths: set, version: Callable[[str], str]) -> list:
+    """A line added to a .gitattributes that hides a file's changes or changes what git stores for it."""
+    found = []
+    for path, line, text, added, _hunk in rows:
+        if not added or not _is_attributes_file(path):
+            continue
+        parts = text[1:].split(None, 1)
+        if len(parts) < 2 or parts[0].startswith("#"):
+            continue
+        pattern, attrs = parts
+        hits = [m for m in _HIDING_ATTRIBUTE.finditer(attrs)
+                if not (m.group(2) and m.group(2).lower() in _BUILTIN_DIFF_DRIVERS)]
+        if hits and not (_BINARY_PATTERN.search(pattern) and not pattern.startswith("[attr]")):
+            found.append(finding("check-changed", path, line, "`%s` hides a file's changes from the diff, or changes "
+                                 "what git stores for it" % " ".join(m.group(1) for m in hits),
+                                 allowed=path in allowed_paths, version=version(path)))
+    return found
 _MAX_UNTRACKED_FILES = 500
 _MAX_UNTRACKED_BYTES = 512 * 1024
 
@@ -1044,8 +1124,11 @@ class Repo:
         if os.name == "nt":
             kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         try:
-            r = subprocess.run(["git", "-c", "core.quotePath=false", "-c", "log.showSignature=false",
-                                "-c", "color.ui=false", *args], cwd=self.root, input=stdin,
+            # --no-replace-objects: a `git replace` of the commit being read would show another commit's content,
+            # while a push sends the real one.
+            r = subprocess.run(["git", "--no-replace-objects", "-c", "core.quotePath=false",
+                                "-c", "log.showSignature=false", "-c", "color.ui=false", *args],
+                               cwd=self.root, input=stdin,
                                capture_output=True, timeout=timeout, env=env, **kwargs)
         except subprocess.TimeoutExpired:
             raise GitTimeout("`git %s` timed out" % args[0])
@@ -1378,9 +1461,14 @@ def scan_range(repo: Repo, base: Optional[str], head: str = "HEAD", check: Optio
     messages = repo.git("log", "--format=%B", rev_range) + "\n" + (extra_messages or "")
     allowed_paths = allowed_paths_in(messages)
     version_of = _versions(repo, rev=head)
-    findings = detect(repo.git("diff", "-M", *_DIFF_OPTS, diff_from, head), deleted,
-                      history=repo.git("log", "-p", "--cc", *_DIFF_OPTS, "--format=", rev_range),
-                      renamed=renamed, allowed_paths=allowed_paths, new_files=added_from_name_status(name_status),
+    diff = repo.git("diff", "-M", *_DIFF_OPTS, diff_from, head)
+    history = repo.git("log", "-p", "--cc", *_DIFF_OPTS, "--format=", rev_range)
+    # The same in the history: a secret added and removed again in a file git shows as binary.
+    hidden = sorted({p for p, _line in _binary_entries(history) if p and not _BINARY_PATTERN.search(p)})
+    if hidden:
+        history += "\n" + repo.git("log", "-p", "--cc", *_SCAN_OPTS, "--format=", rev_range, "--", *hidden)
+    findings = detect(diff + _shown_as_binary_reread(repo, diff, diff_from, head), deleted,
+                      history=history, renamed=renamed, allowed_paths=allowed_paths, new_files=added_from_name_status(name_status),
                       version_of=version_of, deadline=repo.deadline)
     check = check_command_at(repo, base, check)
     findings += _check_findings(repo, base, check, paths, allowed_paths, lambda p: repo.show(head, p), version_of)
@@ -1431,6 +1519,7 @@ def scan_worktree(repo: Repo, staged_only: bool = False, include_untracked: bool
     paths, deleted, renamed = paths_from_name_status(name_status)
     new_files = added_from_name_status(name_status)
     diff = repo.git("diff", "-M", *cached, *_DIFF_OPTS, base)
+    diff += _shown_as_binary_reread(repo, diff, *cached, base)
     if include_untracked and not staged_only:
         extra, files = _untracked_diff(repo)
         diff += "\n" + extra
