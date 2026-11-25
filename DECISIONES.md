@@ -160,10 +160,18 @@ the owner confirms it. An option the owner turned down is a decision too and sta
   by level, as decided the same day.
 - 2026-11-25 · The credit is his personal brand · Pedro: «que quede todo asociado anmi marca personal @pedvalme»,
   in full: «quiero que quitemos el "by aqp intelligence" o la referencia esa que pusimos que quede todo asociado
-  anmi marca personal @pedvalme o sea Pedro Valencia». Replaces the credit line of 2026-11-10 (the company's). Ajustes del agente: the closing line of
-  both READMEs reads "Built by Pedro Valencia (@pedvalme)" and links to his GitHub profile, the one address of
-  his this repository already names; the `author` fields and the licence already say `PedValme` and stay. The
-  page in Hermes's catalog shows the plugin's README at the pinned commit, so it changes with the catalog update.
+  anmi marca personal @pedvalme o sea Pedro Valencia». Replaces the credit line of 2026-11-10 (the company's).
+  The link is his X profile · Pedro: «enlace mi X», to the first version, which linked to GitHub. Ajustes del
+  agente: the closing line of both READMEs reads "Built by Pedro Valencia (@pedvalme)" and links to
+  https://x.com/PedValme, the address this repository already used for his demo video; the `author` fields and
+  the licence already say `PedValme` and stay. The page in Hermes's catalog shows the plugin's README at the
+  pinned commit, so it changes with the catalog update.
+- 2026-11-25 · The external pull request is finished by us, with the credit its author's · Pedro: «3. ok», to
+  the plan he read after his «creo que seria bueno hacer las correcciones del PR externo dandole el credito al
+  externo, aprovrchando que estamos haciendo una mejora grande»: the change asked of #57 on 2026-11-23 goes as a
+  commit of ours on its author's own branch (it allows maintainers' edits), after a comment there that says so,
+  so the pull request merges as theirs; the whole diff re-read, reviewed by an agent that did not write it, its
+  held CI run approved.
 - 2026-11-24 · The root README announces the adapters · Pedro: «ok al readme», to the section he read ("In Claude
   Code, Codex, pi and OpenCode": the install command from git for each, what each gives, where the limits are).
   npm, OpenCode's page, Anthropic's directory and the issue to Hermes still wait for his yes, one by one.
