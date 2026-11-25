@@ -131,6 +131,45 @@ session that did not write the code, the Hermes plugin untouched until one subst
 - Whether the Hermes catalog's scanner reads outside `subdir`: unknown; nothing binary is committed anywhere.
 - Names and distribution (marketplace, npm, how Codex's hooks are installed): the owner, T7.
 
+## Any agent: the evaluation of 2026-11-25 (a proposal; nothing is built before the owner's yes)
+The owner's question: what Foreman needs to be usable whatever the harness, even in a narrower form.
+- Measured, in throwaway repositories on macOS, with the detector imported by a probe that was not kept:
+  - As git's `pre-commit` hook (`detector.scan_worktree`, staged only) it refuses a commit that switches a test
+    off, with the file and line on git's own error output, in about 60 ms; as `pre-push` (`detector.scan_range`)
+    it refuses the push of such a commit in about 95 ms; a clean commit and push pass.
+  - As a `reference-transaction` hook it also refuses `git commit-tree` with `git update-ref`, and it runs on
+    every change of a branch, a pull included.
+  - `adapters/hook.py pi`, given `neutral.py`'s requests from a plain shell with no harness running, blocks the
+    rigged `git commit` and `gh pr merge` and answers `status`: the protocol needs no harness, only a host's name.
+  - A push range taken from the branch's old tip on the remote refuses a rebased branch for a change that came
+    with the base branch; today's gate does the same (ESTADO, known issues).
+  - Not measured: the flag that skips git's hooks (this machine's agent permissions refuse it; git documents it).
+- Read, in documentation, nothing run:
+  - Every client-side git hook can be skipped by whoever has a shell (a flag, `core.hooksPath`, another git,
+    GitHub's API); only what GitHub enforces cannot. Aider commits skipping hooks unless told otherwise.
+  - A required check is matched by its name, and a pull request runs its own copy of a workflow: the check
+    counts only with the workflow's folder protected, and an agent on the person's own token is the person.
+  - Copilot CLI, Cursor, VS Code's agent mode, Droid, Qwen Code and Junie copy Claude Code's hooks, each with
+    differences (tool names, a hook that times out lets the call through); Gemini CLI, Goose, Devin, Kiro,
+    Crush, Amp and Cline have their own; Aider and Zed have none; cloud agents never run on the person's
+    machine. None of them is installed on this machine.
+  - No standard to aim at once: the published plugin specification leaves hooks out, and an MCP server cannot
+    gate a harness's own tools, nor is its question to the user a sound sign of a person.
+  - No other tool was found that reads the real diff for a rigged test.
+- The proposal, after the review by an agent that did not write it (its findings are in what follows):
+  - Three levels, named by what each can promise. **Locked**: the required check in CI, for any agent; it means
+    the workflow protected, the agent unable to merge alone, and marked findings either failing (`--strict`) or
+    behind a required review. **Guarded**: a harness's hook; a harness is named only after its own test in a
+    real session (DECISIONES, 2026-11-24). **Early warning**: git's `pre-commit` and `pre-push`; a marked finding
+    is listed there and does not block, and a missing Foreman lets the commit through with a loud line.
+  - To build, outside `plugin/`: one terminal command (the detector's `check`, `status` saying which level the
+    repository really has as yes, no or unknown, and installing the git hooks; run from git first, a store
+    only with the owner's yes); `action.yml` and `.pre-commit-hooks.yaml` at the root; a `generic` host that
+    answers the gate's events and `status`, refuses where it would ask, and has no `allow` and no `merge`.
+  - The hooks leave a person's own work alone: the push range is the commits no remote has yet, and a merge, a
+    cherry-pick or a rebase in progress is not inspected at commit time.
+  - Not to build: an MCP server, a shim in front of `git` and `gh`, a sandbox, the `reference-transaction` hook.
+
 ## Tasks
 - [x] T1 The neutral half and the Claude Code adapter (pull request #61).
 - [x] T2 Codex adapter (#64), on the shared base (#62).

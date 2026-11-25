@@ -4,31 +4,26 @@
 
 <!-- pic-method: next-session -->
 ## Next session
-- Done this session (the owner: «vamos con T6 y demás pendientes»): T6 and T6b of `trabajo/agnostico.md`, in four
-  pull requests, each reviewed by an agent that did not write it and with CI green on Linux, macOS and Windows.
-  Nothing under `plugin/` changed.
-  - #74: `/foreman` alone is the board on pi and OpenCode, with `verdict`, `pipeline`, `prs`, `issues` and `use`:
-    the Hermes plugin's own `board.py`, run on a stand-in for Hermes's context (`adapters/foreman_hosts/standin.py`).
-  - #75: `/foreman merge` and `/foreman reject` on pi, with the review before the merge. Seen in pi's terminal UI:
-    throwaway pull request #19 of the demo repository reviewed, confirmed in pi's selector and merged; #20 rejected
-    and closed; both refused with nobody attending.
-  - #76: the review at the end of every turn, only where the person turns it on (`reviewer every-turn on`): Claude
-    Code, Codex and pi. Seen on pi: a loosened assertion was sent back once and the agent restored it.
-  - #77: OpenCode's TUI plugin (`adapters/opencode/tui.ts`, installed as a folder): `/foreman` typed in the TUI,
-    replies in a dialog, merge and reject there only. Seen: throwaway pull request #21 merged from the TUI.
-- Next action, asked by the owner on 2026-11-25 for a fresh session, together with what is pending: evaluate what
-  Foreman needs to be harness-agnostic, beyond a list of supported agents · his words: «¿Qué necesitaríamos para
-  que sea una herramienta agnóstica del arnés? Que pueda ser utilizada sin importar el arnés […] aunque sea una
-  versión un poco más acotada o limitada, dependiendo de lo que se pueda, pero para cualquier agente». It is an
-  evaluation: it reads, measures what it must and comes back with a recommendation; nothing is built before his
-  yes. Starting points, the agent's own and not evaluated: what already depends on no harness (the detector as a
-  command for the required check in CI, rule 10; `adapters/hook.py` with `neutral.py`'s protocol, for any harness
-  whose extension can run a command per event); what a harness-free tier could be (git's own hooks, `pre-commit`
-  and `pre-push`; a `foreman` command a person runs in any terminal for the verdict, the review and the merge; a
-  shim in front of `git` and `gh`; an MCP server, which the model may or may not call); the harnesses that read
-  Claude Code's hooks (Cursor, Copilot: never tried); and the question under all of it: what each tier can
-  promise (a gate the agent cannot skip, a gate it can skip, or only the check in CI) and where the person's own
-  commands (`allow`, `merge`) have no sound sign of a person.
+- Done this session (the owner: «empecemos con la evaluacion acordada como promera tarea, usa el protocolo de
+  delegscion si consideras que es util o agentes adversariales»): the evaluation of Foreman for any harness
+  (his question of 2026-11-25: «¿Qué necesitaríamos para que sea una herramienta agnóstica del arnés? […] aunque
+  sea una versión un poco más acotada o limitada […] pero para cualquier agente»). Read-only, nothing built: two
+  research passes (documentation), probes in throwaway repositories, and an adversarial review of the proposal by
+  an agent that did not write it. What was measured and read, and the proposal as it stands after that review:
+  `trabajo/agnostico.md`, "Any agent: the evaluation of 2026-11-25". One defect of today's gate was found on the
+  way (Known issues, the push after a rebase).
+- The recommendation, given to the owner in the session and waiting for his yes (nothing is built before it):
+  say what Foreman promises by level instead of by a list of agents. Locked: the required check in CI, the only
+  level no agent can skip, any agent, cloud ones included. Guarded: a harness's own hook (the five of today), a
+  harness named only after its own test in a real session. Early warning: git's own hooks, for any agent that
+  commits through git, skippable with a flag and said as such. To build, smallest first and outside `plugin/`:
+  a terminal command with the detector's check, `status` and the git hooks; `action.yml` and
+  `.pre-commit-hooks.yaml`; a `generic` host of the adapters' protocol. Not to build: an MCP server, a shim in
+  front of `git` and `gh`, a sandbox, a `reference-transaction` hook.
+- His to decide with it: the go-ahead and its order; the terminal command's name (recommended `foreman-gate`:
+  `foreman` is the Procfile runner's command and another project's package on PyPI; `foreman-gate` is free on PyPI
+  and npm); whether to try the Claude Code adapter on Copilot CLI, Cursor or Droid (none is installed here; each
+  needs his account, and the adapter needs their tool names first).
 - Then T7's remaining steps, each with the owner's yes (below), and the one Hermes catalog update.
   `trabajo/agnostico.md`, "Next step", lists what an agent can do meanwhile without him.
 - Decided on 2026-11-24 (DECISIONES): the public name in every store is `foreman-gate`, and `foreman` stays as the
@@ -78,8 +73,8 @@
   page, Anthropic's directory) and the one Hermes catalog update are left, each with the owner's yes.
 
 ## Next steps
-1. The evaluation the owner asked for: Foreman for any harness, even in a narrower form ("Next session", above).
-   Then T7's stores and the one Hermes catalog update (`trabajo/agnostico.md`, "Next step";
+1. With the owner's yes to the evaluation's recommendation ("Next session", above): Foreman for any agent, by
+   level. Then T7's stores and the one Hermes catalog update (`trabajo/agnostico.md`, "Next step";
    `trabajo/model-picker.md`).
 2. Without the owner: the per-turn review seen in a real Claude Code and Codex session; OpenCode's end of turn
    given the long wait so the per-turn review can be offered there; a rejection and `allow` seen in OpenCode's TUI.
@@ -92,6 +87,18 @@
    register the demo repository in the owner's environment as outside the factory.
 
 ## Known issues
+- Unresolved (core, every harness, Hermes included; found on 2026-11-25, seen through the adapters' protocol in a
+  throwaway repository): a push is inspected against the branch's old tip on the remote, so after a rebase onto a
+  base branch that carries someone else's change to a test, `git push` of the branch is refused for that change,
+  which the branch did not make (the same range from the merge-base with the base branch is CLEAN). The agent is
+  then told to undo another person's line. `gate._push_report`; a change to the core, so it lands on `main` and
+  reaches Hermes with the catalog update.
+- Unresolved (Claude Code's dialect, if it is ever run by another harness that reads Claude Code's hooks): a tool
+  name it does not know is let through with no notice (`claude_code._pre_tool`), and Cursor and Droid name their
+  shell `Shell` and `Execute` (read in their documentation): there the gate would be off and silent.
+- Unresolved (the check in CI): a finding marked `foreman:allow` passes the check unless `--strict` is given, so
+  where nobody reviews the pull request the agent's own marker goes through (the workflow's header says it; the
+  example does not default to it).
 - Unresolved (adapters, every harness): Foreman's hooks and state are files the agent's shell can reach, guarded
   against the plain attempt and not a disguised one; a second agent started without Foreman is outside the gate;
   when the adapter cannot run (no `python3`) the harness goes on without the gate and shows the error. The required
