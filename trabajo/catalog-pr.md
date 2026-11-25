@@ -25,9 +25,7 @@ validator needs Hermes's own environment: `scripts/run-in-hermes-env python3 scr
 5. Commit with the owner's GitHub noreply address (`git -c user.email=82127492+PedValme@users.noreply.github.com
    commit …`): Hermes's Contributor Attribution check fails on an address it cannot map.
 6. The pull request goes out under the owner's account, after he has read the text below (DECISIONES, 2026-11-09
-   and 2026-11-25).7. When it merges: `hermes plugins update foreman` in the owner's default profile (DECISIONES, 2026-11-14). The
-   announcement and the stores wait for the hackathon to close (DECISIONES, 2026-11-25).
-
+   and 2026-11-25).7. When it merges: `hermes plugins update foreman` in the owner's default profile (DECISIONES, 2026-11-14).
 **Title:** `plugin-catalog: bump foreman to 0.2.0`
 
 ---

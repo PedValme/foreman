@@ -12,21 +12,18 @@
   writes on one line each and without control characters, `/foreman use` offering one repository once, the
   README's full list of git commands, and the three seams as names the core asks its context for
   (`foreman_host_label`, `foreman_review_before_merge`, `foreman_finish_review`), so the adapters wrap nothing.
-- The owner decided on 2026-11-25 (DECISIONES): the plugin's own improvements and fixes go up now, and Foreman
-  for other harnesses is not announced or published until the hackathon closes, and is shown as under
-  construction meanwhile. So the update goes with what is built, without
-  the native model picker (`trabajo/model-picker.md`; whether it is built later or asked of Hermes as a seam is
-  still his to say, recommended: the seam). Asked of him in that session and open when it closed:
-  - Done with his yes on 2026-11-25: the pin `c0aa24d` installed in the `foremandev` profile of his Hermes
-    machine (v0.23.4) and tried in real sessions: an edit and a `git commit` that switch off a test blocked, a
-    repository pinned through a link listed once, the board, and `/foreman review` answering BLOCKED for a
-    loosened assertion. The profile stays on 0.2.0; the throwaway branch and link were removed.
-  - The pull request to the catalog under his account: he was shown its text (`trabajo/catalog-pr.md`) in the
-    session and his yes to send it was still open when it closed. Its range and its disclosure
-    show Hermes's maintainer the other harnesses' work (the `adapters/` folder, the three names the core asks its
-    context for), and the root README has said since 2026-11-24 that Foreman runs in Claude Code, Codex, pi and
-    OpenCode: he was told, with the recommendation to send the update as it is and leave the README.
-- After the hackathon closes, his: the announcement (Foreman in Hermes, in Claude Code, Codex, pi and OpenCode,
+- The owner decided on 2026-11-25 (DECISIONES): the plugin's own improvements and fixes go up now, and the
+  adapters for other harnesses are shown as under construction. The update goes with what is built, without the
+  native model picker (`trabajo/model-picker.md`; whether it is built later or asked of Hermes as a seam is
+  still his to say, recommended: the seam). Where it stands:
+  - The commit `c0aa24d` was installed in the `foremandev` profile of his Hermes machine (v0.23.4), with his yes,
+    and tried in real sessions: an edit and a `git commit` that switch off a test blocked, a repository pinned
+    through a link listed once, the board, and `/foreman review` answering BLOCKED for a loosened assertion.
+  - An adversarial review of the update (nothing blocking) then asked for two lines inside `plugin/`, so the
+    commit to pin is a later one and the trial is repeated on it, with his yes.
+  - The pull request to the catalog goes out under his account after that, with his yes to its text
+    (`trabajo/catalog-pr.md`), which he read in the session of 2026-11-25.
+- When the owner says, his: the announcement (Foreman in Hermes, in Claude Code, Codex, pi and OpenCode,
   and in CI for any agent; it tells whoever copied `examples/foreman-check.yml` before 2026-11-25 to update it),
   then the stores, each with his own yes: `npm publish` as `foreman-gate` (his npm account; it lists it in pi's
   catalog), the pull request to OpenCode's ecosystem page, Anthropic's directory for Claude Code (an icon, a
@@ -76,7 +73,7 @@
   update (`trabajo/catalog-pr.md`) and the publications, each with the owner's yes.
 
 ## Next steps
-1. The Hermes catalog update now; the announcement and the stores after the hackathon closes
+1. The Hermes catalog update now; the announcement and the stores when the owner says
    ("Next session", above).
 2. Without the owner: the per-turn review seen in a real Claude Code and Codex session; OpenCode's end of turn
    given the long wait so the per-turn review can be offered there; a rejection and `allow` seen in OpenCode's TUI.
