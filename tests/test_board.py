@@ -503,6 +503,16 @@ class PullRequestVerdicts(BoardCase):
         self.assertIn("merged PR #7 (rebase) in acme/widgets", out)
         self.assertFalse(any(c[:2] == ["pr", "merge"] for c in self.gh.calls))  # never a bare subprocess
 
+    def test_the_reject_comment_is_signed_with_the_host_it_runs_in(self):
+        v = {"blockers": [], "marked": []}
+        sign = "<sub>Posted with `/foreman reject` from %s.</sub>"
+        self.assertTrue(board.reject_comment(v, "note").endswith(sign % "Hermes Agent"))  # Hermes's context
+        for label, shown in (("pi", "pi"), ("", "Hermes Agent"), (None, "Hermes Agent"), (7, "Hermes Agent")):
+            ctx = FakeCtx()
+            ctx.foreman_host_label = label
+            board.bind(ctx)
+            self.assertTrue(board.reject_comment(v, "note").endswith(sign % shown), label)
+
     def test_merge_denied_and_timed_out(self):
         self.gh.add(["pr", "view", "7"], pr_view(7))
         self.gh.add(["pr", "diff", "7"], clean_diff())

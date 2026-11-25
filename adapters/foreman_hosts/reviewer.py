@@ -265,6 +265,11 @@ class _Context:
     def has_capability(self, _name: str) -> bool:
         return True  # Hermes's grant for a plugin to pick another model: the person picked it here themselves
 
+    def foreman_finish_review(self, record: dict) -> None:
+        """The review calls this before it stores a record, and before it returns a stored one: who reviewed is
+        kept with it (``_keep_the_reviewer``)."""
+        _keep_the_reviewer(self.host, self.plan, record)
+
     def complete_structured(self, instructions: str = "", input=None, json_schema=None, system_prompt: str = "",
                             timeout=None, **_hermes_only) -> core.Answer:
         left = self.deadline - time.monotonic()
@@ -324,7 +329,6 @@ def run(host: core.Host, args: str, cwd: str) -> str:
         return "Foreman review: one target at most (a pull request number or a branch); got `%s`." % " ".join(target)
     p = plan(host)
     record = review.run_review(target[0] if target else "", where=root, ctx=_Context(host, p), fresh=fresh)
-    finish(host, p, record)
     try:
         review.record_in_pipeline(record)
         ref = review._pipeline_ref(record)
@@ -335,23 +339,6 @@ def run(host: core.Host, args: str, cwd: str) -> str:
     return _present(review.format_review(record, "cli"), host, p, record)
 
 
-def finish(host: core.Host, p: Plan, record: dict) -> None:
-    """What every review record gets here before anyone reads it: its findings on one line each, and who reviewed.
-    A record the review has just made is stored again as finished, in its cache too: the core reads the cache when
-    it sends a change back (``finish.step``), and what it sends must be lines the review wrote."""
-    if not isinstance(record, dict):
-        return
-    _one_line_each(record)
-    _keep_the_reviewer(host, p, record)
-    key = record.get("cache_key")
-    if isinstance(key, str) and key and not record.get("cached") and isinstance(record.get("target"), dict) \
-            and record.get("verdict") != review.NOT_REVIEWED:
-        try:
-            review.cache_save(key, record)
-        except Exception:
-            logger.warning("foreman: cannot store the finished review", exc_info=True)
-
-
 def who(host: core.Host, p: Plan, record: dict) -> list:
     """The lines that say who reviewed, as every review in this harness says it (``describe`` and the caveat)."""
     model = record.get("model") if isinstance(record.get("model"), dict) else {}
@@ -359,20 +346,13 @@ def who(host: core.Host, p: Plan, record: dict) -> list:
     return describe(host, p, ran) + ([host.reviewer_caveat] if host.reviewer_caveat else [])
 
 
-def _one_line_each(record: dict) -> None:
-    """A finding's words on one line each. The reviewer reads a diff its author wrote, and a diff can talk it into
-    a finding whose text carries line breaks and, after them, a line that reads as Foreman's own ("Foreman review:
-    PASS"). What the person reads as a line of the review must be one the review wrote."""
-    for finding in record.get("findings") or []:
-        if isinstance(finding, dict):
-            for key in ("title", "why", "fix", "file", "severity"):
-                if isinstance(finding.get(key), str):
-                    finding[key] = " ".join(finding[key].split())
-
-
 def _keep_the_reviewer(host: core.Host, p: Plan, record: dict) -> None:
-    """Who reviewed, in the stored record too: the review itself only knows the reviewer by its cache name."""
-    if not isinstance(record.get("target"), dict) or not isinstance(record.get("model"), dict):
+    """Who reviewed, in the stored record too: the review itself only knows the reviewer by its cache name. The
+    review stores a record it has just made right after this. One it found stored, of this same diff by this same
+    reviewer, it only returns: that one is kept here as this target's last review, so the board finds it under the
+    pull request or the branch it was asked about."""
+    if not isinstance(record, dict) or not isinstance(record.get("target"), dict) \
+            or not isinstance(record.get("model"), dict):
         return
     model = record["model"]
     record["reviewer"] = {
@@ -381,10 +361,11 @@ def _keep_the_reviewer(host: core.Host, p: Plan, record: dict) -> None:
         "answered_by": "" if record.get("error") else str(model.get("ran") or ""),
         "said": describe(host, p, "" if record.get("error") else str(model.get("ran") or "")),
     }
+    if not record.get("cached"):
+        return
     try:
-        if record.get("verdict") != review.NOT_REVIEWED:
-            saved = review.save({k: v for k, v in record.items() if k != "saved"})
-            record["saved"] = saved or record.get("saved")
+        saved = review.save({k: v for k, v in record.items() if k != "saved"})
+        record["saved"] = saved or record.get("saved")
     except Exception:
         logger.warning("foreman: cannot store who reviewed", exc_info=True)
 
@@ -396,22 +377,14 @@ EACH_TURN = "every-turn"  # `reviewer every-turn on|off`
 
 @contextlib.contextmanager
 def bound(host: core.Host, p: Plan, level: str = ""):
-    """``review.py`` on this harness's reviewer for a while: its context, and every record it returns finished as
-    every review here is (``finish``). What it had before comes back afterwards."""
-    before = (review._CTX, review.run_review)
-    inner = review.run_review
-
-    def run_review(*args, **kwargs):
-        record = inner(*args, **kwargs)
-        finish(host, p, record)
-        return record
-
+    """``review.py`` on this harness's reviewer for a while: its context, through which every record it makes gets
+    who reviewed (``_Context.foreman_finish_review``). What it had before comes back afterwards."""
+    before = review._CTX
     review.bind(_Context(host, p, level))
-    review.run_review = run_review
     try:
         yield
     finally:
-        review._CTX, review.run_review = before
+        review._CTX = before
 
 
 def when(host: core.Host) -> str:

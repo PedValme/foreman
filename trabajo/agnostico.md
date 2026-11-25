@@ -33,10 +33,11 @@ session that did not write the code, the Hermes plugin untouched until one subst
   (`foreman_hosts/standin.py`). Foreman's program answers one request and ends, so a question to the person is an
   answer (`question`): the extension asks in the harness's own dialog and sends the command again with the pick,
   which counts only for the same question (`neutral.py`). Hermes's terminal tool is Foreman's own `gh` there, only
-  for `gh pr merge`, `comment` and `close`, only attended. For one command the stand-in wraps three functions of
-  the core (`board._review_for_merge`, `board.reject_comment`, `review.run_review`) instead of editing them: three
-  seams worth asking the core for at the catalog update (who reviewed, in the host's words; the comment's footer;
-  a record finished before it is stored).
+  for `gh pr merge`, `comment` and `close`, only attended. What only the host knows the core asks its
+  context for, by names Hermes's own context does not have (since the catalog update of 2026-11-25; until then
+  the stand-in wrapped three functions of the core): who reviewed before a merge, in the host's words
+  (`foreman_review_before_merge`); the name that signs the reject comment (`foreman_host_label`); and who
+  reviewed, added to a review's record before it is stored (`foreman_finish_review`).
 - The review at the end of every turn is the core's own `finish` loop (`plugin/foreman/finish.py`): Foreman calls
   what in Hermes is the agent's `foreman_review` tool, then the gate's end of turn reads the stored review
   (`reviewer.turn_end`). Only where `Host.turn_review` says the end-of-turn hook waits minutes.

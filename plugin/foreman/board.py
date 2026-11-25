@@ -61,6 +61,21 @@ def bind(ctx) -> None:
     _CTX = ctx
 
 
+HERMES = "Hermes Agent"
+
+
+def _host(name: str):
+    """What a host other than Hermes tells the board through the context it bound (``foreman_<name>``), or None.
+    Hermes's context has no such names, so in Hermes the board speaks its own words."""
+    return getattr(_CTX, "foreman_" + name, None)
+
+
+def host_label() -> str:
+    """The name of the program Foreman runs in, for the lines that sign what it posts."""
+    label = _host("host_label")
+    return label if isinstance(label, str) and label.strip() else HERMES
+
+
 # ─── gh, as a subprocess with its own login ──────────────────────────────────
 
 # Tests replace this with a fake: fn(args: list, cwd: str, timeout: float) -> (returncode, stdout, stderr).
@@ -281,12 +296,22 @@ def pinned(keys: tuple = ()) -> Optional[str]:
     return entry["path"]
 
 
+def _same_place(path: str) -> str:
+    """Equal for two spellings of one directory: through a link, or on Windows under a folder's short name
+    (``RUNNER~1``). Only for telling Foreman's own entries apart; a path a command names is matched as text."""
+    try:
+        return os.path.normcase(os.path.realpath(path))
+    except (OSError, ValueError):
+        return os.path.normcase(os.path.normpath(path))
+
+
 def pin(root: str, keys: tuple = ()) -> None:
     with _lock:
         data, now = _load_store(), time.time()
         data["pins"] = {k: v for k, v in data["pins"].items() if (v.get("at") or 0) + PIN_TTL_SECONDS > now}
         data["pins"][_session(keys)] = {"path": root, "at": now}
-        data["recent"] = [root] + [r for r in data["recent"] if os.path.normcase(r) != os.path.normcase(root)]
+        here = _same_place(root)
+        data["recent"] = [root] + [r for r in data["recent"] if _same_place(r) != here]
         data["recent"] = data["recent"][:MAX_RECENT]
         _save_store(data)
 
@@ -300,7 +325,8 @@ def remember(root: str) -> None:
     """Add ``root`` to the recently used repositories without pinning it for any session."""
     with _lock:
         data = _load_store()
-        data["recent"] = [root] + [r for r in data["recent"] if os.path.normcase(r) != os.path.normcase(root)]
+        here = _same_place(root)
+        data["recent"] = [root] + [r for r in data["recent"] if _same_place(r) != here]
         data["recent"] = data["recent"][:MAX_RECENT]
         _save_store(data)
 
@@ -424,7 +450,7 @@ def candidates(keys: tuple = (), platform: Optional[str] = None) -> list:
     def add(root: Optional[str], why: str):
         if not root:
             return
-        key = os.path.normcase(os.path.normpath(root))
+        key = _same_place(root)
         if key in seen or gate._hermes_data(root, root, homes):
             return
         seen.add(key)
@@ -483,10 +509,11 @@ def cmd_use(args: str, keys: tuple = (), platform: Optional[str] = None) -> str:
         return _pinned_message(options[n - 1][0])
     ask = getattr(_CTX, "ask_choice", None)
     picked = None
+    pinned_at = _same_place(current) if current else None
     if callable(ask):
         choices = [{"value": root, "label": os.path.basename(root) or root,
-                    "description": "%s (%s%s)" % (root, why, ", pinned now" if current and
-                                                  os.path.normcase(current) == os.path.normcase(root) else "")}
+                    "description": "%s (%s%s)" % (root, why, ", pinned now" if pinned_at is not None and
+                                                  pinned_at == _same_place(root) else "")}
                    for root, why in options]
         try:
             picked = ask("Which repository should Foreman use in this session?", choices)
@@ -498,7 +525,7 @@ def cmd_use(args: str, keys: tuple = (), platform: Optional[str] = None) -> str:
         return _pinned_message(picked)
     lines = ["Foreman: repositories you can pin for this session:"]
     for i, (root, why) in enumerate(options, 1):
-        mark = "  <- pinned now" if current and os.path.normcase(current) == os.path.normcase(root) else ""
+        mark = "  <- pinned now" if pinned_at is not None and pinned_at == _same_place(root) else ""
         lines.append("  %d. %s" % (i, root))
         lines.append("     %s%s" % (trim(why, WIDTH - 20), mark))
     lines.append("Type `/foreman use <number>` or `/foreman use <path>`.")
@@ -1290,6 +1317,23 @@ def _review_line(f: dict) -> str:
                                trim(f.get("title"), 50))
 
 
+def _said_by_the_host(number: int, head: str, rec: dict) -> Optional[list]:
+    """The lines that say who reviewed this pull request before its merge, from a host other than Hermes
+    (``foreman_review_before_merge`` on its context); None in Hermes. A host that fails to say it gets one line
+    that names no reviewer: Hermes's words about its second model would be false there."""
+    say = _host("review_before_merge")
+    if not callable(say):
+        return None
+    try:
+        lines = say(number, head, rec)
+    except Exception:
+        logger.warning("foreman: the host could not say who reviewed", exc_info=True)
+        lines = None
+    if isinstance(lines, list) and lines:
+        return [str(line) for line in lines]
+    return [wrap("Foreman reviewed PR #%d at %s before the merge: %s." % (number, head, rec.get("verdict")))]
+
+
 def _review_for_merge(root: str, number: int, v: dict, keys: tuple, platform: Optional[str]) -> dict:
     """The second model's review of the pull request's exact head, from the store when the same diff was reviewed
     by the same reviewer, else run now. {"pre": lines to show first, "notes": lines for the question, "unreviewed":
@@ -1312,20 +1356,25 @@ def _review_for_merge(root: str, number: int, v: dict, keys: tuple, platform: Op
         out["refuse_detail"] = "the head moved during the review"
         return out
     review.record_in_pipeline(rec, then="awaiting_owner")
-    m = rec.get("model") or {}
-    who = (review._label(m.get("provider") or None, m.get("model")) if m and m.get("model") else
-           "%s, routed by Hermes" % m["ran"] if m.get("ran") and m.get("same_as_author") is None else
-           "the host's default model")
-    if rec.get("cached"):
-        out["pre"].append(wrap("Second-model review of %s: %s (stored review of this exact diff, %s; the model was "
-                               "not called again)." % (v["head_oid"][:7], verdict, rec.get("time") or "earlier")))
+    said = _said_by_the_host(number, v["head_oid"][:7], rec)
+    if said is not None:  # another host names its own reviewer, in the words every review there uses
+        out["pre"] += said
     else:
-        out["pre"].append(wrap("Foreman reviewed PR #%d at %s with the second model first (%s): %s."
-                               % (number, v["head_oid"][:7], who, verdict)))
-    if m and m.get("same_as_author") is True and not rec.get("error"):
-        out["notes"].append("  " + (review.TASK_SAME_MODEL if m.get("source") == "task" else review.SAME_MODEL))
-    elif m and m.get("same_as_author") is None and m.get("ran") and not rec.get("error"):
-        out["notes"].append("  " + (review.TASK_UNSURE if m.get("source") == "task" else review.ROUTED_MODEL))
+        m = rec.get("model") or {}
+        who = (review._label(m.get("provider") or None, m.get("model")) if m and m.get("model") else
+               "%s, routed by Hermes" % m["ran"] if m.get("ran") and m.get("same_as_author") is None else
+               "the host's default model")
+        if rec.get("cached"):
+            out["pre"].append(wrap("Second-model review of %s: %s (stored review of this exact diff, %s; the model "
+                                   "was not called again)." % (v["head_oid"][:7], verdict,
+                                                               rec.get("time") or "earlier")))
+        else:
+            out["pre"].append(wrap("Foreman reviewed PR #%d at %s with the second model first (%s): %s."
+                                   % (number, v["head_oid"][:7], who, verdict)))
+        if m and m.get("same_as_author") is True and not rec.get("error"):
+            out["notes"].append("  " + (review.TASK_SAME_MODEL if m.get("source") == "task" else review.SAME_MODEL))
+        elif m and m.get("same_as_author") is None and m.get("ran") and not rec.get("error"):
+            out["notes"].append("  " + (review.TASK_UNSURE if m.get("source") == "task" else review.ROUTED_MODEL))
     if verdict == "COULD NOT RUN":
         out["unreviewed"] = rec.get("error") or "unknown reason"
         return out
@@ -1494,7 +1543,7 @@ def reject_comment(v: dict, note: str = "", review: Optional[list] = None) -> st
         lines += ["", "#### Model review", ""] + ["- %s" % r for r in review]
     if note.strip():
         lines += ["", "#### Note from the reviewer", "", note.strip()]
-    lines += ["", "<sub>Posted with `/foreman reject` from Hermes Agent.</sub>"]
+    lines += ["", "<sub>Posted with `/foreman reject` from %s.</sub>" % host_label()]
     return "\n".join(lines)
 
 
