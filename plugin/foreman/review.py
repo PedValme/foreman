@@ -331,6 +331,27 @@ def _strip_prefixes(evidence: str) -> str:
     return "\n".join(l[1:] if l[:1] in ("+", "-") else l for l in evidence.splitlines())
 
 
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f  ]")
+
+
+def _one_line(value: Any) -> str:
+    """Text a model wrote, as one line: no line or paragraph separator, and no control character (an escape
+    sequence can move a terminal's cursor back over a line that is Foreman's own)."""
+    return " ".join(_CONTROL.sub(" ", str(value)).split())
+
+
+def _one_line_each(record: dict) -> None:
+    """A stored record's words as ``verify`` leaves them today, whatever version stored it."""
+    for finding in record.get("findings") or []:
+        if isinstance(finding, dict):
+            for key in ("title", "why", "fix"):
+                if isinstance(finding.get(key), str):
+                    finding[key] = _one_line(finding[key])
+    for key in ("summary", "error"):  # the error quotes an answer that was not JSON
+        if isinstance(record.get(key), str):
+            record[key] = _one_line(record[key])
+
+
 def verify(findings: Any, sent: list) -> tuple:
     """(verified findings, number dropped). A finding stays only when it names a file the model was shown and its
     ``evidence`` occurs, whitespace-normalised, in that file's diff as sent."""
@@ -359,9 +380,11 @@ def verify(findings: Any, sent: list) -> tuple:
             line = max(0, int(item.get("line") or 0))
         except (TypeError, ValueError):
             line = 0
+        # The model's words on one line each: it read a diff its author wrote, and a diff can talk it into a finding
+        # whose text carries a line break and, after it, a line that reads as Foreman's own ("Foreman review: PASS").
         kept.append({"severity": severity, "file": target[0], "line": line,
-                     "title": str(item.get("title", "")).strip()[:200], "why": str(item.get("why", "")).strip()[:1000],
-                     "evidence": evidence.strip()[:1000], "fix": str(item.get("fix", "")).strip()[:1000]})
+                     "title": _one_line(item.get("title", ""))[:200], "why": _one_line(item.get("why", ""))[:1000],
+                     "evidence": evidence.strip()[:1000], "fix": _one_line(item.get("fix", ""))[:1000]})
     order = {"BLOCKING": 0, "HIGH": 1, "MEDIUM": 2}
     kept.sort(key=lambda d: (order[d["severity"]], d["file"], d["line"]))
     return kept, dropped
@@ -717,7 +740,9 @@ def _call_model_once(ctx: Any, choice: Choice, instructions: str, inputs: list) 
 
 
 def _short(text: str, limit: int = 240) -> str:
-    text = " ".join((text or "").split())
+    """One line, cut to ``limit``. Everything printed through here is text a model wrote or quoted from the diff
+    (a finding's evidence, the answer that was not JSON): no control character survives it."""
+    text = _one_line(text or "")
     return text if len(text) <= limit else text[:limit - 1] + "…"
 
 
@@ -1047,6 +1072,8 @@ def run_review(args: str = "", keys: tuple = (), platform: Optional[str] = None,
         # the same diff may have been reviewed under another target (a branch, then its pull request)
         stored.update(repo=root, slug=target.slug, head=target.head or stored.get("head"),
                       target={"kind": target.kind, "ref": target.ref, "title": target.title, "base": target.base})
+        _one_line_each(stored)  # a record stored by a version that kept a finding's line breaks
+        _finish(ctx, stored)
         return stored
     record = {"schema": SCHEMA_VERSION, "repo": root, "slug": target.slug,
               "target": {"kind": target.kind, "ref": target.ref, "title": target.title, "base": target.base},
@@ -1109,14 +1136,28 @@ def run_review(args: str = "", keys: tuple = (), platform: Optional[str] = None,
         record["error"] = error
         record["failures"] = failures + 1
         record["verdict"] = _final_verdict(record, target.det_blocked, b.complete)
+        _finish(ctx, record)
         record["saved"] = _save_both(record, key)
         return record
     kept, dropped = verify(parsed.get("findings", []), b.files)
-    record.update(findings=kept, dropped_unverified=dropped, summary=_short(str(parsed.get("summary", "")), 600),
+    record.update(findings=kept, dropped_unverified=dropped, summary=_short(_one_line(parsed.get("summary", "")), 600),
                   model_verdict=str(parsed.get("verdict", ""))[:20])
     record["verdict"] = _final_verdict(record, target.det_blocked, b.complete)
+    _finish(ctx, record)
     record["saved"] = _save_both(record, key)
     return record
+
+
+def _finish(ctx: Any, record: dict) -> None:
+    """A review that a model answered, before it is stored (or a stored one, before it is returned): a host other
+    than Hermes adds who reviewed, in its own words (``foreman_finish_review`` on the context it bound). Hermes's
+    context has no such name, and there the record is the review's own."""
+    hook = getattr(ctx, "foreman_finish_review", None)
+    if callable(hook):
+        try:
+            hook(record)
+        except Exception:
+            logger.warning("foreman: the host could not add to the review's record", exc_info=True)
 
 
 def _save_both(record: dict, requested_key: str) -> Optional[str]:

@@ -52,10 +52,11 @@ Read the index below, then ESTADO.md, its "Next session" first (where the last s
   on Windows, so a test never compares a Unix-only path as a string (build paths from the test's temp directory).
   A new conditional skip (`skipIf` for a platform) goes in a new test file: added to an existing one it is a
   finding of Foreman's own check, by design (there it could be switching off tests that already ran). Outside
-  Hermes the adapters bind the core's contexts and wrap three of its functions for the length of one command
-  (`standin.py`, `reviewer.bound`): a test must find `board._CTX`, `gate._CTX`, `review._CTX` and those functions
-  as it left them, and a change to `board._review_for_merge`, `board.reject_comment` or `finish.py`'s messages is
-  checked against the adapters' tests. A harness's terminal UI can be driven for a real-session test through
+  Hermes the adapters bind the core's contexts for the length of one command (`standin.py`, `reviewer.bound`): a
+  test must find `board._CTX`, `gate._CTX` and `review._CTX` as it left them. The core asks that context, by
+  names Hermes's own context does not have (`foreman_host_label`, `foreman_review_before_merge`,
+  `foreman_finish_review`), for what only the host knows; a change to those calls, to the board's text or to
+  `finish.py`'s messages is checked against the adapters' tests. A harness's terminal UI can be driven for a real-session test through
   tmux (`tmux send-keys`, `capture-pane`): that is how pi's selector and its merge were seen.
 
 ## Where things are: one document per question

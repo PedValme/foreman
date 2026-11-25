@@ -396,8 +396,8 @@ Desktop, or via `hermes config set plugins.entries.foreman.settings.<key> <value
 ## What it does on your machine
 
 - **Runs `git`** as a subprocess, read-only (`diff`, `diff-tree`, `log`, `ls-files`, `rev-parse`, `rev-list`,
-  `merge-base`, `cat-file`, `show`, `status`, `remote`, `symbolic-ref`, `for-each-ref`, `hash-object` without `-w`),
-  in the repository the agent works in. It never commits, pushes, merges or changes your repository by itself. Its
+  `merge-base`, `cat-file`, `show`, `show-ref`, `status`, `remote`, `symbolic-ref`, `for-each-ref`, `check-ignore`,
+  `config --get` and `--get-all`, `hash-object` without `-w`), in the repository the agent works in. It never commits, pushes, merges or changes your repository by itself. Its
   `git` and `gh` subprocesses get an allowlisted environment (`PATH`, home, locale, temp, the OS's own variables,
   `XDG_*` directories, `SSH_AUTH_SOCK` and `GIT_*`; for gh also `GH_*`, the GitHub tokens and proxies), never a
   copy of Hermes's: a program a repository's config makes git run (`core.fsmonitor`, a hook) does not see your model
