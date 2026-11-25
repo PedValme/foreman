@@ -564,4 +564,4 @@ public fallbacks, until Hermes offers a public way to read the terminal's direct
 
 ## License
 
-MIT. Built by Pedro Valencia ([@pedvalme](https://github.com/PedValme)).
+MIT. Built by Pedro Valencia ([@pedvalme](https://x.com/PedValme)).

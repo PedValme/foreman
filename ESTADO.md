@@ -32,13 +32,16 @@
   4. Then publish what is already built, each store with his own yes (below).
   Not now: the `generic` host, a terminal command with `status`, Foreman's own installer of git's hooks. Never
   proposed to build: an MCP server, a shim in front of `git` and `gh`, a sandbox, a `reference-transaction` hook.
-- Done on 2026-11-25, #86: both READMEs credit Foreman to Pedro Valencia (@pedvalme), linking to his GitHub
-  profile, instead of to the company (DECISIONES); the catalog's page changes with the catalog update.
+- Done on 2026-11-25, #86 and #87: both READMEs credit Foreman to Pedro Valencia (@pedvalme), linking to his
+  X profile, instead of to the company (DECISIONES); the catalog's page changes with the catalog update.
+- Done on 2026-11-25, #57, the first pull request from outside (by `sys-dev-git`), with the owner's «3. ok»: a
+  value that is nothing but a history scrubber's marker (REMOVED or REDACTED between asterisks) is a placeholder,
+  not a secret. The spelling asked of it on 2026-11-23 went as a commit of ours on its author's branch, after a
+  comment there; reviewed by an agent that did not write it; merged by squash as its author's. Left as it was,
+  and true of every placeholder before it: a real value written right after the marker behind a `#` or a `;`,
+  where the captured value stops, is not read.
 - Proposed to the owner and not answered: try the Claude Code adapter on Copilot CLI, after its dialect knows
-  the other harnesses' tool names (none is installed here; it needs his account). And, on his «creo que seria
-  bueno hacer las correcciones del PR externo dandole el credito al externo»: finish external PR #57 on its
-  author's own branch (it allows maintainers' edits), so it merges as theirs with ours as co-author, after a
-  comment that says so; the recommendation given, his yes pending.
+  the other harnesses' tool names (none is installed here; it needs his account).
 - Then T7's remaining steps, each with the owner's yes (below), and the one Hermes catalog update.
   `trabajo/agnostico.md`, "Next step", lists what an agent can do meanwhile without him.
 - Decided on 2026-11-24 (DECISIONES): the public name in every store is `foreman-gate`, and `foreman` stays as the
@@ -68,8 +71,6 @@
     of its security label, and its maintainer asked for one focused issue or a pull request against
     `hermes_cli/data/plugin_api.json` per seam (#148311, the same kind of request, was completed). Foreman still
     needs it: it is the only source that follows the agent's `cd` between terminal calls.
-- External PR #57 (`***REDACTED***` as a placeholder in the detector): no push from its author since the changes
-  asked on 2026-11-23. When it comes: re-read the whole diff, approve its held CI run, then decide the merge.
 - Hermes: Foreman is in its catalog at the pin ce9b01a (NousResearch/hermes-agent#153851); a plugin change reaches
   users only through the one substantial catalog update, tried first in the `foremandev` profile (DECISIONES,
   2026-11-22 and 2026-11-24). First place in the Hermes Agent Plugin Hackathon; promotion is another project's.
@@ -89,8 +90,8 @@
 
 ## Next steps
 1. `action.yml` and the README by level (decided, "Next session" above). Then T7's stores and the one Hermes
-   catalog update, which now also carries the gate's fixes of #83, #84 and #85 (`trabajo/agnostico.md`, "Next
-   step"; `trabajo/model-picker.md`).
+   catalog update, which now also carries the gate's fixes of #83, #84 and #85, the scrubber's marker of #57
+   and the new credit line (`trabajo/agnostico.md`, "Next step"; `trabajo/model-picker.md`).
 2. Without the owner: the per-turn review seen in a real Claude Code and Codex session; OpenCode's end of turn
    given the long wait so the per-turn review can be offered there; a rejection and `allow` seen in OpenCode's TUI.
 3. Propose the Hermes seams one by one (#153841's advice): first the terminal cwd accessor.
