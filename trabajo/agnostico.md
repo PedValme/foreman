@@ -122,8 +122,8 @@ session that did not write the code, the Hermes plugin untouched until one subst
 - The reviewer in Claude Code is the account's default model, not necessarily the session's: Claude Code names the
   model to no hook. In Codex the choice of reviewer is a file, and the session still sees the person's global
   instructions and declares a few tools with no switch. None of the four was tried on Windows.
-- The Hermes plugin's own review keeps line breaks in a finding's text (ESTADO, known issues): one line in
-  `review.verify`, for the catalog update.
+- The Hermes plugin's own review kept line breaks in a finding's text: fixed on `main` in #91, and in the listed
+  plugin with the catalog update.
 - T6 on OpenCode: a server command can answer only through an error notice; the TUI plugin has dialogs and toasts.
 - A merge outside Hermes runs the command twice (ask, then answer), so its gate, review and "waiting" lines are
   twice in the pipeline; a review that failed on the first run is tried once more on the second.
@@ -205,9 +205,10 @@ T7, which starts with the owner: the names of the packages, where each adapter i
 marketplace, npm for pi and OpenCode, how Codex's hooks are installed) and what the root README says about them.
 Until then nothing is published and the root README does not mention the adapters. With his answers: the READMEs,
 the publication of each harness whose end-to-end test passed (Claude Code, Codex, pi and OpenCode all have one;
-Windows nowhere), and the one Hermes catalog update with what waits for it: the one line in `review.verify`
-(a finding's words on one line), the three seams the stand-in wraps today (above, "How it is built"), the native
-model picker (`trabajo/model-picker.md`), the README's award, GIF and `/foreman notify on`.
+Windows nowhere), and the one Hermes catalog update (`trabajo/catalog-pr.md`). What waited for it is on
+`main` since 2026-11-25 (#91 and the version 0.2.0): a finding's words on one line, the three seams (above, "How it
+is built"), the README's award and GIF. The native model picker (`trabajo/model-picker.md`) waits for the owner's
+answer: recommended to him, not in this update.
 
 What an agent can do before that without the owner: see the per-turn review in a real Claude Code and a real Codex
 session (one short session each, in a throwaway repository, `claude --plugin-dir` and `codex -c hooks.…`); give
