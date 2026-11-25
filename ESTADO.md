@@ -1,24 +1,35 @@
-# Foreman state — 2026-11-24
+# Foreman state — 2026-11-25
 
 > Rewritten in full, never appended; kept short.
 
 <!-- pic-method: next-session -->
 ## Next session
-- Done this session (the owner: «vamos con T6 y demás pendientes»): T6 and T6b of `trabajo/agnostico.md`, in four
-  pull requests, each reviewed by an agent that did not write it and with CI green on Linux, macOS and Windows.
-  Nothing under `plugin/` changed.
-  - #74: `/foreman` alone is the board on pi and OpenCode, with `verdict`, `pipeline`, `prs`, `issues` and `use`:
-    the Hermes plugin's own `board.py`, run on a stand-in for Hermes's context (`adapters/foreman_hosts/standin.py`).
-  - #75: `/foreman merge` and `/foreman reject` on pi, with the review before the merge. Seen in pi's terminal UI:
-    throwaway pull request #19 of the demo repository reviewed, confirmed in pi's selector and merged; #20 rejected
-    and closed; both refused with nobody attending.
-  - #76: the review at the end of every turn, only where the person turns it on (`reviewer every-turn on`): Claude
-    Code, Codex and pi. Seen on pi: a loosened assertion was sent back once and the agent restored it.
-  - #77: OpenCode's TUI plugin (`adapters/opencode/tui.ts`, installed as a folder): `/foreman` typed in the TUI,
-    replies in a dialog, merge and reject there only. Seen: throwaway pull request #21 merged from the TUI.
-- Next action: T7, which starts with the owner's answers (names of the packages, where each adapter is published,
-  what the root README says); then the one Hermes catalog update. `trabajo/agnostico.md`, "Next step", lists both
-  and what an agent can do meanwhile without him.
+- Done this session (the owner: «empecemos con la evaluacion acordada como promera tarea, usa el protocolo de
+  delegscion si consideras que es util o agentes adversariales»): the evaluation of Foreman for any harness
+  (his question of 2026-11-25: «¿Qué necesitaríamos para que sea una herramienta agnóstica del arnés? […] aunque
+  sea una versión un poco más acotada o limitada […] pero para cualquier agente»). Read-only, nothing built: two
+  research passes (documentation), probes in throwaway repositories, and an adversarial review of the proposal by
+  an agent that did not write it. What was measured and read, and the proposal as it stands after that review:
+  `trabajo/agnostico.md`, "Any agent: the evaluation of 2026-11-25".
+- What the owner decided on it (DECISIONES, 2026-11-25; he asked «antes de hacerlo, valenla pena???» and the
+  answer was that not all of it is: nobody has asked for Foreman on a harness it does not cover). In this order:
+  1. Done, #83: the gate no longer refuses a push for what came with the base branch (a rebase onto it, a
+     merge of it), a defect of today's gate the evaluation found. Reviewed in three passes by an agent that did
+     not write it; the first version loosened the control and was reworked. It is in the core, so Hermes users
+     get it with the catalog update. With it, the OpenCode TUI tests stopped depending on the runner's speed
+     (CI had failed three times on Windows that day).
+  2. Next: `action.yml` at the root (the check in CI as a GitHub Action instead of a copied workflow) and a
+     README that says what Foreman promises by level: locked (the required check in CI, any agent, with the
+     workflow protected, the agent unable to merge alone, and marked findings failing or behind a required
+     review), guarded (a harness's hook, the five of today), early warning (git's own hooks: not built).
+  3. Then publish what is already built, each store with his own yes (below).
+  Not now: the `generic` host, a terminal command with `status`, Foreman's own installer of git's hooks. Never
+  proposed to build: an MCP server, a shim in front of `git` and `gh`, a sandbox, a `reference-transaction` hook.
+- Proposed to the owner and not answered: fix the two false refusals that are left (Known issues, the first
+  two), as the next change to the gate; try the Claude Code adapter on Copilot CLI, after its dialect knows the
+  other harnesses' tool names (none is installed here; it needs his account).
+- Then T7's remaining steps, each with the owner's yes (below), and the one Hermes catalog update.
+  `trabajo/agnostico.md`, "Next step", lists what an agent can do meanwhile without him.
 - Decided on 2026-11-24 (DECISIONES): the public name in every store is `foreman-gate`, and `foreman` stays as the
   command, the plugin's name inside Claude Code, OpenCode's plugin id and the Hermes catalog entry. Done for it,
   with nothing published: a root `package.json` under that name (pi's manifest, OpenCode's entrypoints), the Claude
@@ -66,7 +77,9 @@
   page, Anthropic's directory) and the one Hermes catalog update are left, each with the owner's yes.
 
 ## Next steps
-1. T7 and the one Hermes catalog update (`trabajo/agnostico.md`, "Next step"; `trabajo/model-picker.md`).
+1. `action.yml` and the README by level (decided, "Next session" above). Then T7's stores and the one Hermes
+   catalog update, which now also carries #83's fix of the gate (`trabajo/agnostico.md`, "Next step";
+   `trabajo/model-picker.md`).
 2. Without the owner: the per-turn review seen in a real Claude Code and Codex session; OpenCode's end of turn
    given the long wait so the per-turn review can be offered there; a rejection and `allow` seen in OpenCode's TUI.
 3. Propose the Hermes seams one by one (#153841's advice): first the terminal cwd accessor.
@@ -78,6 +91,27 @@
    register the demo repository in the owner's environment as outside the factory.
 
 ## Known issues
+- Unresolved (core, every harness, Hermes included; seen on 2026-11-25 through the adapters' protocol in a
+  throwaway repository): the `git commit` that concludes a merge of the base branch with conflicts is refused for
+  the base branch's own change to a test, because the staged tree is read against the branch's side only. The
+  agent is then told to undo another person's line. Which side a merge is read against is a decision about the
+  control (a test dropped in the resolution shows only against the other side): its own change, reviewed.
+- Unresolved (core; reasoned and pinned by a test, not seen in a session): a branch that follows the base branch
+  itself (`git checkout -b topic origin/main`) and is pushed before it is rebased is read against the base's tip,
+  so what the base gained since reads as the branch's doing (someone's new test as a test deleted). Reading it
+  rightly needs to know where the push goes, and guessing that from the command opened two holes in the review of
+  #83 (`topic:heads/main`, a flag with a value): it needs the push's arguments parsed properly first.
+- Unresolved (the push after the base came in, #83; disclosed in the plugin's README): what the branch changed
+  since its last push is not read in the files the base's incoming commits touched too, and a clone that cannot
+  name the remote's default branch (no `origin/HEAD`, `main` or `master`) is read as before the fix.
+- Unresolved (Claude Code's dialect, if it is ever run by another harness that reads Claude Code's hooks): a tool
+  name it does not know is let through with no notice (`claude_code._pre_tool`), and Cursor and Droid name their
+  shell `Shell` and `Execute` (read in their documentation): there the gate would be off and silent.
+- Unresolved (a test that may depend on speed; not seen failing): `test_hosts_opencode_tui` asserts that the
+  command returns within a second (`returnedAt`); on a much slower runner it could fail.
+- Unresolved (the check in CI): a finding marked `foreman:allow` passes the check unless `--strict` is given, so
+  where nobody reviews the pull request the agent's own marker goes through (the workflow's header says it; the
+  example does not default to it).
 - Unresolved (adapters, every harness): Foreman's hooks and state are files the agent's shell can reach, guarded
   against the plain attempt and not a disguised one; a second agent started without Foreman is outside the gate;
   when the adapter cannot run (no `python3`) the harness goes on without the gate and shows the error. The required
