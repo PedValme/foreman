@@ -96,6 +96,11 @@
 - Unresolved (Claude Code's dialect, if it is ever run by another harness that reads Claude Code's hooks): a tool
   name it does not know is let through with no notice (`claude_code._pre_tool`), and Cursor and Droid name their
   shell `Shell` and `Execute` (read in their documentation): there the gate would be off and silent.
+- Unresolved (a test that depends on speed; seen in CI on 2026-11-25, Windows with Python 3.13, on a change to
+  documents only): `test_hosts_opencode_tui`'s `test_the_command_is_a_tui_slash_command_and_every_reply_is_a_dialog`
+  expects the board with no "Foreman is working" toast before it, and `tui.ts` shows that toast, rightly, when
+  Foreman's program takes longer than `WORKING_MS`: on a slow runner the test fails. The job was run again; the
+  test needs to accept the toast or to take the wait out of the clock's hands.
 - Unresolved (the check in CI): a finding marked `foreman:allow` passes the check unless `--strict` is given, so
   where nobody reviews the pull request the agent's own marker goes through (the workflow's header says it; the
   example does not default to it).
