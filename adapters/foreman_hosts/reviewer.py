@@ -1,4 +1,4 @@
-"""The reviewer outside Hermes: a fresh session of the harness itself (PRODUCTO.md, rule 25).
+"""The reviewer outside Hermes: a fresh session of the harness itself (docs/rules.md, rule 25).
 
 In Hermes the review asks a second model through the host's own model access. Another harness gives a plugin no such
 access, and it has something else: its own command to run one prompt without an interface. So here the reviewer is a

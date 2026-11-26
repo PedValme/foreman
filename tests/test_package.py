@@ -1,5 +1,5 @@
 """The root ``package.json``: the package pi and OpenCode install from this repository, under the public name
-``foreman-gate`` (DECISIONES.md, 2026-11-24). It names only files that exist, and nothing outside the adapters and the
+``foreman-gate`` (docs/decisions/0010.md). It names only files that exist, and nothing outside the adapters and the
 gate they run."""
 import json
 import os
@@ -24,7 +24,7 @@ class PackageJson(unittest.TestCase):
         self.assertEqual(p["license"], "MIT")
         self.assertIn("github.com/PedValme/foreman", p["repository"]["url"])
         self.assertIn("pi-package", p["keywords"])  # pi's package gallery lists it by this keyword
-        self.assertNotIn("private", p)  # publishable later, with the owner's yes
+        self.assertNotIn("private", p)  # publishable later
 
     def test_the_version_is_the_projects(self):
         plugin = json.loads(read(".claude-plugin", "plugin.json"))["version"]

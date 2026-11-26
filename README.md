@@ -147,6 +147,6 @@ gate does not follow are listed in [`plugin/README.md`](plugin/README.md), under
 ---
 
 The Hermes plugin is the [`plugin/`](plugin/) folder and the other agents' adapters are in [`adapters/`](adapters/).
-How the project is run: [PRODUCTO.md](PRODUCTO.md), [DECISIONES.md](DECISIONES.md) and [ESTADO.md](ESTADO.md).
+What the product must do: [docs/rules.md](docs/rules.md); why it is built this way: [docs/decisions/](docs/decisions/); how to contribute: [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
 
 MIT. Built by Pedro Valencia ([@pedvalme](https://x.com/PedValme)).

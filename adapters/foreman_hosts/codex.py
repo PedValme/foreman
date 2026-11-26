@@ -17,7 +17,7 @@ the field names of Claude Code (checked on Codex CLI 0.171.0, in ``codex exec``)
 
 Allowing a finding (``foreman allow <id>``) is not available in Codex yet: nothing Codex gives a hook was shown to
 tell the person's prompt in an interactive session from a prompt the model writes for a subagent or a resumed
-session, and with nobody attending ``allow`` must do nothing (PRODUCTO.md, rule 24). Listing what waits stays.
+session, and with nobody attending ``allow`` must do nothing (docs/rules.md, rule 24). Listing what waits stays.
 """
 from __future__ import annotations
 

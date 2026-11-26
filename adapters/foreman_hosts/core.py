@@ -6,7 +6,7 @@ one of them into the gate's own call (``foreman.gate``, the code the Hermes plug
 one of four decisions: nothing (allow), ``block``, ``ask`` (a person must decide) or ``continue`` (send the agent
 back before it finishes).
 
-An adapter adds no gate rule and loosens none (PRODUCTO.md, rule 22). What it adds is what the gate gets from Hermes and
+An adapter adds no gate rule and loosens none (docs/rules.md, rule 22). What it adds is what the gate gets from Hermes and
 another harness does not give: which files the turn changed (the gate's end-of-turn scan needs them), words that fit
 the harness, and a guard around Foreman's own program and state, which outside Hermes are plain files the agent's
 shell can reach.

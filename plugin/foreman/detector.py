@@ -317,7 +317,7 @@ def has_skip_marker(text: str) -> Optional[str]:
 
 
 # Outside test files a skip marker counts only as code: one inside a quoted string (a regex, a fixture written by a
-# script) or a comment does not switch a test off (DECISIONES.md, 2026-11-10). A skip helper defined as code outside
+# script) or a comment does not switch a test off (docs/decisions/0006.md). A skip helper defined as code outside
 # the tests (a module-level pytest skip mark bound to a name) still counts. These comments name no marker literally:
 # this repository's CI runs the base's detector on each pull request.
 _QUOTED = re.compile(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'')

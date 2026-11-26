@@ -16,7 +16,7 @@ board the part of that context it uses, for the length of one command:
 - **Hermes's terminal tool**, which the board uses for the three commands that write to GitHub (``gh pr merge``,
   ``gh pr comment``, ``gh pr close``), is Foreman's own ``gh`` process here: no shell, gh's own login, and only for
   those three. In Hermes that tool sits behind Hermes's approval; here what stands in its place is that ``merge``
-  and ``reject`` run only for a command the person typed with someone attending (PRODUCTO.md, rule 24), and that a
+  and ``reject`` run only for a command the person typed with someone attending (docs/rules.md, rule 24), and that a
   merge is confirmed in the harness's dialog. The agent's own ``gh pr merge`` stays refused by the gate.
 - **The review before a merge** is the board's own step (rule 16), with this harness's reviewer: a fresh session
   that did not write the code (``reviewer.py``). The board's two sentences about "the second model" are Hermes's;

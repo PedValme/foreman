@@ -323,7 +323,7 @@ class PluginFiles(unittest.TestCase):
 
     def test_the_manifest_points_at_files_that_exist(self):
         manifest = json.loads(self.read(".claude-plugin", "plugin.json"))
-        self.assertEqual(manifest["name"], "foreman")  # the prefix of /foreman:status (DECISIONES.md, 2026-11-24)
+        self.assertEqual(manifest["name"], "foreman")  # the prefix of /foreman:status (docs/decisions/0010.md)
         self.assertTrue(os.path.isfile(os.path.join(ROOT, manifest["hooks"])))
         self.assertTrue(os.path.isdir(os.path.join(ROOT, manifest["commands"])))
 

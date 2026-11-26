@@ -514,7 +514,7 @@ class ModelChoice(ReviewCase):
             self.assertFalse(review.same_model_id(a, b), (a, b))
 
     def test_the_review_goes_through_foremans_auxiliary_task(self):
-        # The owner asked for a dropdown of the configured models (DECISIONES.md, 2026-11-11): the review is Hermes's
+        # docs/decisions/0007.md: a dropdown of the configured models. The review is Hermes's
         # auxiliary task "Foreman review", picked in Hermes's own model pickers, with no override capability.
         defaults = {"provider": "otherprov", "model": "other-model"}
         with mock.patch.object(review, "_TASK_REGISTERED", True), mock.patch.object(review, "_TASK_DEFAULTS", defaults):
