@@ -500,8 +500,8 @@ class Choice:
 # Foreman's review as one of Hermes's auxiliary tasks: it is listed in every model picker Hermes has (`hermes model`
 # → Configure auxiliary models, the dashboard's Models page, Desktop → Settings → Models → Auxiliary), so a person
 # picks the reviewer from the providers and models already configured, and calling it needs no override capability.
-# Its default is the first fallback model (another model, often another provider). The owner asked for a dropdown of
-# the configured models (DECISIONES.md, 2026-11-11).
+# Its default is the first fallback model (another model, often another provider). Why it is built this way:
+# docs/decisions/0007.md.
 TASK = "foreman_review"
 TASK_TITLE = "Foreman review"
 _TASK_REGISTERED = False

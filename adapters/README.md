@@ -5,7 +5,7 @@
 
 Foreman's gate lives in `plugin/foreman/`, the Hermes Agent plugin. An adapter brings that same gate to another
 harness: it translates what the harness sends into the gate's calls and the gate's answer into what the harness
-understands. It adds no rule and loosens none (PRODUCTO.md, rules 22 to 26).
+understands. It adds no rule and loosens none (docs/rules.md, rules 22 to 26).
 
 | Path | What it is |
 |---|---|

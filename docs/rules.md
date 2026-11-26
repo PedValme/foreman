@@ -1,11 +1,14 @@
-# Foreman — product
+# Foreman's product rules
 
 **Promise:** a green check the agent did not rig. Other plugins prove the check ran; Foreman proves the agent did
 not skip, delete or weaken the tests, change what the check runs, or commit a secret to get there.
 
 **User:** a developer who lets a coding agent write code in a git repository. Hermes Agent has the whole line (the
 plugin in `plugin/`, listed in its catalog); Claude Code, Codex, pi and OpenCode get it through adapters (rules 22
-to 25; ESTADO.md says which ones exist today). Rules 1 to 21 are written for Hermes and hold there as they are.
+to 26), which are under construction. Rules 1 to 21 are written for Hermes and hold there as they are.
+
+These rules are what the code is held to; the code and its tests cite them by number. Design decisions, with their
+reasons and the alternatives, are in [`docs/decisions/`](decisions/).
 
 ## Rules
 1. **Deterministic first.** The blockers come from a detector with no model: skipped or isolated tests, deleted
@@ -41,7 +44,6 @@ to 25; ESTADO.md says which ones exist today). Rules 1 to 21 are written for Her
     (conflicts, draft, GitHub still computing) is said apart. CI is shown and never decides.
 14. **A merge needs a person.** `/foreman merge` asks before merging; with nobody to ask it merges nothing and
     prints the command to confirm by typing it. Refusals (BLOCKED, conflicts, draft) cannot be overridden.
-
 15. **One line for every change.** write → gate → second-model review → bounce → the owner approves → merge. Each
     change has one persisted state with its stages and events; the board, `/foreman pipeline`, the notifications
     and the Desktop panel all read that same state.
@@ -57,15 +59,16 @@ to 25; ESTADO.md says which ones exist today). Rules 1 to 21 are written for Her
     only after `/foreman notify on`; the commands in it pass every check again.
 20. **The panel only shows and submits.** The Desktop panel reads Foreman's own state and its buttons send the
     same `/foreman` commands a person would type; it never calls `gh` or merges.
-21. **Only the plugin is installed.** The plugin lives in `plugin/`; the method documents, tests and examples
-    stay in the repository and never reach a user's machine.
+21. **Only the plugin is installed.** The plugin lives in `plugin/`; the tests, examples and documentation stay in
+    the repository and never reach a user's machine.
 22. **One core, an adapter per harness.** The detector and the gate live in `plugin/foreman/`, the single source.
     An adapter (`adapters/`) only translates: what its harness sends becomes the gate's own calls, and the gate's
     answer becomes what that harness understands. An adapter adds no gate rule and loosens none; what it adds is
     the guard around Foreman's own program and state, which outside Hermes are files the agent's shell can reach.
     `plugin/` never reads outside itself.
 23. **The Hermes plugin changes only with a catalog update.** Changes to the core land on `main` with the tests
-    green and reach Hermes users together, in one substantial update tried first in the `foremandev` profile.
+    green and reach Hermes users together, in one substantial catalog update, tried first in a dedicated Hermes
+    profile.
 24. **What a person decides stays out of the agent's reach, in every harness.** `allow` and `merge` exist only where
     the model cannot type them (a command the person types; never a tool, never the agent's shell), an agent that
     runs them is blocked, and with nobody attending they do nothing. A harness that gives no sound sign that a
@@ -87,7 +90,6 @@ to 25; ESTADO.md says which ones exist today). Rules 1 to 21 are written for Her
     reviewer; Claude Code and Codex get the gate, the person's commands and the reviewer. Phone notifications and
     the Desktop panel are Hermes's. Outside Hermes `/foreman` is the Hermes plugin's own board, run unchanged on a
     stand-in for Hermes's context, so the two cannot drift apart.
-
 27. **Said by where it holds.** Foreman says what it promises by where it runs, not by a list of agents. In the
     agent (a harness's hook) it stops the shortcut at the moment it is tried, and it is made of files the agent's
     shell can reach. In CI (the required check) it is the one control the agent cannot move, once the check is
@@ -96,7 +98,6 @@ to 25; ESTADO.md says which ones exist today). Rules 1 to 21 are written for Her
     detector from the repository it checks (a pull request could bring its own), and in the action a marked
     finding fails unless the user turns that off.
 
-## Out of this delivery
-Publishing GitHub checks from the agent, the owner's decisions and pending items, rework metrics. Buttons on the
-pushed notification itself and Hermes's own approval prompt for a plugin's commands need seams Hermes does not
-offer yet (requested upstream).
+## Not covered
+Publishing GitHub checks from the agent, and rework metrics. Buttons on the pushed notification itself and Hermes's
+own approval prompt for a plugin's commands need seams Hermes does not offer yet.

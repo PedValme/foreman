@@ -66,7 +66,7 @@ def find_browser(explicit):
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--out", default=str(ROOT / "trabajo" / "panel-screenshots"))
+    parser.add_argument("--out", default=str(ROOT / "examples" / "panel-preview" / "out" / "screenshots"))
     parser.add_argument("--browser")
     parser.add_argument("--only", help="substring of the shot names to take")
     args = parser.parse_args(argv)

@@ -237,7 +237,7 @@ class SkipMarkers(unittest.TestCase):
         self.assertTrue(one("this." + "skip()", "tests/a.test.js"))
 
     def test_outside_test_files_only_a_marker_written_as_code_counts(self):
-        # DECISIONES.md, 2026-11-10: Foreman's own detector (a regex) and a shell script (a fixture it writes) were
+        # docs/decisions/0006.md: Foreman's own detector (a regex) and a shell script (a fixture it writes) were
         # reported as skipped tests. Quoted or commented, a marker switches nothing off outside a test file.
         regex = 'r"@unittest\\.(?:' + 'skip|expectedFailure)\\b",'
         self.assertEqual(one(regex, "plugin/foreman/detector.py"), [])
