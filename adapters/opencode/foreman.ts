@@ -324,8 +324,8 @@ export default {
     // Python side counts the nudges (three in all at most); this side also stops at three per run, so a Python side
     // that cannot save its count never loops. That review starts a session of OpenCode and waits for it, so the
     // answer gets a command's time, and the session's model goes with the request, for the review's default
-    // reviewer. OpenCode waits for this hook (seen on 2.3.2: a hook that took 45 seconds held the run until it
-    // returned). Experimental in OpenCode.
+    // reviewer. OpenCode waits for this hook (seen on 2.3.2: a hook that took 45 seconds in `opencode run`, and 90
+    // in the TUI, held the run until it returned, and a send-back then continued it). Experimental in OpenCode.
     await ctx.session.hook("experimental.idle", async (event: any) => {
       const session = String(event.sessionID ?? "")
       const background = Array.isArray(event.background) ? event.background : []
@@ -341,6 +341,15 @@ export default {
           fault(session, e as Error)
         }
       }
+      // A send-back first: it may carry a review that was paid for, and an error from earlier in the run waits for
+      // the end of the run, when it is shown below.
+      if (answer.action === "continue" && answer.message) {
+        sentBack.set(session, (sentBack.get(session) ?? 0) + 1)
+        await ctx.session.synthetic({ sessionID: session, text: answer.message, metadata: { source: "foreman" } })
+        return // the run goes on
+      }
+      active.delete(session)
+      sentBack.delete(session)
       const error = failed.get(session)
       if (error) {
         // OpenCode has no notice a plugin can show; a failed session hook is the one error the person sees. Once
@@ -350,13 +359,6 @@ export default {
         throw new Error(`${error} Until that is fixed its gate does not inspect this session's calls; the `
                         + "git and gh commands it would inspect come to you first.")
       }
-      if (answer.action === "continue" && answer.message) {
-        sentBack.set(session, (sentBack.get(session) ?? 0) + 1)
-        await ctx.session.synthetic({ sessionID: session, text: answer.message, metadata: { source: "foreman" } })
-        return // the run goes on
-      }
-      active.delete(session)
-      sentBack.delete(session)
     })
 
     // `/foreman <args>` as a server command: code, no model turn. OpenCode shows a command's error to the person and

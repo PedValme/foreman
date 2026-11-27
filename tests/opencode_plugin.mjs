@@ -183,7 +183,9 @@ if (scenario === "gate") {
   // the Python side answers (here a stand-in on PATH that always sends the agent back and logs each request).
   answerModel = { providerID: "p", id: "m", variant: "high" } // as in `opencode run`: only the messages state it
   await prompt()
-  for (let i = 0; i < 4; i++) await idle()                 // the fourth end is not sent back: the run is over
+  out.failedCall = await tool("shell", { command: "ls fail-here" }) // the stand-in fails this one request
+  out.idles = []
+  for (let i = 0; i < 4; i++) out.idles.push(await idle())   // the fourth end is not sent back: the run is over
   out.synthetic = seen.synthetic.length
   await prompt("s1", "m9")                                   // a new run starts its own count
   await idle()

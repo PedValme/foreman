@@ -109,7 +109,7 @@ of `examples/cart` with the link above:
   change until three send-backs or four reviews (then it waits for you: `/foreman review` reviews it and gives the
   four back). It costs one more OpenCode session on each such run, on your account, and the run waits for it (the
   plugin gives the end of a turn ten minutes; OpenCode 2.3.2 was seen holding a run for an end-of-turn hook that
-  took 45 seconds). Seen with `opencode run --auto`: with an assertion loosened to "is true" in the working tree and
+  took 45 seconds with `opencode run`, and 90 seconds in the TUI, where the agent sent back after it went on). Seen with `opencode run --auto`: with an assertion loosened to "is true" in the working tree and
   the agent asked for a one-line change elsewhere, the review (the session's own model) found the loosened
   assertion, the agent was sent back, put the exact value back, and the next review passed.
 - **Your command through the server part** (the apps, the HTTP API, the SDK, a TUI without the TUI part):

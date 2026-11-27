@@ -19,6 +19,8 @@ import json, os, sys
 request = json.loads(sys.stdin.read())
 with open(os.environ["FOREMAN_TEST_LOG"], "a", encoding="utf-8") as fh:
     fh.write(json.dumps(request) + "\\n")
+if "fail-here" in str(request.get("command")):
+    sys.exit(3)
 print(json.dumps({"action": "continue", "message": "go back"} if request.get("event") == "turn_end" else {}))
 """
 
@@ -39,7 +41,11 @@ class TurnCap(GitRepoCase):
                            capture_output=True, env=env, timeout=120)
         self.assertEqual(r.returncode, 0, r.stderr.decode())
         out = json.loads(r.stdout.decode())
+        self.assertTrue(out["failedCall"]["ok"])    # Foreman's own failure does not hold the call up...
         self.assertEqual(out["synthetic"], 3)       # four ends of the same run, three send-backs
+        # ...nor a send-back: each is delivered, and the error reaches the person when the run ends
+        self.assertEqual([i["ok"] for i in out["idles"]], [True, True, True, False])
+        self.assertIn("Foreman could not run (exit code 3", out["idles"][3]["error"])
         self.assertEqual(out["afterNewRun"], 4)     # a new run is sent back again
         self.assertEqual(len(out["ends"]), 4)       # past the bound the Python side is not even asked
         self.assertEqual({e.get("model") for e in out["ends"]}, {"p/m#high"})
