@@ -215,6 +215,13 @@ def lines_of(text: Optional[str], keepends: bool = False) -> list:
     return [p[:-1] if p.endswith("\r") else p for p in pieces]
 
 
+def pieces(line: str) -> list:
+    """One line of a file (as git counts lines) cut wherever a reader might break it (``str.splitlines``: a lone
+    "\\r", "\\x0c", "\\x85"…), so a rule anchored at a line's start or a comment that runs to its end judges each
+    piece. The line itself when there is nothing to cut."""
+    return line.splitlines() or [line]
+
+
 def _norm(text: Optional[str]) -> str:
     return " ".join((text or "").split())
 
@@ -520,7 +527,10 @@ def _iter_new_side(diff: str, deadline: Optional[float] = None):
             added = "+" in prefix
             if not added:
                 old_left -= 1
-            yield path, line, ("+" if added else " ") + body, added, hunk
+            # Counted as git counts it, judged as a language may read it: Python's tokenizer and YAML also break
+            # a line at a lone "\r" (and splitlines at more), so each piece is read on its own, at the same line.
+            for piece in pieces(body):
+                yield path, line, ("+" if added else " ") + piece, added, hunk
             new_left -= 1
             line += 1
             continue
@@ -553,7 +563,8 @@ def _iter_removed(diff: str, deadline: Optional[float] = None):
             if "-" in prefix:
                 old_left -= 1
                 if ncols == 1:
-                    yield path, body
+                    for piece in pieces(body):
+                        yield path, piece
                 continue
             if "+" not in prefix:
                 old_left -= 1
@@ -879,7 +890,7 @@ def _make_rules(text: Optional[str]) -> tuple:
     """(target -> (prerequisites, recipe lines), variable -> value) of a Makefile text. Recipe lines continue
     after a backslash and across conditional directives."""
     rules, variables, current, continued = {}, {}, [], False
-    for raw in (text or "").splitlines():
+    for raw in lines_of(text):  # make breaks lines at "\n" only
         if raw.startswith("\t") or (continued and current):
             for t in current:
                 rules[t][1].append(raw.strip())

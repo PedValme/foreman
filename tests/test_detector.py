@@ -597,6 +597,50 @@ class BreaksInsideALine(GitRepoCase):
                 self.assertIn(("secret-history", "app.py"), [(f.rule, f.file) for f in report.blockers])
                 self.git("reset", "-q", "--hard", base)
 
+    # A lone "\r" ends a line for Python and YAML although git does not count it: what follows it on the same line
+    # is judged as a line of its own (rules anchored at a line's start, a comment that runs to the line's end).
+    SAME_LINE = {
+        "tests/test_y.py": ("import unittest\nfrom unittest import skip\n\n\nclass T(unittest.TestCase):\n"
+                            "    x = 1{sep}    @skip('no')\n    def test_a(self):\n        pass\n", "test-skipped"),
+        "lib/helper.py": ("import pytest\n# note{sep}skip_all = pytest.mark." + "skip\n", "test-skipped"),
+        "config.yml": ("a: 1{sep}pass" + "word: Zq8vR2mXk9LpW3tY\n", "secret"),
+    }
+
+    def test_what_follows_on_the_same_line_is_judged_untracked_staged_and_in_history(self):
+        self.write("README.md", "x\n")
+        self.commit("base")
+        base = self.git("rev-parse", "HEAD").strip()
+        for sep in ("\r", "\x0c", "\x85"):
+            with self.subTest(sep=repr(sep)):
+                for path, (text, _rule) in self.SAME_LINE.items():
+                    self.write(path, text.format(sep=sep))
+                want = sorted((rule, path) for path, (_text, rule) in self.SAME_LINE.items())
+                self.assertEqual(self.scan(), want)  # untracked
+                self.git("add", "-A")
+                self.assertEqual(self.scan(), want)  # staged
+                self.commit("add")
+                for path in self.SAME_LINE:
+                    os.remove(os.path.join(self.root, *path.split("/")))
+                self.commit("remove")
+                report = detector.scan_range(detector.Repo(self.root), base)
+                self.assertIn(("secret-history", "config.yml"), [(f.rule, f.file) for f in report.blockers])
+                self.git("reset", "-q", "--hard", base)
+
+    def test_a_write_that_puts_a_skip_after_a_lone_cr_is_refused(self):
+        from foreman import gate
+        old = "import unittest\nfrom unittest import skip\n\n\nclass T(unittest.TestCase):\n    def test_a(self):\n" \
+              "        pass\n"
+        new = old.replace("    def test_a", "    x = 1\r    @skip('no')\n    def test_a")
+        self.assertEqual(gate._new_marker_lines(old, new, path="tests/test_y.py"),
+                         [("@skip('no')", "def test_a(self):")])
+
+    def test_a_makefile_recipe_is_read_as_make_reads_it(self):
+        self.write("Makefile", "test:\n\tpytest\n")
+        self.commit("base")
+        for sep in ("\x0c", "\x0b", "\x1c"):
+            self.write("Makefile", "test:\n\tpytest" + sep + "|| true\n")  # one recipe line for make
+            self.assertEqual(self.scan(), [("check-changed", "Makefile")], repr(sep))
+
     def test_a_crlf_file_still_reads_line_by_line(self):
         self.write("tests/test_win.py", "def test_one():\r\n    assert True\r\n")
         self.commit("base")

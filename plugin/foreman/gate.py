@@ -1367,8 +1367,10 @@ def _new_marker_lines(old_text: str, new_text: str, new_file: bool = False, path
     def counts(kind):
         return kind == "skip" or (kind == "conditional" and not new_file)
 
-    before = Counter(" ".join(l.split()) for l in detector.lines_of(old_text) if detector.skip_marker_at(l, path))
-    lines = detector.lines_of(new_text)
+    before = Counter(" ".join(l.split()) for l in (old_text or "").splitlines() if detector.skip_marker_at(l, path))
+    # every place a reader may break a line (a lone "\r" ends a line for Python): what the write would add is judged
+    # piece by piece, as ``_read`` already reads the old side
+    lines = (new_text or "").splitlines()
     added = []
     for i, l in enumerate(lines):
         if counts(detector.skip_marker_at(l, path)):
