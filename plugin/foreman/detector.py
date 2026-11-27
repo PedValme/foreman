@@ -527,10 +527,7 @@ def _iter_new_side(diff: str, deadline: Optional[float] = None):
             added = "+" in prefix
             if not added:
                 old_left -= 1
-            # Counted as git counts it, judged as a language may read it: Python's tokenizer and YAML also break
-            # a line at a lone "\r" (and splitlines at more), so each piece is read on its own, at the same line.
-            for piece in pieces(body):
-                yield path, line, ("+" if added else " ") + piece, added, hunk
+            yield path, line, ("+" if added else " ") + body, added, hunk
             new_left -= 1
             line += 1
             continue
@@ -563,8 +560,7 @@ def _iter_removed(diff: str, deadline: Optional[float] = None):
             if "-" in prefix:
                 old_left -= 1
                 if ncols == 1:
-                    for piece in pieces(body):
-                        yield path, piece
+                    yield path, body
                 continue
             if "+" not in prefix:
                 old_left -= 1
@@ -718,6 +714,18 @@ def next_nonempty(lines: Iterable[str]) -> str:
 
 def _line_finding(path, line, text, history: bool = False, new_files=frozenset(), before=(), after=(),
                   version_of: Optional[Callable[[str], str]] = None) -> Optional[Finding]:
+    """The finding of one added line, or None. The line is counted as git counts it (``lines_of``); its content is
+    judged whole and, when a language may break it (Python and YAML end a line at a lone "\\r"), piece by piece:
+    the first finding counts. Only a search for something wrong sees the pieces; the windows ``before`` and
+    ``after`` stay whole lines, so a piece cannot end a step or stand in for a definition."""
+    for candidate in [text] + [text[:1] + p for p in (pieces(text[1:]) if len(pieces(text[1:])) > 1 else [])]:
+        f = _one_line_finding(path, line, candidate, history, new_files, before, after, version_of)
+        if f:
+            return f
+    return None
+
+
+def _one_line_finding(path, line, text, history, new_files, before, after, version_of) -> Optional[Finding]:
     allowed, content = MARKER in text, text[1:]
     if has_secret(text, path):
         rule = "secret-history" if history else ("env-file" if _is_env_file(path) else "secret")

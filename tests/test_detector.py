@@ -634,6 +634,23 @@ class BreaksInsideALine(GitRepoCase):
         self.assertEqual(gate._new_marker_lines(old, new, path="tests/test_y.py"),
                          [("@skip('no')", "def test_a(self):")])
 
+    def test_a_piece_never_clears_or_bounds_a_finding(self):
+        # Only the search for something wrong sees a line's pieces: an attribute line, a test definition still
+        # there, the end of a workflow step are read from whole lines.
+        self.write("a.py", "x = 1\n")
+        self.write("tests/test_a.py", "def test_a():\n    assert True\n")
+        self.write(".github/workflows/ci.yml", "jobs:\n  t:\n    steps:\n      - name: tests\n        run: pytest\n")
+        self.commit("base")
+        self.write(".gitattributes", "*.py\r-diff\n")  # git reads the "\r" as a blank: the diff of every .py is off
+        self.assertIn(".gitattributes", [f for _r, f in self.scan()])
+        os.remove(os.path.join(self.root, ".gitattributes"))
+        self.write("tests/test_a.py", "def _test_a():\n    assert True\n#\x0cdef test_a():\n")  # still a comment
+        self.assertEqual(self.scan(), [("test-skipped", "tests/test_a.py")])
+        self.git("checkout", "-q", "tests/test_a.py")
+        self.write(".github/workflows/ci.yml", "jobs:\n  t:\n    steps:\n      - name: tests\n        run: pytest\n"
+                   "        # n\x85- name: other\n        continue-on-error: true\n")
+        self.assertEqual(self.scan(), [("check-weakened", ".github/workflows/ci.yml")])
+
     def test_a_makefile_recipe_is_read_as_make_reads_it(self):
         self.write("Makefile", "test:\n\tpytest\n")
         self.commit("base")
