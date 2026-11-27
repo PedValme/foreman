@@ -251,7 +251,7 @@ class InEachHarness(TurnsCase):
         with open(reviewer._config_path(), "w", encoding="utf-8") as fh:
             json.dump({"each_turn": {name: True}}, fh)
 
-    def test_it_is_off_by_default_everywhere_and_never_on_where_the_hook_cannot_wait(self):
+    def test_it_is_off_by_default_everywhere_and_on_where_the_person_turns_it_on(self):
         from foreman_hosts import claude_code, codex, opencode
         hosts = {"claude-code": claude_code.host({}, {}), "codex": codex.host({}, {}), "pi": pi.host({}),
                  "opencode": opencode.host({})}
@@ -259,18 +259,31 @@ class InEachHarness(TurnsCase):
             self.assertFalse(reviewer.each_turn(host), name)
         for name, host in hosts.items():
             self.turn_on(name)
-            self.assertEqual(reviewer.each_turn(host), name != "opencode", name)
+            self.assertTrue(reviewer.each_turn(host), name)
 
-    def test_opencode_does_not_offer_it_and_starts_no_reviewer_even_with_the_file_set(self):
+    def test_opencodes_end_of_turn_reviews_with_the_sessions_model(self):
         from foreman_hosts import opencode
         with mock.patch.object(opencode, "_fresh_session", self.fake):
-            host = opencode.host({})
-            reply = reviewer.configure(host, "every-turn on")
-            self.assertIn("not available in OpenCode yet", reply)
-            self.assertNotIn("every-turn on` also", reviewer.configure(host, ""))  # nor is it advertised there
-            self.turn_on("opencode")
-            self.assertIsNone(self.turn("t1", {"cart.py": "def total():\n    return 3\n"}, host=host))
-        self.assertEqual(self.sessions, [])
+            self.assertIn("every-turn on` also", reviewer.configure(opencode.host({}), ""))  # offered there
+            reply = neutral.answer(opencode.host({"event": "command", "args": "reviewer every-turn on",
+                                                  "cwd": self.root, "attended": True}),
+                                   {"event": "command", "args": "reviewer every-turn on", "cwd": self.root,
+                                    "attended": True})["reply"]
+            self.assertIn("is on in OpenCode", reply)
+            self.answer = LOOSENED
+            path = os.path.join(self.root, "tests", "test_cart.py")
+            loosened = "def test_total():\n    assert total()\n"
+            base = {"cwd": self.root, "session": "ses_1", "turn": "msg_1"}
+            for request in ({"event": "turn_start", **base},
+                            {"event": "write", "path": path, "content": loosened, **base}):
+                self.assertEqual(neutral.answer(opencode.host(request), request), {})
+            self.write("tests/test_cart.py", loosened)
+            request = {"event": "turn_end", "model": "p/m#high", **base}
+            out = neutral.answer(opencode.host(request), request)
+        self.assertEqual(out["action"], "continue")
+        self.assertIn("review sent this change back (bounce 1 of 3)", out["message"])
+        self.assertIn("[BLOCKING] tests/test_cart.py:2", out["message"])
+        self.assertEqual(self.sessions, [("p/m#high", "")])  # the session's model; a variant is part of its name
 
     def test_claude_codes_stop_hook_reviews_with_the_sessions_effort(self):
         from foreman_hosts import claude_code

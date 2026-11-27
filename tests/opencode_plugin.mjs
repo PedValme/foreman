@@ -1,7 +1,7 @@
 // Drives adapters/opencode/foreman.ts with a stand-in for OpenCode's plugin context, against the real Python side.
 // Run by tests/test_hosts_opencode.py with node or bun: `<runtime> tests/opencode_plugin.mjs <repo> <scenario>`.
 // Prints one JSON object with what the plugin did; the Python test judges it.
-import { writeFileSync } from "node:fs"
+import { readFileSync, writeFileSync } from "node:fs"
 import { pathToFileURL } from "node:url"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -120,7 +120,9 @@ if (scenario === "gate") {
   await prompt()
   out.shell = await tool("shell", { command: "perl -pi -e s/x/y/ " + rest[0] })
   if (rest[1] !== undefined) writeFileSync(join(repo, rest[0]), rest[1]) // what that command did
+  const before = delays.length
   out.first = await idle()
+  out.idleDelay = delays[before]                             // the end of a turn may wait for a review
   out.second = await idle()
   out.synthetic = seen.synthetic
 } else if (scenario === "talk") {
@@ -168,6 +170,18 @@ if (scenario === "gate") {
   out.modelOf = [module.modelOf({ model: { providerID: "a", id: "b", variant: "max" } }),
                  module.modelOf({ model: { providerID: "a", id: "b" } }), module.modelOf({}), module.modelOf(null),
                  module.modelOf({ model: { providerID: "a" } })]
+} else if (scenario === "turn-cap") {
+  // The end of a turn carries the session's model, and the plugin sends a run back at most three times whatever
+  // the Python side answers (here a stand-in on PATH that always sends the agent back and logs each request).
+  sessionModel = { providerID: "p", id: "m", variant: "high" }
+  await prompt()
+  for (let i = 0; i < 4; i++) await idle()                 // the fourth end is not sent back: the run is over
+  out.synthetic = seen.synthetic.length
+  await prompt("s1", "m9")                                   // a new run starts its own count
+  await idle()
+  out.afterNewRun = seen.synthetic.length
+  out.ends = readFileSync(rest[0], "utf-8").trim().split("\n").map((line) => JSON.parse(line))
+    .filter((r) => r.event === "turn_end")
 } else if (scenario === "reviewer-env") {
   out.registered = Object.keys(hooks)
   out.commands = Object.keys(commands)

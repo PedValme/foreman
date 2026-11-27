@@ -310,6 +310,7 @@ class Plugin(OpenCodeCase):
         self.assertTrue(out["first"]["ok"])
         self.assertTrue(out["second"]["ok"])
         self.assertEqual(len(out["synthetic"]), 1)  # once: the Python side counts, the plugin adds no loop
+        self.assertEqual(out["idleDelay"], 600_000)  # a command's time: the end of a turn may wait for a review
         self.assertEqual(out["synthetic"][0]["sessionID"], "s1")
         self.assertIn("tests/test_cart.py:4", out["synthetic"][0]["text"])
 

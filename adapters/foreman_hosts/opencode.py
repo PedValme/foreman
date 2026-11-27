@@ -309,6 +309,7 @@ def host(request=None) -> core.Host:
         fresh_session=_fresh_session(), efforts=(), session=lambda: neutral.session(request),
         # Merge and reject too, for the person at the TUI; through the server command they find nobody attending.
         reviewer_caveat=CAVEAT, board=core.BOARD_READS + core.BOARD_WRITES, attended_where=ATTENDED_WHERE,
+        turn_review=True,  # the plugin gives the end of a turn a command's time (adapters/opencode/foreman.ts)
     )
 
 

@@ -19,7 +19,8 @@ export type Question = { id: string; question: string; options: Option[] }
 export type Answer = { action?: string; message?: string; reply?: string; question?: Question }
 
 const TIMEOUT_MS = 30_000 // the protocol's limit; the gate's own budget is 18 s
-export const COMMAND_MS = 600_000 // a `command` request: the review starts a session of OpenCode and waits for it
+export const COMMAND_MS = 600_000 // a `command` or `turn_end` request: the review starts a session of OpenCode
+const MAX_SENT_BACK = 3 // neutral.py: a run is sent back at most three times (the gate once, the review's bounces)
 const PERMISSION = "foreman" // the action Foreman's questions carry in OpenCode's permission mechanism
 const PERSON_MS = 1_000 // a yes sooner than this after the question was not typed by a person
 const SHELL_TOOL = "shell"
@@ -188,6 +189,7 @@ export default {
     const turns = new Map<string, string>()   // session -> the id of the person's prompt that started its current run
     const failed = new Map<string, string>()  // session -> why Foreman could not run, not yet shown to the person
     const shown = new Set<string>()           // sessions already shown that error
+    const sentBack = new Map<string, number>() // session -> how many times its current run was already sent back
 
     const fault = (session: string, error: Error): string => {
       const text = `Foreman could not run (${error.message}).`
@@ -280,6 +282,7 @@ export default {
       const turn = String(event.messageID ?? "")
       if (turns.has(session) && (await running(session))) return
       turns.set(session, turn)
+      sentBack.delete(session)
       active.add(session)
       try {
         await ask({ event: "turn_start", cwd: base, session, turn })
@@ -288,18 +291,29 @@ export default {
       }
     })
 
-    // The session is about to go idle: send the agent back once when its run left a blocker in the working
-    // tree. The Python side counts the nudges; this hook only relays its answer. Experimental in OpenCode.
+    // The session is about to go idle: send the agent back when its run left a blocker in the working tree, and,
+    // where the person turned on the review at the end of every turn, when that review sends the change back. The
+    // Python side counts the nudges (three in all at most); this side also stops at three per run, so a Python side
+    // that cannot save its count never loops. That review starts a session of OpenCode and waits for it, so the
+    // answer gets a command's time, and the session's model goes with the request, for the review's default
+    // reviewer. OpenCode waits for this hook as long as it takes. Experimental in OpenCode.
     await ctx.session.hook("experimental.idle", async (event: any) => {
       const session = String(event.sessionID ?? "")
       const background = Array.isArray(event.background) ? event.background : []
       // The session's own background work wakes it again when it ends: the run is not over yet.
       if (background.some((work: any) => work?.sessionID === session)) return
       let answer: Answer = {}
-      try {
-        answer = await ask({ event: "turn_end", cwd: base, session, turn: turns.get(session) ?? "" })
-      } catch (e) {
-        fault(session, e as Error)
+      if ((sentBack.get(session) ?? 0) < MAX_SENT_BACK) {
+        let model: string | undefined
+        try {
+          model = modelOf(await ctx.session.get({ sessionID: session }))
+        } catch {}
+        try {
+          answer = await ask({ event: "turn_end", cwd: base, session, turn: turns.get(session) ?? "",
+                               ...(model ? { model } : {}) }, HOOK, "python3", COMMAND_MS)
+        } catch (e) {
+          fault(session, e as Error)
+        }
       }
       const error = failed.get(session)
       if (error) {
@@ -311,10 +325,12 @@ export default {
                         + "git and gh commands it would inspect come to you first.")
       }
       if (answer.action === "continue" && answer.message) {
+        sentBack.set(session, (sentBack.get(session) ?? 0) + 1)
         await ctx.session.synthetic({ sessionID: session, text: answer.message, metadata: { source: "foreman" } })
         return // the run goes on
       }
       active.delete(session)
+      sentBack.delete(session)
     })
 
     // `/foreman <args>` as a server command: code, no model turn. OpenCode shows a command's error to the person and
