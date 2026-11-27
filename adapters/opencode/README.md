@@ -102,6 +102,16 @@ of `examples/cart` with the link above:
   one of those in it, Foreman sends the agent back once with what to undo. Seen: after the refused commit above, the
   agent reported and stopped, Foreman sent it back, it removed the skip. A run that only answered "hello", with a skip
   the person had left in the tree, was not sent back.
+- **The review at the end of every turn**, only if you turn it on: `/foreman reviewer every-turn on` (`off` to
+  stop; off by default). When the session is about to go idle after a run that changed code and the gate finds
+  nothing, Foreman starts the reviewer on the change itself, and a verified BLOCKING or HIGH finding sends the agent
+  back with it: never twice for the same diff, at most three times in one run with the gate's own once, and for one
+  change until three send-backs or four reviews (then it waits for you: `/foreman review` reviews it and gives the
+  four back). It costs one more OpenCode session on each such run, on your account, and the run waits for it (the
+  plugin gives the end of a turn ten minutes; OpenCode 2.3.2 was seen holding a run for an end-of-turn hook that
+  took 45 seconds with `opencode run`, and 90 seconds in the TUI, where the agent sent back after it went on). Seen with `opencode run --auto`: with an assertion loosened to "is true" in the working tree and
+  the agent asked for a one-line change elsewhere, the review (the session's own model) found the loosened
+  assertion, the agent was sent back, put the exact value back, and the next review passed.
 - **Your command through the server part** (the apps, the HTTP API, the SDK, a TUI without the TUI part):
   `/foreman` (the board), `verdict`, `pipeline`, `prs`, `issues`, `use`, `status [path]`, `allow [id]`, `review`,
   `reviewer`, `help`: code, no model turn. A server command answers only through an error notice, so the reply
@@ -139,9 +149,12 @@ terminal, a plugin the agent plants):
   merge 3` refused a BLOCKED pull request before any review; `/foreman merge 21`, on a throwaway pull request,
   started the review (an OpenCode session of its own; about a minute with only the "Foreman is working" notice),
   asked "Merge PR #21 of PedValme/foreman-demo (8ef72a5, squash) into main?" in the select dialog and, on Merge,
-  merged it by squash and showed the review's verdict and who reviewed. Only tested, not seen: a rejection carried
-  out (no comment was posted from OpenCode), with a fake `gh`.
-- **Allow**: `/foreman allow <id>` asks you to confirm that finding's id in a dialog first; only tested, not seen.
+  merged it by squash and showed the review's verdict and who reviewed. `/foreman reject 3 <note>` posted the
+  comment on the pull request and showed it in a dialog.
+- **Allow**: `/foreman allow <id>` asks you to confirm that finding's id in a dialog first. Seen: a commit of a
+  skip marked `foreman:allow` was refused with its id; `/foreman allow <id>` asked "Allow the Foreman finding
+  <id>?", Allow answered that it was allowed for 24 hours for that marked line only, and the same commit then
+  passed.
 - **On the home screen** (no session open), a repository pinned with `use` is kept for that TUI's run only, not for
   a session (tested).
 - **The prompt stays yours while Foreman works**: the command returns at once and its dialogs come when they are
@@ -182,9 +195,10 @@ Who reviews is yours: `/foreman reviewer [model]` (`default` to go back), a mode
   servers start (their tools are denied, the servers still run), its global `AGENTS.md` still reaches the model
   (OpenCode has no setting to leave it out), and your plugin modules are imported before `-*` turns them off. Foreman
   cannot close these from the configuration it passes; each review says so in one line under its "Reviewer:" line.
-- **Who reviews by default**: the model this session runs on, when OpenCode's record of the session names it (the
-  plugin sends it), in a clean context and with nothing raised: OpenCode has no effort to raise. With no model in the
-  record it is OpenCode's default model. Either way it is the model that wrote the code: choose another to get a
+- **Who reviews by default**: the model this session runs on, as OpenCode's record of the session names it or, when
+  the record does not (seen in `opencode run`), as the session's latest answer names it (the plugin sends it), in a
+  clean context and with nothing raised: OpenCode has no effort to raise. With no model in either it is OpenCode's
+  default model. Either way it is the model that wrote the code: choose another to get a
   second opinion. Each review says who it was.
 - **Seen** (OpenCode 2.3.2, macOS, an OpenCode Go model, a throwaway copy of `examples/cart`): an assertion loosened
   from an exact value to "is true", which the gate cannot see (CLEAN), came back BLOCKED with the line quoted. The same
@@ -276,5 +290,3 @@ Who reviews is yours: `/foreman reviewer [model]` (`default` to go back), a mode
   do it yourself.
 - Not seen yet: Windows; OpenCode's background service (all runs above used `--standalone`); OpenCode's desktop and
   web apps.
-
-What it does not do yet: the review on every turn (it runs when you ask, and before a merge).

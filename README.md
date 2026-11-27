@@ -64,8 +64,7 @@ The words in that table, once:
 - **The review** is a second look at the diff by a model, for what rules cannot see (an assertion made weaker). In
   Hermes it is by default a second model; in the others, a fresh session of the agent's own program, without
   tools, started by Foreman and never by the agent that wrote the code. It runs on your account there: when you
-  ask for it; before a merge, where `/foreman merge` exists; and, except in OpenCode, at the end of every turn if
-  you turn that on.
+  ask for it; before a merge, where `/foreman merge` exists; and at the end of every turn if you turn that on.
 - **`/foreman`** is your branch and your pull requests, each with Foreman's verdict, and merging or rejecting one
   from there with the reasons. The agent's own `gh pr merge` is always refused; where `/foreman` exists, merging
   is yours, through `/foreman merge`.

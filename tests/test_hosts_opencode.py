@@ -310,6 +310,7 @@ class Plugin(OpenCodeCase):
         self.assertTrue(out["first"]["ok"])
         self.assertTrue(out["second"]["ok"])
         self.assertEqual(len(out["synthetic"]), 1)  # once: the Python side counts, the plugin adds no loop
+        self.assertEqual(out["idleDelay"], 600_000)  # a command's time: the end of a turn may wait for a review
         self.assertEqual(out["synthetic"][0]["sessionID"], "s1")
         self.assertIn("tests/test_cart.py:4", out["synthetic"][0]["text"])
 
@@ -359,6 +360,7 @@ class Plugin(OpenCodeCase):
         self.assertNotIn("only the effort differs", out["sameShown"])
         # a variant is part of the model name: `p/m#high` as the session's own and as the person's choice agree
         self.assertIn("same model", out["variantAgain"])
+        self.assertIn("same model", out["fromAnswer"])  # no model in the record: the latest answer's, not an older one
         self.assertEqual(out["modelOf"], ["a/b#max", "a/b", None, None, None])
 
     def test_the_variable_alone_switches_nothing_off_in_the_plugin(self):
