@@ -67,7 +67,7 @@ enabled"; OpenCode installed `git+https://github.com/PedValme/foreman.git` into 
 | Your commands, no model turn | `/foreman:status` | `foreman status` as a prompt | `/foreman status` | `/foreman status` (TUI, apps) |
 | The board (`/foreman`, `verdict`, `pipeline`, `prs`, `issues`, `use`) | no | no | yes | yes: in a dialog in the TUI (its TUI part), as an error notice elsewhere |
 | Merge and reject with reasons (`/foreman merge`, `reject`) | no | no | yes, confirmed in pi's selector | in the TUI only (its TUI part), confirmed in its select dialog |
-| Allowing a marked finding | typed in an interactive session | not available yet | at pi's interface | confirmed in a TUI dialog (tested, not seen); elsewhere, approved in OpenCode's permission prompt |
+| Allowing a marked finding | typed in an interactive session | not available yet | at pi's interface | confirmed in a TUI dialog; elsewhere, approved in OpenCode's permission prompt |
 | When Foreman must ask you | the permission prompt | refused with the reason | pi's dialog | the permission prompt |
 | With nobody attending | refused | refused | refused | refused |
 | To try it from a clone | `claude --plugin-dir` | `codex -c hooks.…` | `pi -e` | a link in `.opencode/plugins` (to the folder, for the TUI part) |
@@ -142,15 +142,16 @@ turn, `reviewer` says so, and your own `review` reviews it and gives the four re
 shows the change waiting for you). A review that could not run does not hold the turn. It costs one more session
 of the harness on each such turn, on your account, and the turn waits for it (minutes, with nothing shown). The
 agent cannot switch it through a nested harness. Seen on pi 1.5.0: the agent loosened an assertion, the review
-sent it back once and the agent put the exact value back. In Claude Code and Codex it was run in the tests,
-through their `Stop` hooks, and not seen in a session. OpenCode does not offer it: its plugin stops waiting for
-the end of a turn after thirty seconds, so a review started there would be paid for and never read.
+sent it back once and the agent put the exact value back. Seen in Claude Code 2.1.332, Codex 0.172.0 and
+OpenCode 2.3.2: with an assertion loosened to "is true" in the working tree, the review found it at the end of the
+turn and the agent was sent back with the finding; in OpenCode the agent then put the exact value back and the
+next review passed.
 
 | | Claude Code | Codex | pi | OpenCode |
 |---|---|---|---|---|
 | You ask with | `/foreman:review` | `foreman review` | `/foreman review` | `/foreman review` |
 | You choose who reviews with | `/foreman:reviewer` | a file (not from a prompt) | `/foreman reviewer` | `/foreman reviewer` |
-| At the end of every turn | `/foreman:reviewer every-turn on` (tested, not seen) | the same file (tested, not seen) | `/foreman reviewer every-turn on` (seen) | not yet |
+| At the end of every turn | `/foreman:reviewer every-turn on` | the same file | `/foreman reviewer every-turn on` | `/foreman reviewer every-turn on` |
 | With nothing chosen | the default model, one effort level up once the session's effort is known | the session's model | the session's model, one thinking level up | the session's model |
 | Does the harness say which model wrote the code | no | yes | yes | yes |
 | The answer's form is held by | the harness (a schema) | the harness (a schema) | a seal made for that request | a seal made for that request |
@@ -216,7 +217,9 @@ What it does there, each seen in a real session on Claude Code 2.1.331:
   review says so. It takes as long as that model takes: up to a few minutes with nothing shown meanwhile.
 
 - **The review at the end of every turn**, `/foreman:reviewer every-turn on` (off by default): see "The review in
-  the four". The `Stop` hook waits up to ten minutes for it. Run in the tests, not seen in a session.
+  the four". The `Stop` hook waits up to ten minutes for it. Seen on Claude Code 2.1.332 with `-p`: the review
+  found an assertion loosened to "is true" in the working tree and the `Stop` hook sent the agent back with the
+  finding.
 
 What it does not do: the board, merge and reject with reasons (Foreman on Hermes Agent and on pi have them).
 

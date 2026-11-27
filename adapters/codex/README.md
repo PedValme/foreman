@@ -89,7 +89,9 @@ directory does not exist), the call is refused with the reason; run it yourself 
 The review at the end of every turn is off unless you turn it on, in Foreman's `config.json` like the reviewer
 itself (`{"each_turn": {"codex": true}}`; `foreman reviewer` shows whether it is on): then a turn that changed code
 and passed the gate is reviewed before it ends, and a verified BLOCKING or HIGH finding sends the agent back with
-it. The `Stop` hook waits up to ten minutes for it. Run in the tests, not seen in a session.
+it. The `Stop` hook waits up to ten minutes for it. Seen on Codex 0.172.0 (`codex exec`, the hooks given with
+`-c`): in a turn that left an assertion loosened from an exact value to "is true" in the working tree, the review
+(the session's own model) found it and the `Stop` hook sent the agent back with the finding.
 
 What it does not do: the board, merge and reject with reasons (Foreman on Hermes Agent and on pi have them).
 
