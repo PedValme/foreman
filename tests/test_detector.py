@@ -482,6 +482,21 @@ class DefaultCheckProtection(unittest.TestCase):
                                                                  contents=contents)], ["package.json"])
         same = lambda p: (json.dumps(base), json.dumps(dict(base, version="2.0.0")))
         self.assertEqual(detector.check_changed("npm test", ["package.json"], lambda p: True, contents=same), [])
+        # what a failing run reports, and how tests are found or run, are a choice of tests too
+        for key, value in (("testFailureExitCode", 0), ("passWithNoTests", True), ("testRunner", "./pass.js"),
+                           ("runner", "./pass.js"), ("testSequencer", "./none.js"), ("preset", "./weak"),
+                           ("moduleFileExtensions", ["js"])):
+            self.assertEqual(f(dict(base, jest=dict(base["jest"], **{key: value}))), ["`jest.%s` in package.json" % key])
+        with_roots = dict(no_key, jest={"roots": ["s"]})
+        self.assertEqual(detector.default_check_changes("package.json", json.dumps(with_roots), json.dumps(no_key)),
+                         ["`jest.roots` in package.json"])  # the setting removed
+        self.assertEqual([x.rule for x in one('  "testPathIgnorePatterns": ["tests/"],', "jest.config.json")],
+                         ["check-weakened"])  # read like jest.config.js
+        # a workspace package Jest reads (a root's `projects`), with no scripts of its own
+        ws = {"name": "a", "jest": {"testMatch": ["**/*.test.js"]}}
+        self.assertEqual(detector.default_check_changes("packages/a/package.json", json.dumps(ws), json.dumps(
+            dict(ws, jest={"testMatch": ["**/*.test.js"], "testPathIgnorePatterns": ["."]}))),
+            ["`jest.testPathIgnorePatterns` in packages/a/package.json"])
 
     def test_what_the_entry_points_delegate_to(self):
         base = json.dumps({"scripts": {"test": "npm run test:unit && yarn e2e", "test:unit": "jest", "e2e": "playwright",

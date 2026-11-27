@@ -146,7 +146,7 @@ TEST_RUNNER = re.compile(r"(?i)\b(?:pytest|py\.test|jest|vitest|mocha|tox|nox|un
                          r"test|go\s+test|cargo\s+test|make\s+(?:test|check))\b")
 PYTEST_CONFIG = re.compile(r"(^|/)(pytest\.ini|setup\.cfg|pyproject\.toml|tox\.ini)$", re.I)
 PYTEST_DROP = re.compile(r"--(?:deselect|ignore|ignore-glob)(?:=|\s+)([^\s\"',\]]+)")
-JS_TEST_CONFIG = re.compile(r"(^|/)(jest|vitest)\.config\.[cm]?[jt]s$", re.I)
+JS_TEST_CONFIG = re.compile(r"(^|/)(jest|vitest)\.config\.(?:[cm]?[jt]s|json)$", re.I)
 JS_TEST_DROP = re.compile(r"\btestPathIgnorePatterns\b|\bexclude\s*:")
 _STEP_WINDOW = 8  # at most this many new-side lines around a workflow line, within the same step
 STEP_START = re.compile(r"^\s*-\s")                         # a new step (or list item) in the YAML
@@ -841,10 +841,18 @@ def scripts_of(package_json: Optional[str]):
     return data.get("scripts") if isinstance(data, dict) else None
 
 
-# Jest's settings that choose which tests run: in a package.json's "jest" key they switch tests off as the same
-# lines in jest.config.* do (testPathIgnorePatterns there is a check-weakened line).
+# Jest's settings that choose which tests run, or what a failing run reports: in a package.json's "jest" key they
+# switch tests off as the same lines in jest.config.* do (testPathIgnorePatterns there is a check-weakened line).
 JEST_SELECTION = ("testPathIgnorePatterns", "modulePathIgnorePatterns", "testMatch", "testRegex", "roots", "rootDir",
-                  "projects", "testPathPattern", "testNamePattern")
+                  "projects", "testPathPattern", "testNamePattern", "moduleFileExtensions", "preset", "testRunner",
+                  "runner", "testSequencer", "testFailureExitCode", "passWithNoTests")
+
+
+def _is_json_object(text: Optional[str]) -> bool:
+    try:
+        return isinstance(json.loads(text or ""), dict)
+    except ValueError:
+        return False
 
 
 def jest_selection_of(package_json: Optional[str]):
@@ -1004,12 +1012,16 @@ def default_check_changes(path: str, old: Optional[str], new: Optional[str]) -> 
         return []
     if name == "package.json":
         before, after = scripts_of(old), scripts_of(new)
-        if not isinstance(before, dict):
+        if not _is_json_object(old):
             return []
+        before = before if isinstance(before, dict) else {}
         after = after if isinstance(after, dict) else {}
         protected = _protected_scripts(before)
         changed = ["`scripts.%s` in %s" % (k, path) for k in protected if new is None or after.get(k) != before[k]]
-        if protected and new is not None:  # the tests run through this package.json: Jest's choice of them counts
+        has_jest = isinstance((json.loads(old) if _is_json_object(old) else {}).get("jest"), dict)
+        if (protected or has_jest) and new is not None:
+            # the tests run through this package.json, or Jest reads it (a workspace package under a root's
+            # `projects`): Jest's choice of the tests counts
             jest_before, jest_after = jest_selection_of(old) or {}, jest_selection_of(new) or {}
             changed += ["`jest.%s` in %s" % (k, path) for k in JEST_SELECTION
                         if jest_before.get(k) != jest_after.get(k)]
