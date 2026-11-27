@@ -536,9 +536,11 @@ a quoted string or a comment does not, except in the files that run the check (C
   When nothing qualifies, Foreman says it cannot tell and asks for a path or `workdir`. When a slash command reaches a
   running gateway before the agent has used the terminal in that session, use `/foreman use <path>`.
 - In a shared chat, anyone Hermes authorises can type `/foreman merge … --yes`: restrict who can talk to your Hermes.
-- Only a plain `gh pr merge` is blocked as a merge: a merge through `gh api` (`-X PUT …/pulls/7/merge`), an approval with
-  `gh pr review --approve`, or a direct `git push` to the base branch (inspected only as a push) is not. Protect the
-  base branch on GitHub (required pull request and checks).
+- A merge is blocked as `gh pr merge` and as `gh api` to GitHub's merge endpoints (`-X PUT …/pulls/7/merge`,
+  `POST …/merges`, a GraphQL `mergePullRequest` or `enablePullRequestAutoMerge`; a GraphQL query Foreman cannot
+  read counts as one). An approval with `gh pr review --approve`, a merge through another client (`curl` to the
+  API), or a direct `git push` to the base branch (inspected only as a push) is not. Protect the base branch on
+  GitHub (required pull request and checks).
 - Foreman's state (stored reviews and their cache, the pipeline, the grants) is plain files: a deliberate write that
   gets past the text guard (for example through `execute_code`) could forge a stored PASS. The guard is best effort;
   the required CI check is where independence is real.
@@ -561,6 +563,9 @@ same-model warning compares with the main model in your config, not one you swit
   tests run (`testPathIgnorePatterns`, `testMatch`, `roots` and the like) counts as a change to the check, as its
   `scripts` already did; before, `"jest": {"testPathIgnorePatterns": ["tests/"]}` took the tests out unseen. A
   `jest.config.json` is read like `jest.config.js`.
+- **A merge through `gh api` is refused like `gh pr merge`.** The agent's `gh api` call to GitHub's merge endpoints,
+  or a GraphQL mutation that merges or arms an automatic merge, was let through. gh's `{owner}`/`{repo}`
+  placeholders no longer split a command in two.
 - **A review recorded again adds no line to the pipeline.** The same review of the same diff, recorded by the
   review tool and again by the finish loop, showed twice in a change's events.
 

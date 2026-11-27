@@ -36,7 +36,7 @@ _MAX_READ_BYTES = 2 * 1024 * 1024
 # independent linear searches: one regex spanning both words with ``[\s\S]*`` between them is quadratic on a long
 # command that names git many times without a verb (a 260 KB heredoc took 98 s, past Hermes's hook timeout).
 _QUICK_TOOL = re.compile(r"\b(?:git|gh)(?:\.exe)?\b", re.I)
-_QUICK_VERB = re.compile(r"\b(?:commit|push|pr|config)\b", re.I)
+_QUICK_VERB = re.compile(r"\b(?:commit|push|pr|config|api)\b", re.I)
 _REDIR = re.compile(r">>?(?:&(?:\d+|-))?")
 
 
@@ -127,7 +127,10 @@ def tokenize(command: str) -> list:
             tokens.append(_Redir(m.group(0)))
             i += len(m.group(0))
             continue
-        elif c == "\n" or c in ";|&(){}":
+        elif c == "\n" or c in ";|&()" or (c in "{}" and not has_word and (
+                c == "}" or i + 1 >= n or command[i + 1] in " \t\r\n")):
+            # a brace groups commands only as a word of its own (`{ git commit; }`); inside a word it is text
+            # (`repos/{owner}/{repo}`, gh's placeholders)
             flush()
             op = command[i:i + 2] if command[i:i + 2] in ("&&", "||") else c
             tokens.append(_Op(op))
@@ -516,12 +519,82 @@ def _parse_gh(words: list, cwd: str, located: bool):
         return i
 
     i = skip_flags(0)
+    if i < len(words) and words[i] == "api":
+        target = _api_merge(words[i + 1:], cwd)
+        if target is not None:
+            return Action("pr-merge", cwd, [target] if target else [], located=located), "api"
+        return None, "api"
     if i < len(words) and words[i] == "pr":
         j = skip_flags(i + 1)  # gh pr -R owner/repo merge 5: the persistent flag may come after "pr"
         if j < len(words) and words[j] in ("create", "merge"):
             return Action("pr-" + words[j], cwd, words[j + 1:], located=located), words[j]
         return None, words[j] if j < len(words) else ""
     return None, words[i + 1] if i + 1 < len(words) else ""
+
+
+# `gh api` options that take a value (the endpoint is the first word that is neither an option nor its value).
+_API_VALUE_OPTS = {"-X", "--method", "-f", "--raw-field", "-F", "--field", "-H", "--header", "--input", "-q", "--jq",
+                   "-t", "--template", "--hostname", "-p", "--preview", "--cache"}
+_API_FIELD_OPTS = {"-f", "--raw-field", "-F", "--field"}
+# REST endpoints that merge: a pull request (`PUT …/pulls/7/merge`) and a branch into another (`POST …/merges`).
+_API_PR_MERGE = re.compile(r"(?:^|/)repos/[^/]+/[^/]+/pulls/([^/?#]+)/merge/?(?:[?#].*)?$")
+_API_BRANCH_MERGE = re.compile(r"(?:^|/)repos/[^/]+/[^/]+/merges/?(?:[?#].*)?$")
+# GraphQL mutations that merge, or arm a merge for later.
+_API_GRAPHQL_MERGE = re.compile(r"\b(?:mergePullRequest|enablePullRequestAutoMerge|mergeBranch|"
+                                r"enqueuePullRequest)\b")
+
+
+def _api_merge(args: list, cwd: str) -> Optional[str]:
+    """For ``gh api <args>``: the pull request it merges (its number, or "" when it names none), or None when the
+    call does not merge. A call that reaches GitHub's merge endpoints, or a GraphQL mutation that merges, is a
+    merge like ``gh pr merge`` (rule 18). A GraphQL query Foreman cannot read (stdin, a missing file) counts as one:
+    it cannot tell, and the call is refused rather than let through."""
+    endpoint, method, fields, inputs, i = None, None, [], [], 0
+    while i < len(args):
+        a = args[i]
+        name, eq, inline = a.partition("=") if a.startswith("--") else (a, "", "")
+        if not eq and len(a) > 2 and a[:2] in ("-X", "-f", "-F", "-H", "-q", "-t", "-p") and not a.startswith("--"):
+            name, inline, eq = a[:2], a[2:], "="  # -XPUT, -fquery=…
+        if name in _API_VALUE_OPTS:
+            value = inline if eq else (args[i + 1] if i + 1 < len(args) else "")
+            i += 1 if eq else 2
+            if name in ("-X", "--method"):
+                method = value.upper()
+            elif name in _API_FIELD_OPTS:
+                fields.append(value)
+            elif name == "--input":
+                inputs.append(value)
+            continue
+        if not a.startswith("-") and endpoint is None:
+            endpoint = a
+        i += 1
+    if not endpoint:
+        return None
+    method = method or ("POST" if fields or inputs else "GET")
+    path = re.sub(r"^https?://[^/]+/(?:api/v3/)?", "", endpoint).lstrip("/")
+    m = _API_PR_MERGE.search(path)
+    if m and method != "GET":
+        return m.group(1) if m.group(1).isdigit() else ""
+    if _API_BRANCH_MERGE.search(path) and method != "GET":
+        return ""
+    if path.split("?")[0].rstrip("/") != "graphql":
+        return None
+    texts = []
+    for field in fields:
+        key, _, value = field.partition("=")
+        if value.startswith("@"):
+            inputs.append(value[1:])
+        else:
+            texts.append(value)
+    for source in inputs:
+        if source in ("", "-"):
+            return ""  # the query comes from stdin: unseen
+        try:
+            with open(os.path.join(cwd, os.path.expanduser(source)), encoding="utf-8", errors="replace") as fh:
+                texts.append(fh.read(1 << 20))
+        except OSError:
+            return ""  # a file Foreman cannot read: unseen
+    return "" if any(_API_GRAPHQL_MERGE.search(t) for t in texts) else None
 
 
 def _option_values(args: list, short: str, long: str) -> list:
@@ -1285,7 +1358,22 @@ def gate_command(command: str, workdir: Optional[str] = None, task_id: str = "")
     first = parse_actions(command, os.sep)
     if not first:  # nothing gated: skip resolving the session directory
         return None
+    cwd = None
+
+    def where():
+        nonlocal cwd
+        if cwd is None:
+            if workdir and os.path.isabs(os.path.expanduser(workdir)):
+                cwd = os.path.normpath(os.path.expanduser(workdir))  # explicit: never replaced by another candidate
+            else:
+                base = session_cwd(task_id, deadline=deadline) or _UNKNOWN_DIR
+                cwd = _resolve(base, workdir) if workdir else base
+        return cwd
+
     merge = next((a for a in first if a.kind == "pr-merge"), None)
+    if merge is not None and not merge.args:  # `gh api graphql -F query=@q.graphql`: read where the command runs
+        merge = next((a for a in parse_actions(command, where(), located=bool(workdir)) if a.kind == "pr-merge"),
+                     None)
     if merge is not None:  # never `approve`: "always", a session answer or YOLO would let later merges through
         return {"action": "block", "message": "Merging is the user's decision. Ask them to run `/foreman merge %s`."
                 % _merge_target(merge.args)}
@@ -1293,12 +1381,7 @@ def gate_command(command: str, workdir: Optional[str] = None, task_id: str = "")
         return {"action": "block", "message": "Foreman blocked `git config core.hooksPath`: it switches the "
                 "repository's git hooks off or elsewhere. Leave the hooks in place; if a hook fails, fix what it "
                 "reports. If the repository's setup needs it, ask the user to run it."}
-    if workdir and os.path.isabs(os.path.expanduser(workdir)):
-        cwd = os.path.normpath(os.path.expanduser(workdir))  # explicit: never replaced by another candidate
-    else:
-        base = session_cwd(task_id, deadline=deadline) or _UNKNOWN_DIR
-        cwd = _resolve(base, workdir) if workdir else base
-    actions = parse_actions(command, cwd, located=bool(workdir))
+    actions = parse_actions(command, where(), located=bool(workdir))
     if not actions:
         return None
     unknown = [a for a in actions if _inside(a.cwd, _canon(_UNKNOWN_DIR))]
