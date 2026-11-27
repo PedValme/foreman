@@ -646,6 +646,8 @@ class BreaksInsideALine(GitRepoCase):
         os.remove(os.path.join(self.root, ".gitattributes"))
         self.write("tests/test_a.py", "def _test_a():\n    assert True\n#\x0cdef test_a():\n")  # still a comment
         self.assertEqual(self.scan(), [("test-skipped", "tests/test_a.py")])
+        self.write("tests/test_a.py", "x = 1\rdef _test_a():\n    assert True\n")  # the rename after a lone "\r"
+        self.assertEqual(self.scan(), [("test-skipped", "tests/test_a.py")])
         self.git("checkout", "-q", "tests/test_a.py")
         self.write(".github/workflows/ci.yml", "jobs:\n  t:\n    steps:\n      - name: tests\n        run: pytest\n"
                    "        # n\x85- name: other\n        continue-on-error: true\n")

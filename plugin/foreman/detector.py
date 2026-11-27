@@ -679,7 +679,9 @@ def _renamed_tests(rows: list, diff: str, deadline: Optional[float]) -> list:
         net = net_by_path.get(path) if added else None
         if not net:
             continue
-        old = disabled_by_rename(path, net, text[1:])
+        # a search for something wrong: the whole line, then its pieces (``_line_finding``); what is still
+        # defined (``still_*`` above) stays whole lines
+        old = next((o for o in (disabled_by_rename(path, net, c) for c in [text[1:]] + pieces(text[1:])) if o), None)
         if old:
             after = [r[2][1:] for r in rows[i + 1:i + 3] if r[0] == path]
             found.append(finding("test-skipped", path, line, "renamed from `%s`, so the runner no longer collects it"
