@@ -169,7 +169,7 @@ def _closing_quote(text: str, start: int) -> int:
 def split_diff(diff: str) -> list:
     """A unified git diff, one ``FileDiff`` per ``diff --git`` section."""
     files, cur, in_hunk = [], None, False
-    for line in diff.splitlines():
+    for line in detector.lines_of(diff):
         if line.startswith("diff --git "):
             old, new = _header_paths(line)
             cur = FileDiff(path=new or old, old_path=old)
@@ -306,7 +306,7 @@ def _ws(text: str) -> str:
 def _body(text: str) -> tuple:
     """(lines as written in the diff, lines without their one-character diff prefix), headers dropped."""
     raw, bare, in_hunk = [], [], False
-    for line in text.splitlines():
+    for line in detector.lines_of(text):
         if line.startswith("@@"):
             in_hunk = True
             continue

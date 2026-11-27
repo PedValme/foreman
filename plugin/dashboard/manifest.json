@@ -3,7 +3,7 @@
   "label": "Foreman",
   "description": "Backend route for Foreman's Desktop panel; Foreman has no web dashboard page.",
   "icon": "Factory",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "tab": { "path": "/foreman", "hidden": true },
   "entry": "index.js",
   "api": "plugin_api.py"
