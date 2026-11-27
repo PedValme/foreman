@@ -462,6 +462,27 @@ class DefaultCheckProtection(unittest.TestCase):
         self.assertEqual(detector.default_check_changes("web/package.json", base, "{broken"),
                          ["`scripts.test` in web/package.json"])
 
+    def test_jest_settings_in_package_json_that_choose_the_tests(self):
+        base = {"scripts": {"test": "jest"}, "jest": {"moduleNameMapper": {"^x$": "y"}}}
+        f = lambda new: detector.default_check_changes("package.json", json.dumps(base), json.dumps(new))
+        self.assertEqual(f(dict(base, jest={"moduleNameMapper": {"^x$": "y"}, "testPathIgnorePatterns": ["tests/"]})),
+                         ["`jest.testPathIgnorePatterns` in package.json"])  # added where there was none
+        self.assertEqual(f(dict(base, jest={"testMatch": ["**/none/*.js"]})), ["`jest.testMatch` in package.json"])
+        self.assertEqual(f(dict(base, jest={"moduleNameMapper": {"^x$": "z"}})), [])  # not a choice of tests
+        no_key = {"scripts": {"test": "jest"}}
+        self.assertEqual(detector.default_check_changes("package.json", json.dumps(no_key), json.dumps(
+            dict(no_key, jest={"roots": ["src/"]}))), ["`jest.roots` in package.json"])
+        # a package.json the tests do not run through is not an entry point
+        other = {"scripts": {"build": "tsc"}}
+        self.assertEqual(detector.default_check_changes("package.json", json.dumps(other), json.dumps(
+            dict(other, jest={"testPathIgnorePatterns": ["tests/"]}))), [])
+        # with .foreman.json naming `npm test`, a change to those settings touches the check like its scripts do
+        contents = lambda p: (json.dumps(no_key), json.dumps(dict(no_key, jest={"testPathIgnorePatterns": ["t/"]})))
+        self.assertEqual([f.file for f in detector.check_changed("npm test", ["package.json"], lambda p: True,
+                                                                 contents=contents)], ["package.json"])
+        same = lambda p: (json.dumps(base), json.dumps(dict(base, version="2.0.0")))
+        self.assertEqual(detector.check_changed("npm test", ["package.json"], lambda p: True, contents=same), [])
+
     def test_what_the_entry_points_delegate_to(self):
         base = json.dumps({"scripts": {"test": "npm run test:unit && yarn e2e", "test:unit": "jest", "e2e": "playwright",
                                        "build": "tsc", "lint": "eslint ."}})
@@ -671,6 +692,16 @@ class BreaksInsideALine(GitRepoCase):
         old = "a\x0cb\nc\n"
         diff = "--- a/f\n+++ b/f\n@@ -2 +2 @@\n-c\n+C\n"
         self.assertEqual(detector.apply_file_diff(old, diff), "a\x0cb\nC\n")
+
+
+class JestInPackageJson(GitRepoCase):
+    def test_a_jest_key_that_ignores_the_tests_is_refused(self):
+        self.write("package.json", json.dumps({"scripts": {"test": "jest"}}))
+        self.commit("base")
+        self.write("package.json", json.dumps({"scripts": {"test": "jest"},
+                                               "jest": {"testPathIgnorePatterns": ["tests/"]}}))
+        report = detector.scan_worktree(detector.Repo(self.root))
+        self.assertEqual([(f.rule, f.file) for f in report.blockers], [("check-changed", "package.json")])
 
 
 class TimeBudget(unittest.TestCase):
