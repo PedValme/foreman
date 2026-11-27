@@ -193,6 +193,34 @@ class Shape(PipelineCase):
         self.assertIn("stage: review,", pipeline.format_item(legacy))
         self.assertEqual(pipeline.shown_stage(dict(item, stage="bounced", bounces=2)), "bounced")
 
+    def test_the_same_review_recorded_again_adds_no_event(self):
+        ref = self.ref()
+        pipeline.record_gate(ref, "pass", "CLEAN", "Gate passed")
+        bad = {"verdict": "BLOCKED", "findings": [finding("BLOCKING", "a.py", "x")], "cache_key": "k1"}
+        pipeline.record_review(ref, bad, bounce=True)  # the review tool
+        pipeline.record_gate(ref, "pass", "CLEAN", "Gate passed")
+        pipeline.record_review(ref, bad, bounce=True)  # the finish loop reading the stored review back
+        pipeline.record_review(ref, bad, bounce=True)  # a later turn that left the same diff
+        texts = [e["text"] for e in pipeline.get(ref.id)["events"]]
+        self.assertEqual(sum(t.startswith("Review sent it back") for t in texts), 1)
+        ok = {"verdict": "PASS", "findings": [], "cache_key": "k2"}
+        pipeline.record_review(ref, ok)
+        pipeline.record_review(ref, ok)
+        pipeline.record_review(ref, bad)  # back to the earlier diff: a different result than the last one
+        texts = [e["text"] for e in pipeline.get(ref.id)["events"]]
+        self.assertEqual(sum(t.startswith("Review passed") for t in texts), 1)
+        self.assertEqual(sum(t.startswith("Review sent it back") for t in texts), 2)
+        new_head = self.ref(head="b" * 40)  # the same diff on a new head is recorded again
+        pipeline.record_gate(new_head, "pass", "CLEAN")
+        pipeline.record_review(new_head, ok)
+        texts = [e["text"] for e in pipeline.get(ref.id)["events"]]
+        self.assertEqual(sum(t.startswith("Review passed") for t in texts), 2)
+        legacy = {"verdict": "PASS", "findings": []}  # no cache key: nothing to compare, every one is recorded
+        pipeline.record_review(new_head, legacy)
+        pipeline.record_review(new_head, legacy)
+        texts = [e["text"] for e in pipeline.get(ref.id)["events"]]
+        self.assertEqual(sum(t.startswith("Review passed") for t in texts), 4)
+
     def test_notification_event_and_once_per_head(self):
         ref = self.ref()
         pipeline.record_gate(ref, "pass", "CLEAN")

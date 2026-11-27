@@ -171,6 +171,7 @@ def _load_meta() -> dict:
     counted = data.get("counted")
     pending = data.get("pending_notifications")
     calls = data.get("model_calls")
+    last = data.get("last_review")
     return {"notified": [n for n in notified if isinstance(n, str)] if isinstance(notified, list) else [],
             "nudged": {k: v for k, v in nudged.items() if isinstance(k, str) and isinstance(v, str)}
             if isinstance(nudged, dict) else {},
@@ -179,7 +180,9 @@ def _load_meta() -> dict:
             "pending_notifications": [e for e in pending if isinstance(e, dict)][-MAX_PENDING:]
             if isinstance(pending, list) else [],
             "model_calls": {k: v for k, v in calls.items() if isinstance(k, str) and isinstance(v, int)
-                            and not isinstance(v, bool)} if isinstance(calls, dict) else {}}
+                            and not isinstance(v, bool)} if isinstance(calls, dict) else {},
+            "last_review": {k: v for k, v in last.items() if isinstance(k, str) and isinstance(v, str)}
+            if isinstance(last, dict) else {}}
 
 
 def _prune(data: dict, meta: dict) -> None:
@@ -193,6 +196,7 @@ def _prune(data: dict, meta: dict) -> None:
     meta["nudged"] = dict(list(meta["nudged"].items())[-MAX_ITEMS * 2:])
     ids = {i["id"] for i in data["items"]}
     meta["counted"] = {k: v[-20:] for k, v in meta["counted"].items() if k in ids}
+    meta["last_review"] = {k: v for k, v in meta["last_review"].items() if k in ids}
     budgets = {_budget_key(i) for i in data["items"]}
     meta["model_calls"] = {k: v for k, v in meta["model_calls"].items() if k in budgets}
     meta["notified"] = meta["notified"][-MAX_NOTIFIED:]
@@ -514,6 +518,15 @@ def record_review(ref: Ref, record: dict, then: str = "ready", bounce: bool = Fa
         item = _ensure(data, ref, at)
         s = stage_of(item, "review")
         s.update(status=status, detail=_one_line(detail, 200), model=model, at=at)
+        # The same stored review recorded again for this head (the review tool, then the finish loop reading it
+        # back; a turn that ended without changing the diff) adds no event: the line already says it.
+        seen = "%s|%s|%s" % (key, status, item.get("head") or "")
+        again = bool(key) and meta["last_review"].get(item["id"]) == seen
+        meta["last_review"][item["id"]] = seen
+
+        def event(text):
+            if not again:
+                _event(item, text, at)
         limit = False
         if item["stage"] not in DONE:
             gate_ok = stage_of(item, "gate").get("status") in ("pass", "pending")
@@ -526,8 +539,8 @@ def record_review(ref: Ref, record: dict, then: str = "ready", bounce: bool = Fa
                 # else (a merge, a review a person asked for) leaves it at the review, which reads "Review failed"
                 item["stage"] = "bounced" if bounce and int(item.get("bounces") or 0) > 0 else "review"
                 limit = bounce and item["bounces"] >= item["max_bounces"]
-                _event(item, "Review sent it back (%s)%s" % (detail, ", bounce %d/%d" % (
-                    item["bounces"], item["max_bounces"]) if bounce else ""), at)
+                event("Review sent it back (%s)%s" % (detail, ", bounce %d/%d" % (
+                    item["bounces"], item["max_bounces"]) if bounce else ""))
                 if limit:
                     _queue(meta, item, "needs_owner", "%s: the reviewer still finds problems after %d bounce(s); "
                            "it needs you" % (_label(item), item["bounces"]))
@@ -536,15 +549,15 @@ def record_review(ref: Ref, record: dict, then: str = "ready", bounce: bool = Fa
                 worktree_on_pr = ref.kind == "branch" and item["target"].get("kind") == "pr"
                 # a review of the local working tree says nothing about the pull request's head on GitHub
                 item["stage"] = "review" if worktree_on_pr and then == "ready" else then
-                _event(item, "Review %s (%s)%s" % ("passed" if status == "pass" else "passed with notes", detail,
-                                                   " on the local changes" if worktree_on_pr else ""), at)
+                event("Review %s (%s)%s" % ("passed" if status == "pass" else "passed with notes", detail,
+                                            " on the local changes" if worktree_on_pr else ""))
                 if then == "ready" and not worktree_on_pr:
                     _queue(meta, item, "ready", "%s is ready for you: gate %s, review %s" % (
                         _label(item), stage_of(item, "gate").get("status"), detail), notes=status == "notes")
             else:
                 if item["stage"] in ("gate", "bounced", "ready"):
                     item["stage"] = "review" if gate_ok else "gate"
-                _event(item, "Review: %s" % detail, at)
+                event("Review: %s" % detail)
         return {"bounces": item["bounces"], "max_bounces": item["max_bounces"], "limit": limit}
     return _mutate(apply) or {"bounces": 0, "max_bounces": max_bounces(), "limit": False}
 
