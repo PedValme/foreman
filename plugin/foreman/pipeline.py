@@ -519,13 +519,15 @@ def record_review(ref: Ref, record: dict, then: str = "ready", bounce: bool = Fa
         s = stage_of(item, "review")
         s.update(status=status, detail=_one_line(detail, 200), model=model, at=at)
         # The same stored review recorded again for this head (the review tool, then the finish loop reading it
-        # back; a turn that ended without changing the diff) adds no event: the line already says it.
+        # back; a turn that ended without changing the diff) adds no event: the line already says it. A review
+        # that could not run is always recorded (each try is news), and so is a bounce counted now.
         seen = "%s|%s|%s" % (key, status, item.get("head") or "")
-        again = bool(key) and meta["last_review"].get(item["id"]) == seen
+        again = bool(key) and status in ("pass", "notes", "fail") and meta["last_review"].get(item["id"]) == seen
         meta["last_review"][item["id"]] = seen
+        counted_now = []
 
         def event(text):
-            if not again:
+            if not again or counted_now:
                 _event(item, text, at)
         limit = False
         if item["stage"] not in DONE:
@@ -534,6 +536,7 @@ def record_review(ref: Ref, record: dict, then: str = "ready", bounce: bool = Fa
                 counted = meta["counted"].setdefault(item["id"], [])
                 if bounce and key not in counted:
                     counted.append(key)
+                    counted_now.append(key)
                     item["bounces"] = int(item.get("bounces") or 0) + 1
                 # "bounced" means the finish loop sent the change back to the agent; a review that fails anywhere
                 # else (a merge, a review a person asked for) leaves it at the review, which reads "Review failed"

@@ -220,6 +220,24 @@ class Shape(PipelineCase):
         pipeline.record_review(new_head, legacy)
         texts = [e["text"] for e in pipeline.get(ref.id)["events"]]
         self.assertEqual(sum(t.startswith("Review passed") for t in texts), 4)
+        failed = {"verdict": "COULD NOT RUN", "error": "HTTP 429", "findings": [], "cache_key": "k3"}
+        pipeline.record_review(new_head, failed)
+        pipeline.record_review(new_head, failed)  # each try that could not run is news
+        texts = [e["text"] for e in pipeline.get(ref.id)["events"]]
+        self.assertEqual(sum("could not run" in t for t in texts), 2)
+        self.assertEqual(pipeline.stage_of(pipeline.get(ref.id), "review")["status"], "error")
+
+    def test_a_bounce_counted_later_for_the_same_review_still_shows(self):
+        ref = self.ref()
+        pipeline.record_gate(ref, "pass", "CLEAN", "Gate passed")
+        bad = {"verdict": "BLOCKED", "findings": [finding("BLOCKING", "a.py", "x")], "cache_key": "k1"}
+        pipeline.record_review(ref, bad)  # a person's review: no bounce
+        pipeline.record_review(ref, bad, bounce=True)  # the finish loop reads it back and sends the change back
+        item = pipeline.get(ref.id)
+        texts = [e["text"] for e in item["events"]]
+        self.assertEqual(item["bounces"], 1)
+        self.assertIn("Review sent it back (1 blocking), bounce 1/3", texts)
+        self.assertEqual(item["stage"], "bounced")
 
     def test_notification_event_and_once_per_head(self):
         ref = self.ref()
