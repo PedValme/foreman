@@ -360,6 +360,7 @@ class Plugin(OpenCodeCase):
         self.assertNotIn("only the effort differs", out["sameShown"])
         # a variant is part of the model name: `p/m#high` as the session's own and as the person's choice agree
         self.assertIn("same model", out["variantAgain"])
+        self.assertIn("same model", out["fromAnswer"])  # no model in the record: the latest answer's, not an older one
         self.assertEqual(out["modelOf"], ["a/b#max", "a/b", None, None, None])
 
     def test_the_variable_alone_switches_nothing_off_in_the_plugin(self):

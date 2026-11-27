@@ -164,6 +164,20 @@ export function modelOf(session: unknown): string | undefined {
   return `${ref.providerID}/${ref.id}${typeof ref.variant === "string" && ref.variant ? `#${ref.variant}` : ""}`
 }
 
+/** The model of the session's latest answer, from its messages (`ctx.session.context`): undefined when none says.
+ * Seen on OpenCode 2.3.2: in `opencode run` the session's record carries no model, its assistant messages do. */
+export function modelOfMessages(messages: unknown): string | undefined {
+  if (!Array.isArray(messages)) return undefined
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if (m?.type === "assistant") {
+      const model = modelOf(m)
+      if (model) return model
+    }
+  }
+  return undefined
+}
+
 /** `/foreman allow <id>` is the one command this server command asks a person about (OpenCode's permission prompt).
  * Merge and reject are not: through a server command nobody is attending (they are the TUI part's, `tui.ts`). */
 export function needsPerson(args: string): boolean {
@@ -195,6 +209,20 @@ export default {
       const text = `Foreman could not run (${error.message}).`
       if (!shown.has(session)) failed.set(session, text)
       return text
+    }
+
+    // The session's own model, for what the review says about its reviewer: OpenCode's record of the session when
+    // it states one, else the model of its latest answer. Undefined when neither says.
+    const sessionModel = async (session: string): Promise<string | undefined> => {
+      try {
+        const model = modelOf(await ctx.session.get({ sessionID: session }))
+        if (model) return model
+      } catch {}
+      try {
+        return modelOfMessages(await ctx.session.context({ sessionID: session }))
+      } catch {
+        return undefined
+      }
     }
 
     // A question Foreman asks the person: OpenCode's own permission prompt. Resolves when a person approves;
@@ -296,7 +324,8 @@ export default {
     // Python side counts the nudges (three in all at most); this side also stops at three per run, so a Python side
     // that cannot save its count never loops. That review starts a session of OpenCode and waits for it, so the
     // answer gets a command's time, and the session's model goes with the request, for the review's default
-    // reviewer. OpenCode waits for this hook as long as it takes. Experimental in OpenCode.
+    // reviewer. OpenCode waits for this hook (seen on 2.3.2: a hook that took 45 seconds held the run until it
+    // returned). Experimental in OpenCode.
     await ctx.session.hook("experimental.idle", async (event: any) => {
       const session = String(event.sessionID ?? "")
       const background = Array.isArray(event.background) ? event.background : []
@@ -304,10 +333,7 @@ export default {
       if (background.some((work: any) => work?.sessionID === session)) return
       let answer: Answer = {}
       if ((sentBack.get(session) ?? 0) < MAX_SENT_BACK) {
-        let model: string | undefined
-        try {
-          model = modelOf(await ctx.session.get({ sessionID: session }))
-        } catch {}
+        const model = await sessionModel(session)
         try {
           answer = await ask({ event: "turn_end", cwd: base, session, turn: turns.get(session) ?? "",
                                ...(model ? { model } : {}) }, HOOK, "python3", COMMAND_MS)
@@ -355,11 +381,7 @@ export default {
               attended = false
             }
           }
-          // The session's own model, as OpenCode records it, for what the review says about its reviewer.
-          let model: string | undefined
-          try {
-            model = modelOf(await ctx.session.get({ sessionID: String(input.sessionID) }))
-          } catch {}
+          const model = await sessionModel(String(input.sessionID))
           let answer: Answer
           try {
             // `session`: the repository pinned with `/foreman use` is kept per conversation. A server plugin has no

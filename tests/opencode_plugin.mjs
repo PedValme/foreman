@@ -18,6 +18,7 @@ const delays = []
 const realSetTimeout = globalThis.setTimeout
 globalThis.setTimeout = (fn, ms, ...more) => { delays.push(ms); return realSetTimeout(fn, ms, ...more) }
 let sessionModel // what OpenCode's record of the session says about its model, when it does
+let answerModel // the model of the session's latest answer, in its messages (`opencode run` states only this one)
 
 const hooks = {}
 const commands = {}
@@ -34,6 +35,10 @@ const ctx = {
     get: async ({ sessionID }) => ({ id: sessionID, ...(sessionModel ? { model: sessionModel } : {}),
                                      time: running.has(sessionID) ? { busy: 2000, idle: 1000 }
                                                                   : { busy: 1000, idle: 2000 } }),
+    context: async () => [{ type: "user", text: "go" },
+                          ...(answerModel ? [{ type: "assistant", model: { providerID: "old", id: "x" } },
+                                             { type: "assistant", model: answerModel }] : []),
+                          { type: "synthetic", text: "note" }],
   },
   permission: {
     hook: async (name, fn) => { hooks["permission." + name] = fn },
@@ -167,13 +172,16 @@ if (scenario === "gate") {
   sessionModel = { providerID: "p", id: "m", variant: "high" }
   out.variantShown = (await command("reviewer p/m#high")).error
   out.variantAgain = (await command("reviewer")).error
+  sessionModel = undefined                                     // the record says nothing: the latest answer does
+  answerModel = { providerID: "p", id: "m", variant: "high" }
+  out.fromAnswer = (await command("reviewer")).error
   out.modelOf = [module.modelOf({ model: { providerID: "a", id: "b", variant: "max" } }),
                  module.modelOf({ model: { providerID: "a", id: "b" } }), module.modelOf({}), module.modelOf(null),
                  module.modelOf({ model: { providerID: "a" } })]
 } else if (scenario === "turn-cap") {
   // The end of a turn carries the session's model, and the plugin sends a run back at most three times whatever
   // the Python side answers (here a stand-in on PATH that always sends the agent back and logs each request).
-  sessionModel = { providerID: "p", id: "m", variant: "high" }
+  answerModel = { providerID: "p", id: "m", variant: "high" } // as in `opencode run`: only the messages state it
   await prompt()
   for (let i = 0; i < 4; i++) await idle()                 // the fourth end is not sent back: the run is over
   out.synthetic = seen.synthetic.length
