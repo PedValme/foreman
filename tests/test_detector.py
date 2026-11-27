@@ -547,6 +547,132 @@ class InRealRepositories(GitRepoCase):
         self.assertEqual([f.file for f in both], ["package.json"])
 
 
+# What str.splitlines splits at and git does not: inside one line of a file, each must not end the hunk.
+INLINE_BREAKS = ("\r", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85", " ", " ")
+
+
+class BreaksInsideALine(GitRepoCase):
+    """git splits a diff at "\\n" only: a character str.splitlines also breaks at, inside a line, must not end
+    the hunk and hide what comes after it."""
+
+    def scan(self):
+        return sorted((f.rule, f.file) for f in detector.scan_worktree(detector.Repo(self.root)).blockers)
+
+    def test_lines_of_splits_where_git_does(self):
+        for sep in INLINE_BREAKS:
+            self.assertEqual(detector.lines_of("a" + sep + "b\nc\n"), ["a" + sep + "b", "c"], repr(sep))
+        self.assertEqual(detector.lines_of("a\r\nb\r\n"), ["a", "b"])  # a CRLF line's "\r" is the line break's
+        self.assertEqual(detector.lines_of("a\nb"), ["a", "b"])
+        self.assertEqual(detector.lines_of("a\x0cb\nc", keepends=True), ["a\x0cb\n", "c"])
+        self.assertEqual(detector.lines_of(""), [])
+        self.assertEqual(detector.lines_of(None), [])
+
+    def test_a_skip_after_such_a_line_is_found_in_a_new_and_in_a_changed_file(self):
+        self.write("tests/test_old.py", "def test_one():\n    assert True\n")
+        self.commit("base")
+        for i, sep in enumerate(INLINE_BREAKS):
+            with self.subTest(sep=repr(sep)):
+                self.write("tests/test_new.py", "x = 1" + sep + "y = 2\n" + SKIP + "\ndef test_one():\n    pass\n")
+                self.write("tests/test_old.py", "z = 1" + sep + "w = 2\n" + SKIP + "\ndef test_one():\n"
+                           "    assert True\n")
+                self.assertEqual(self.scan(), [("test-skipped", "tests/test_new.py"),
+                                               ("test-skipped", "tests/test_old.py")])  # untracked, then staged
+                self.git("add", "-A")
+                self.assertEqual(self.scan(), [("test-skipped", "tests/test_new.py"),
+                                               ("test-skipped", "tests/test_old.py")])
+                self.git("reset", "-q")
+
+    def test_a_secret_after_such_a_line_is_found_in_the_diff_and_in_the_history(self):
+        self.write("app.py", "x = 1\n")
+        self.commit("base")
+        base = self.git("rev-parse", "HEAD").strip()
+        for i, sep in enumerate(INLINE_BREAKS):
+            with self.subTest(sep=repr(sep)):
+                self.write("app.py", "x = 1" + sep + "y = 2\nK = 'AKIA" + "ABCDEFGHIJKLMNO%s'\n" % chr(65 + i))
+                self.assertEqual(self.scan(), [("secret", "app.py")])
+                self.commit("add")
+                self.write("app.py", "x = 1\n")
+                self.commit("remove")
+                report = detector.scan_range(detector.Repo(self.root), base)
+                self.assertIn(("secret-history", "app.py"), [(f.rule, f.file) for f in report.blockers])
+                self.git("reset", "-q", "--hard", base)
+
+    # A lone "\r" ends a line for Python and YAML although git does not count it: what follows it on the same line
+    # is judged as a line of its own (rules anchored at a line's start, a comment that runs to the line's end).
+    SAME_LINE = {
+        "tests/test_y.py": ("import unittest\nfrom unittest import skip\n\n\nclass T(unittest.TestCase):\n"
+                            "    x = 1{sep}    @skip('no')\n    def test_a(self):\n        pass\n", "test-skipped"),
+        "lib/helper.py": ("import pytest\n# note{sep}skip_all = pytest.mark." + "skip\n", "test-skipped"),
+        "config.yml": ("a: 1{sep}pass" + "word: Zq8vR2mXk9LpW3tY\n", "secret"),
+    }
+
+    def test_what_follows_on_the_same_line_is_judged_untracked_staged_and_in_history(self):
+        self.write("README.md", "x\n")
+        self.commit("base")
+        base = self.git("rev-parse", "HEAD").strip()
+        for sep in ("\r", "\x0c", "\x85"):
+            with self.subTest(sep=repr(sep)):
+                for path, (text, _rule) in self.SAME_LINE.items():
+                    self.write(path, text.format(sep=sep))
+                want = sorted((rule, path) for path, (_text, rule) in self.SAME_LINE.items())
+                self.assertEqual(self.scan(), want)  # untracked
+                self.git("add", "-A")
+                self.assertEqual(self.scan(), want)  # staged
+                self.commit("add")
+                for path in self.SAME_LINE:
+                    os.remove(os.path.join(self.root, *path.split("/")))
+                self.commit("remove")
+                report = detector.scan_range(detector.Repo(self.root), base)
+                self.assertIn(("secret-history", "config.yml"), [(f.rule, f.file) for f in report.blockers])
+                self.git("reset", "-q", "--hard", base)
+
+    def test_a_write_that_puts_a_skip_after_a_lone_cr_is_refused(self):
+        from foreman import gate
+        old = "import unittest\nfrom unittest import skip\n\n\nclass T(unittest.TestCase):\n    def test_a(self):\n" \
+              "        pass\n"
+        new = old.replace("    def test_a", "    x = 1\r    @skip('no')\n    def test_a")
+        self.assertEqual(gate._new_marker_lines(old, new, path="tests/test_y.py"),
+                         [("@skip('no')", "def test_a(self):")])
+
+    def test_a_piece_never_clears_or_bounds_a_finding(self):
+        # Only the search for something wrong sees a line's pieces: an attribute line, a test definition still
+        # there, the end of a workflow step are read from whole lines.
+        self.write("a.py", "x = 1\n")
+        self.write("tests/test_a.py", "def test_a():\n    assert True\n")
+        self.write(".github/workflows/ci.yml", "jobs:\n  t:\n    steps:\n      - name: tests\n        run: pytest\n")
+        self.commit("base")
+        self.write(".gitattributes", "*.py\r-diff\n")  # git reads the "\r" as a blank: the diff of every .py is off
+        self.assertIn(".gitattributes", [f for _r, f in self.scan()])
+        os.remove(os.path.join(self.root, ".gitattributes"))
+        self.write("tests/test_a.py", "def _test_a():\n    assert True\n#\x0cdef test_a():\n")  # still a comment
+        self.assertEqual(self.scan(), [("test-skipped", "tests/test_a.py")])
+        self.write("tests/test_a.py", "x = 1\rdef _test_a():\n    assert True\n")  # the rename after a lone "\r"
+        self.assertEqual(self.scan(), [("test-skipped", "tests/test_a.py")])
+        self.git("checkout", "-q", "tests/test_a.py")
+        self.write(".github/workflows/ci.yml", "jobs:\n  t:\n    steps:\n      - name: tests\n        run: pytest\n"
+                   "        # n\x85- name: other\n        continue-on-error: true\n")
+        self.assertEqual(self.scan(), [("check-weakened", ".github/workflows/ci.yml")])
+
+    def test_a_makefile_recipe_is_read_as_make_reads_it(self):
+        self.write("Makefile", "test:\n\tpytest\n")
+        self.commit("base")
+        for sep in ("\x0c", "\x0b", "\x1c"):
+            self.write("Makefile", "test:\n\tpytest" + sep + "|| true\n")  # one recipe line for make
+            self.assertEqual(self.scan(), [("check-changed", "Makefile")], repr(sep))
+
+    def test_a_crlf_file_still_reads_line_by_line(self):
+        self.write("tests/test_win.py", "def test_one():\r\n    assert True\r\n")
+        self.commit("base")
+        self.write("tests/test_win.py", SKIP + "\r\ndef test_one():\r\n    assert True\r\n")
+        report = detector.scan_worktree(detector.Repo(self.root))
+        self.assertEqual([(f.rule, f.file, f.line) for f in report.blockers], [("test-skipped", "tests/test_win.py", 1)])
+
+    def test_a_files_new_content_keeps_its_lines(self):
+        old = "a\x0cb\nc\n"
+        diff = "--- a/f\n+++ b/f\n@@ -2 +2 @@\n-c\n+C\n"
+        self.assertEqual(detector.apply_file_diff(old, diff), "a\x0cb\nC\n")
+
+
 class TimeBudget(unittest.TestCase):
     def test_long_diffs_check_the_clock(self):
         diff = hunk("app/a.py", *["x = %d" % i for i in range(5000)])

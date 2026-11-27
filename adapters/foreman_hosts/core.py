@@ -476,7 +476,7 @@ def _patch_switches_off(host: Host, patch: str, full: Callable[[str], str]) -> b
         logger.warning("foreman: cannot read the patch's files", exc_info=True)
         return False
     source = None
-    for line in patch.splitlines():
+    for line in detector.lines_of(patch):
         m = _PATCH_HEADER.match(line)
         if not m:
             continue

@@ -545,6 +545,18 @@ a quoted string or a comment does not, except in the files that run the check (C
 **The review** can miss things, and an exact quote can still back a wrong conclusion: read the findings. The
 same-model warning compares with the main model in your config, not one you switched to inside a session.
 
+## What changed in 0.2.1
+
+- **A character that breaks a line for Python but not for git no longer hides what follows it.** The gate split a
+  diff where `str.splitlines` does: also at a lone carriage return, a form feed, `\x1c`-`\x1e`, `\x85` and the
+  Unicode line and paragraph separators. Inside one line of a file (a form feed in a source file, a lone `\r` in
+  an old one) that ended the hunk early, and nothing after it was read until the next hunk, in a new file the
+  whole rest of it: a test switched off or a secret, in the change and in the pushed history, passed. Diffs,
+  patches and Makefiles are now split where git and make split them, at `\n` only, and what a line holds is still
+  judged piece by piece where a language may break it (Python and YAML end a line at a lone `\r`).
+- **A review recorded again adds no line to the pipeline.** The same review of the same diff, recorded by the
+  review tool and again by the finish loop, showed twice in a change's events.
+
 ## What changed in 0.2.0
 
 - **Fewer refusals for someone else's change.** The gate no longer refuses a push after the base branch came into

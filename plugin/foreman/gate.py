@@ -1368,6 +1368,8 @@ def _new_marker_lines(old_text: str, new_text: str, new_file: bool = False, path
         return kind == "skip" or (kind == "conditional" and not new_file)
 
     before = Counter(" ".join(l.split()) for l in (old_text or "").splitlines() if detector.skip_marker_at(l, path))
+    # every place a reader may break a line (a lone "\r" ends a line for Python): what the write would add is judged
+    # piece by piece, as ``_read`` already reads the old side
     lines = (new_text or "").splitlines()
     added = []
     for i, l in enumerate(lines):
@@ -1407,7 +1409,7 @@ def _repo_relative(path: str) -> tuple:
 def _v4a_files(patch: str) -> list:
     """(path, old side, new side, is new file) per file of a V4A patch; each side keeps the context lines."""
     files, cur = [], None
-    for line in patch.splitlines():
+    for line in detector.lines_of(patch):
         m = re.match(r"^\*\*\* (Update|Add) File:\s*(.+?)\s*$", line)
         if m:
             cur = [m.group(2), [], [], m.group(1) == "Add"]

@@ -198,6 +198,30 @@ class Finding:
         return d
 
 
+def lines_of(text: Optional[str], keepends: bool = False) -> list:
+    """The lines of a diff, a patch or a file as git counts them: split at "\\n" only. ``str.splitlines`` also
+    splits at a lone "\\r", "\\x0b", "\\x0c", "\\x1c"-"\\x1e", "\\x85", "\\u2028" and "\\u2029", which can sit inside
+    one line of a file; the next piece then has no diff prefix and a parser would take the hunk as ended, reading
+    nothing until the next one. A CRLF line's "\\r" is dropped (kept with ``keepends``, so the pieces join back to
+    the text). No empty last piece for a text that ends with "\\n"."""
+    if not text:
+        return []
+    pieces = text.split("\n")
+    if keepends:
+        out = [p + "\n" for p in pieces[:-1]]
+        return out + [pieces[-1]] if pieces[-1] else out
+    if not pieces[-1]:
+        pieces.pop()
+    return [p[:-1] if p.endswith("\r") else p for p in pieces]
+
+
+def pieces(line: str) -> list:
+    """One line of a file (as git counts lines) cut wherever a reader might break it (``str.splitlines``: a lone
+    "\\r", "\\x0c", "\\x85"…), so a rule anchored at a line's start or a comment that runs to its end judges each
+    piece. The line itself when there is nothing to cut."""
+    return line.splitlines() or [line]
+
+
 def _norm(text: Optional[str]) -> str:
     return " ".join((text or "").split())
 
@@ -490,7 +514,7 @@ def _iter_new_side(diff: str, deadline: Optional[float] = None):
     Hunk lengths are tracked, so an added line whose content starts with "++ " is never taken for a file header.
     Combined diffs of merges (``--cc``, ``@@@`` hunks) carry one prefix column per parent."""
     path, line, new_left, old_left, ncols, hunk = None, 0, 0, 0, 1, 0
-    for count, text in enumerate(diff.splitlines()):
+    for count, text in enumerate(lines_of(diff)):
         if count % _CHECK_EVERY == 0:
             _check_deadline(deadline)
         if (new_left > 0 or old_left > 0) and text[:1] in (" ", "+", "-", "\\", ""):
@@ -526,7 +550,7 @@ def _iter_new_side(diff: str, deadline: Optional[float] = None):
 def _iter_removed(diff: str, deadline: Optional[float] = None):
     """Yield (path, removed line without its prefix) for the removed lines of a unified diff (one-parent hunks)."""
     path, new_left, old_left, ncols = None, 0, 0, 1
-    for count, text in enumerate(diff.splitlines()):
+    for count, text in enumerate(lines_of(diff)):
         if count % _CHECK_EVERY == 0:
             _check_deadline(deadline)
         if (new_left > 0 or old_left > 0) and text[:1] in (" ", "+", "-", "\\", ""):
@@ -655,7 +679,9 @@ def _renamed_tests(rows: list, diff: str, deadline: Optional[float]) -> list:
         net = net_by_path.get(path) if added else None
         if not net:
             continue
-        old = disabled_by_rename(path, net, text[1:])
+        # a search for something wrong: the whole line, then its pieces (``_line_finding``); what is still
+        # defined (``still_*`` above) stays whole lines
+        old = next((o for o in (disabled_by_rename(path, net, c) for c in [text[1:]] + pieces(text[1:])) if o), None)
         if old:
             after = [r[2][1:] for r in rows[i + 1:i + 3] if r[0] == path]
             found.append(finding("test-skipped", path, line, "renamed from `%s`, so the runner no longer collects it"
@@ -690,6 +716,18 @@ def next_nonempty(lines: Iterable[str]) -> str:
 
 def _line_finding(path, line, text, history: bool = False, new_files=frozenset(), before=(), after=(),
                   version_of: Optional[Callable[[str], str]] = None) -> Optional[Finding]:
+    """The finding of one added line, or None. The line is counted as git counts it (``lines_of``); its content is
+    judged whole and, when a language may break it (Python and YAML end a line at a lone "\\r"), piece by piece:
+    the first finding counts. Only a search for something wrong sees the pieces; the windows ``before`` and
+    ``after`` stay whole lines, so a piece cannot end a step or stand in for a definition."""
+    for candidate in [text] + [text[:1] + p for p in (pieces(text[1:]) if len(pieces(text[1:])) > 1 else [])]:
+        f = _one_line_finding(path, line, candidate, history, new_files, before, after, version_of)
+        if f:
+            return f
+    return None
+
+
+def _one_line_finding(path, line, text, history, new_files, before, after, version_of) -> Optional[Finding]:
     allowed, content = MARKER in text, text[1:]
     if has_secret(text, path):
         rule = "secret-history" if history else ("env-file" if _is_env_file(path) else "secret")
@@ -862,7 +900,7 @@ def _make_rules(text: Optional[str]) -> tuple:
     """(target -> (prerequisites, recipe lines), variable -> value) of a Makefile text. Recipe lines continue
     after a backslash and across conditional directives."""
     rules, variables, current, continued = {}, {}, [], False
-    for raw in (text or "").splitlines():
+    for raw in lines_of(text):  # make breaks lines at "\n" only
         if raw.startswith("\t") or (continued and current):
             for t in current:
                 rules[t][1].append(raw.strip())
@@ -1045,7 +1083,7 @@ def _binary_entries(diff: str) -> list:
     """(path or None, line) for each file a diff shows as binary; None when the line could not be read (a quoted
     path)."""
     out = []
-    for line in (diff or "").splitlines():
+    for line in lines_of(diff):
         if line.startswith("Binary files "):
             m = _BINARY_ENTRY.match(line)
             out.append(((m.group(2) or m.group(1)) if m else None, line))
@@ -1498,7 +1536,7 @@ def _untracked_diff(repo: Repo) -> tuple:
             continue
         if b"\0" in data[:8192]:
             continue  # binary
-        lines = data.decode("utf-8", "replace").splitlines()
+        lines = lines_of(data.decode("utf-8", "replace"))
         if not lines:
             continue
         parts.append("+++ b/%s\n@@ -0,0 +1,%d @@\n%s\n" % (path, len(lines), "\n".join("+" + l for l in lines)))
@@ -1587,7 +1625,7 @@ def name_status_from_diff(diff: str) -> str:
             rows.append("%s\t%s" % (cur["kind"], new))
 
     in_hunks = False  # past the file's first @@: lines are content, never headers ("++ b/x" added is "+++ b/x")
-    for text in diff.splitlines():
+    for text in lines_of(diff):
         if text.startswith("diff --git "):
             close()
             cur, in_hunks = {"kind": "M", "old": None, "new": None}, False
@@ -1622,7 +1660,7 @@ def name_status_from_diff(diff: str) -> str:
 def _file_diffs(diff: str) -> dict:
     """The part of a unified diff that belongs to each file, keyed by its new path (old path for a deletion)."""
     out, cur, lines, in_hunks = {}, None, [], False
-    for text in diff.splitlines(keepends=True):
+    for text in lines_of(diff, keepends=True):
         if text.startswith("diff --git "):
             if cur is not None:
                 out[cur] = "".join(lines)
@@ -1647,7 +1685,7 @@ def _file_diffs(diff: str) -> dict:
 
 def apply_file_diff(old_text: Optional[str], file_diff: str) -> Optional[str]:
     """A file's new content from its old content and its unified diff, or None when the diff does not apply."""
-    old = (old_text or "").splitlines()
+    old = lines_of(old_text)
     new, pos = [], 0
     hunks = list(re.finditer(r"(?m)^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@.*$", file_diff))
     if not hunks:
@@ -1659,7 +1697,7 @@ def apply_file_diff(old_text: Optional[str], file_diff: str) -> Optional[str]:
         new += old[pos:start]
         pos = start
         end = hunks[i + 1].start() if i + 1 < len(hunks) else len(file_diff)
-        for text in file_diff[m.end():end].splitlines()[1:]:
+        for text in lines_of(file_diff[m.end():end])[1:]:
             if text.startswith("\\"):
                 continue
             body = text[1:]
