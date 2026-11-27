@@ -121,7 +121,7 @@ hermes
 | `test-skipped` | a skip, only, ignore or expected-failure marker added to a test (list in *Known limits*), or a test renamed so the runner stops collecting it (`test_x` to `_test_x`) |
 | `test-deleted` | a test code file deleted (snapshots, JSON and fixtures do not count) |
 | `test-moved` | a test code file moved out of the tests, or renamed to a name the runner does not collect (`tests/test_a.py` to `tests/a_check.py`) |
-| `check-changed` | with no configuration: the `test`/`check`/`lint` scripts of `package.json` (and the scripts they run), the `test`/`check`/`ci` targets of a `Makefile` (and the targets and variables they use), tox's `envlist` and `commands`/`setenv`; with `.foreman.json`: any file its check command runs, and `.foreman.json` itself |
+| `check-changed` | with no configuration: the `test`/`check`/`lint` scripts of `package.json` (and the scripts they run, and its `jest` settings that choose the tests or what a failing run reports: `testPathIgnorePatterns`, `testMatch`, `roots`, `testRunner`, `testFailureExitCode`…; also in a workspace package's `package.json` that has a `jest` key), the `test`/`check`/`ci` targets of a `Makefile` (and the targets and variables they use), tox's `envlist` and `commands`/`setenv`; with `.foreman.json`: any file its check command runs, and `.foreman.json` itself |
 | `check-weakened` | `\|\| true` or `continue-on-error: true` next to a test runner in `.github/workflows/*`; `--deselect`/`--ignore` of tests in pytest config; `testPathIgnorePatterns`/`exclude` in jest or vitest config |
 | `secret`, `env-file` | real credential formats (cloud, GitHub, model APIs, Slack, Stripe, private keys and more) anywhere; key/value guesses (passwords in code, config, shell, YAML, `.env`) outside the tests |
 | `secret-history` | a secret in any commit of what is pushed, even if a later commit removed it |
@@ -463,8 +463,11 @@ Desktop, or via `hermes config set plugins.entries.foreman.settings.<key> <value
 - emptied test bodies, removed or loosened asserts, commented-out tests, a test function deleted from a file that
   still exists, a `return` at the top of a test, a rename it does not know (`test_x` to `tst_x`), a decorator it does
   not know;
-- tests switched off by selection: `-k 'not x'` in pytest `addopts`, a `jest` section with `testPathIgnorePatterns`
-  inside `package.json`;
+- tests switched off by selection: `-k 'not x'` in pytest `addopts`; in a `package.json`, a `jest` setting outside
+  those that choose the tests (a `moduleNameMapper` or a setup file that stubs code out), or Jest's settings in a
+  `package.json` with neither test scripts nor a `jest` key at the base;
+- a deleted fixture (`tests/fixtures/`, snapshots, test data): not test code, so its deletion is not a finding, even
+  when a test needed it;
 - without `.foreman.json`, a `noxfile.py` or a test command in `pyproject.toml` or `setup.cfg`; with it, the entry
   point it names, not everything that entry point runs;
 - secret key/value guesses inside test files (only real credential formats count there).
@@ -554,6 +557,10 @@ same-model warning compares with the main model in your config, not one you swit
   whole rest of it: a test switched off or a secret, in the change and in the pushed history, passed. Diffs,
   patches and Makefiles are now split where git and make split them, at `\n` only, and what a line holds is still
   judged piece by piece where a language may break it (Python and YAML end a line at a lone `\r`).
+- **Jest's choice of tests inside `package.json` is protected.** A change to the `jest` settings that choose which
+  tests run (`testPathIgnorePatterns`, `testMatch`, `roots` and the like) counts as a change to the check, as its
+  `scripts` already did; before, `"jest": {"testPathIgnorePatterns": ["tests/"]}` took the tests out unseen. A
+  `jest.config.json` is read like `jest.config.js`.
 - **A review recorded again adds no line to the pipeline.** The same review of the same diff, recorded by the
   review tool and again by the finish loop, showed twice in a change's events.
 

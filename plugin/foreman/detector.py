@@ -146,7 +146,7 @@ TEST_RUNNER = re.compile(r"(?i)\b(?:pytest|py\.test|jest|vitest|mocha|tox|nox|un
                          r"test|go\s+test|cargo\s+test|make\s+(?:test|check))\b")
 PYTEST_CONFIG = re.compile(r"(^|/)(pytest\.ini|setup\.cfg|pyproject\.toml|tox\.ini)$", re.I)
 PYTEST_DROP = re.compile(r"--(?:deselect|ignore|ignore-glob)(?:=|\s+)([^\s\"',\]]+)")
-JS_TEST_CONFIG = re.compile(r"(^|/)(jest|vitest)\.config\.[cm]?[jt]s$", re.I)
+JS_TEST_CONFIG = re.compile(r"(^|/)(jest|vitest)\.config\.(?:[cm]?[jt]s|json)$", re.I)
 JS_TEST_DROP = re.compile(r"\btestPathIgnorePatterns\b|\bexclude\s*:")
 _STEP_WINDOW = 8  # at most this many new-side lines around a workflow line, within the same step
 STEP_START = re.compile(r"^\s*-\s")                         # a new step (or list item) in the YAML
@@ -841,12 +841,40 @@ def scripts_of(package_json: Optional[str]):
     return data.get("scripts") if isinstance(data, dict) else None
 
 
+# Jest's settings that choose which tests run, or what a failing run reports: in a package.json's "jest" key they
+# switch tests off as the same lines in jest.config.* do (testPathIgnorePatterns there is a check-weakened line).
+JEST_SELECTION = ("testPathIgnorePatterns", "modulePathIgnorePatterns", "testMatch", "testRegex", "roots", "rootDir",
+                  "projects", "testPathPattern", "testNamePattern", "moduleFileExtensions", "preset", "testRunner",
+                  "runner", "testSequencer", "testFailureExitCode", "passWithNoTests")
+
+
+def _is_json_object(text: Optional[str]) -> bool:
+    try:
+        return isinstance(json.loads(text or ""), dict)
+    except ValueError:
+        return False
+
+
+def jest_selection_of(package_json: Optional[str]):
+    """The settings of a package.json's ``jest`` key that choose which tests run ({} without that key), or None
+    when the text cannot be read."""
+    try:
+        data = json.loads(package_json or "")
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    jest = data.get("jest")
+    return {k: jest[k] for k in JEST_SELECTION if k in jest} if isinstance(jest, dict) else {}
+
+
 def check_changed(command: Optional[str], paths: Iterable[str], is_file: Callable[[str], bool],
                   allowed_paths: Iterable[str] = (), protected: Iterable[str] = (),
                   contents: Optional[Callable[[str], tuple]] = None,
                   version_of: Optional[Callable[[str], str]] = None, labels: Optional[dict] = None) -> list:
     """One blocker per file the base's check runs (plus ``protected`` ones) that the change touches. For
-    package.json only its ``scripts`` count; ``contents(path)`` returns (base text, new text) to compare them."""
+    package.json only its ``scripts`` and the ``jest`` settings that choose the tests count; ``contents(path)``
+    returns (base text, new text) to compare them."""
     paths, allowed_paths = set(paths), set(allowed_paths or ())
     targets = sorted(set(check_files(command, is_file)) | set(protected))
 
@@ -856,7 +884,8 @@ def check_changed(command: Optional[str], paths: Iterable[str], is_file: Callabl
         if p.rsplit("/", 1)[-1] == "package.json" and contents is not None:
             old, new = contents(p)
             before, after = scripts_of(old), scripts_of(new)
-            return before is None or after is None or before != after
+            return (before is None or after is None or before != after
+                    or jest_selection_of(old) != jest_selection_of(new))
         return True
 
     def detail(p):
@@ -973,7 +1002,8 @@ def _tox_settings(text: Optional[str]) -> Optional[dict]:
 
 def default_check_changes(path: str, old: Optional[str], new: Optional[str]) -> list:
     """What the change does to the usual test entry points of ``path`` with no .foreman.json: the ``test``,
-    ``check`` and ``lint`` scripts of a package.json (with their ``test:*`` family and the scripts they run), the
+    ``check`` and ``lint`` scripts of a package.json (with their ``test:*`` family and the scripts they run, and the
+    ``jest`` settings that choose the tests), the
     ``test``, ``check`` and ``ci`` targets of a Makefile (with the targets they depend on and the variables they
     use), tox's ``envlist`` and its test environments' ``commands`` and ``setenv``. Only what exists at the base
     counts: a new script is not a finding. ``new`` None means the file is gone. One description per change."""
@@ -982,11 +1012,20 @@ def default_check_changes(path: str, old: Optional[str], new: Optional[str]) -> 
         return []
     if name == "package.json":
         before, after = scripts_of(old), scripts_of(new)
-        if not isinstance(before, dict):
+        if not _is_json_object(old):
             return []
+        before = before if isinstance(before, dict) else {}
         after = after if isinstance(after, dict) else {}
-        return ["`scripts.%s` in %s" % (k, path) for k in _protected_scripts(before)
-                if new is None or after.get(k) != before[k]]
+        protected = _protected_scripts(before)
+        changed = ["`scripts.%s` in %s" % (k, path) for k in protected if new is None or after.get(k) != before[k]]
+        has_jest = isinstance((json.loads(old) if _is_json_object(old) else {}).get("jest"), dict)
+        if (protected or has_jest) and new is not None:
+            # the tests run through this package.json, or Jest reads it (a workspace package under a root's
+            # `projects`): Jest's choice of the tests counts
+            jest_before, jest_after = jest_selection_of(old) or {}, jest_selection_of(new) or {}
+            changed += ["`jest.%s` in %s" % (k, path) for k in JEST_SELECTION
+                        if jest_before.get(k) != jest_after.get(k)]
+        return changed
     if MAKEFILE.search(path):
         (rules, variables), (new_rules, new_variables) = _make_rules(old), _make_rules(new)
         targets, names = _make_protected(rules, variables)
