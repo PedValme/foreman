@@ -536,11 +536,12 @@ a quoted string or a comment does not, except in the files that run the check (C
   When nothing qualifies, Foreman says it cannot tell and asks for a path or `workdir`. When a slash command reaches a
   running gateway before the agent has used the terminal in that session, use `/foreman use <path>`.
 - In a shared chat, anyone Hermes authorises can type `/foreman merge … --yes`: restrict who can talk to your Hermes.
-- A merge is blocked as `gh pr merge` and as `gh api` to GitHub's merge endpoints (`-X PUT …/pulls/7/merge`,
-  `POST …/merges`, a GraphQL `mergePullRequest` or `enablePullRequestAutoMerge`; a GraphQL query Foreman cannot
-  read counts as one). An approval with `gh pr review --approve`, a merge through another client (`curl` to the
-  API), or a direct `git push` to the base branch (inspected only as a push) is not. Protect the base branch on
-  GitHub (required pull request and checks).
+- A merge is blocked as `gh pr merge` and as `gh api` to GitHub's merge endpoints (`-X PUT …/pulls/7/merge` or
+  `…/merge-async`, `POST …/merges`, a GraphQL `mergePullRequest` or `enablePullRequestAutoMerge`; a GraphQL query
+  Foreman cannot read whole counts as one). Not blocked: an approval with `gh pr review --approve`, a merge through
+  a `gh` alias or extension or another client (`curl` to the API), a query file changed between the check and the
+  call, or a direct `git push` to the base branch (inspected only as a push). Protect the base branch on GitHub
+  (required pull request and checks).
 - Foreman's state (stored reviews and their cache, the pipeline, the grants) is plain files: a deliberate write that
   gets past the text guard (for example through `execute_code`) could forge a stored PASS. The guard is best effort;
   the required CI check is where independence is real.

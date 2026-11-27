@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextvars
 import hashlib
+import json
 import logging
 import os
 import posixpath
@@ -127,10 +128,9 @@ def tokenize(command: str) -> list:
             tokens.append(_Redir(m.group(0)))
             i += len(m.group(0))
             continue
-        elif c == "\n" or c in ";|&()" or (c in "{}" and not has_word and (
-                c == "}" or i + 1 >= n or command[i + 1] in " \t\r\n")):
-            # a brace groups commands only as a word of its own (`{ git commit; }`); inside a word it is text
-            # (`repos/{owner}/{repo}`, gh's placeholders)
+        elif c == "\n" or c in ";|&()" or (c in "{}" and not has_word):
+            # a brace at a word's start may group commands (`{ git commit; }`; zsh runs `{git commit}`); inside a
+            # word it is text (`repos/{owner}/{repo}`, gh's placeholders)
             flush()
             op = command[i:i + 2] if command[i:i + 2] in ("&&", "||") else c
             tokens.append(_Op(op))
@@ -520,7 +520,7 @@ def _parse_gh(words: list, cwd: str, located: bool):
 
     i = skip_flags(0)
     if i < len(words) and words[i] == "api":
-        target = _api_merge(words[i + 1:], cwd)
+        target = _api_merge(words[i + 1:], cwd if located or cwd != os.sep else None)
         if target is not None:
             return Action("pr-merge", cwd, [target] if target else [], located=located), "api"
         return None, "api"
@@ -533,67 +533,129 @@ def _parse_gh(words: list, cwd: str, located: bool):
 
 
 # `gh api` options that take a value (the endpoint is the first word that is neither an option nor its value).
-_API_VALUE_OPTS = {"-X", "--method", "-f", "--raw-field", "-F", "--field", "-H", "--header", "--input", "-q", "--jq",
-                   "-t", "--template", "--hostname", "-p", "--preview", "--cache"}
-_API_FIELD_OPTS = {"-f", "--raw-field", "-F", "--field"}
-# REST endpoints that merge: a pull request (`PUT …/pulls/7/merge`) and a branch into another (`POST …/merges`).
-_API_PR_MERGE = re.compile(r"(?:^|/)repos/[^/]+/[^/]+/pulls/([^/?#]+)/merge/?(?:[?#].*)?$")
+_API_VALUE_LONG = {"--method", "--raw-field", "--field", "--header", "--input", "--jq", "--template", "--hostname",
+                   "--preview", "--cache"}
+_API_VALUE_SHORT = set("XfFHqtp")  # gh's one-letter options that take a value; the rest (-i…) are switches
+# REST endpoints that merge: a pull request (`PUT …/pulls/7/merge`, `…/merge-async`, which merges or queues it) and
+# a branch into another (`POST …/merges`).
+_API_PR_MERGE = re.compile(r"(?:^|/)repos/[^/]+/[^/]+/pulls/([^/?#]+)/merge(?:-async)?/?(?:[?#].*)?$")
 _API_BRANCH_MERGE = re.compile(r"(?:^|/)repos/[^/]+/[^/]+/merges/?(?:[?#].*)?$")
 # GraphQL mutations that merge, or arm a merge for later.
 _API_GRAPHQL_MERGE = re.compile(r"\b(?:mergePullRequest|enablePullRequestAutoMerge|mergeBranch|"
                                 r"enqueuePullRequest)\b")
+_API_READ_LIMIT = 1 << 20
 
 
-def _api_merge(args: list, cwd: str) -> Optional[str]:
-    """For ``gh api <args>``: the pull request it merges (its number, or "" when it names none), or None when the
-    call does not merge. A call that reaches GitHub's merge endpoints, or a GraphQL mutation that merges, is a
-    merge like ``gh pr merge`` (rule 18). A GraphQL query Foreman cannot read (stdin, a missing file) counts as one:
-    it cannot tell, and the call is refused rather than let through."""
-    endpoint, method, fields, inputs, i = None, None, [], [], 0
+def _api_options(args: list):
+    """(option, value) for each option of ``gh api`` (None for a switch) and ("", word) for each other word, read
+    as gh's flag parser reads them: ``--method=PUT``, ``--method PUT``, ``-XPUT``, ``-X=PUT``, ``-X PUT`` and
+    switches combined with one (``-iX PUT``)."""
+    i = 0
     while i < len(args):
         a = args[i]
-        name, eq, inline = a.partition("=") if a.startswith("--") else (a, "", "")
-        if not eq and len(a) > 2 and a[:2] in ("-X", "-f", "-F", "-H", "-q", "-t", "-p") and not a.startswith("--"):
-            name, inline, eq = a[:2], a[2:], "="  # -XPUT, -fquery=…
-        if name in _API_VALUE_OPTS:
-            value = inline if eq else (args[i + 1] if i + 1 < len(args) else "")
-            i += 1 if eq else 2
-            if name in ("-X", "--method"):
-                method = value.upper()
-            elif name in _API_FIELD_OPTS:
-                fields.append(value)
-            elif name == "--input":
-                inputs.append(value)
-            continue
-        if not a.startswith("-") and endpoint is None:
-            endpoint = a
         i += 1
+        if a == "--":
+            for rest in args[i:]:
+                yield "", rest
+            return
+        if a.startswith("--"):
+            name, eq, inline = a.partition("=")
+            if name in _API_VALUE_LONG:
+                if not eq:
+                    inline, i = (args[i] if i < len(args) else ""), i + 1
+                yield name, inline
+            else:
+                yield name, None
+            continue
+        if a.startswith("-") and len(a) > 1:
+            for k, ch in enumerate(a[1:], 1):
+                if ch in _API_VALUE_SHORT:
+                    rest = a[k + 1:]
+                    if rest:
+                        yield "-" + ch, rest[1:] if rest.startswith("=") else rest
+                    else:
+                        yield "-" + ch, args[i] if i < len(args) else ""
+                        i += 1
+                    break
+                yield "-" + ch, None
+            continue
+        yield "", a
+
+
+def _api_read(cwd: Optional[str], source: str) -> Optional[str]:
+    """The text of a file ``gh`` would read, or None when Foreman cannot read all of it here (no working
+    directory yet, not a regular file, too long, unreadable)."""
+    path = os.path.expanduser(source)
+    if not os.path.isabs(path):
+        if not cwd:
+            return None
+        path = os.path.join(cwd, path)
+    try:
+        if not os.path.isfile(path) or os.path.getsize(path) > _API_READ_LIMIT:
+            return None  # a FIFO would hold the hook; a longer file is not read whole
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            return fh.read()
+    except OSError:
+        return None
+
+
+def _api_texts(text: str) -> list:
+    """A query's text as written and, for a JSON body, its strings decoded (``\\u0050`` written for ``P``)."""
+    out = [text]
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return out
+    stack = [data]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, str):
+            out.append(item)
+        elif isinstance(item, dict):
+            stack.extend(item.values())
+            stack.extend(k for k in item if isinstance(k, str))
+        elif isinstance(item, list):
+            stack.extend(item)
+    return out
+
+
+def _api_merge(args: list, cwd: Optional[str]) -> Optional[str]:
+    """For ``gh api <args>``: the pull request it merges (its number, or "" when it names none), or None when the
+    call does not merge. A call that reaches GitHub's merge endpoints, or a GraphQL mutation that merges, is a
+    merge like ``gh pr merge`` (rule 18). A GraphQL query Foreman cannot read whole (stdin, a missing or special
+    file, one past 1 MiB, a relative file before the working directory is known) counts as one: it cannot tell, and
+    the call is refused rather than let through."""
+    endpoint, method, raw, files = None, None, [], []
+    for name, value in _api_options(args):
+        if name == "" and endpoint is None:
+            endpoint = value
+        elif name in ("-X", "--method"):
+            method = (value or "").upper()
+        elif name in ("-f", "--raw-field"):  # a literal value, "@" included
+            raw.append((value or "").partition("=")[2])
+        elif name in ("-F", "--field"):  # "@file" is read from the file ("@-": stdin)
+            v = (value or "").partition("=")[2]
+            (files if v.startswith("@") else raw).append(v[1:] if v.startswith("@") else v)
+        elif name == "--input":
+            files.append(value or "")
     if not endpoint:
         return None
-    method = method or ("POST" if fields or inputs else "GET")
-    path = re.sub(r"^https?://[^/]+/(?:api/v3/)?", "", endpoint).lstrip("/")
+    method = method or ("POST" if raw or files else "GET")
+    path = re.sub(r"^https?://[^/]+/", "", endpoint).lstrip("/")
+    path = re.sub(r"^api/v3/", "", path)
     m = _API_PR_MERGE.search(path)
     if m and method != "GET":
         return m.group(1) if m.group(1).isdigit() else ""
     if _API_BRANCH_MERGE.search(path) and method != "GET":
         return ""
-    if path.split("?")[0].rstrip("/") != "graphql":
+    if re.split(r"[?#]", path)[0].rstrip("/") not in ("graphql", "api/graphql"):
         return None
-    texts = []
-    for field in fields:
-        key, _, value = field.partition("=")
-        if value.startswith("@"):
-            inputs.append(value[1:])
-        else:
-            texts.append(value)
-    for source in inputs:
-        if source in ("", "-"):
-            return ""  # the query comes from stdin: unseen
-        try:
-            with open(os.path.join(cwd, os.path.expanduser(source)), encoding="utf-8", errors="replace") as fh:
-                texts.append(fh.read(1 << 20))
-        except OSError:
-            return ""  # a file Foreman cannot read: unseen
+    texts = list(raw)
+    for source in files:
+        text = None if source in ("", "-") else _api_read(cwd, source)
+        if text is None:
+            return ""  # a query Foreman cannot see
+        texts += _api_texts(text)
     return "" if any(_API_GRAPHQL_MERGE.search(t) for t in texts) else None
 
 
