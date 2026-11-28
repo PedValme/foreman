@@ -118,7 +118,7 @@ def tokenize(command: str) -> list:
             continue
         if c in "'\"":
             quote, has_word = c, True
-        elif c == "\\" and i + 1 < n and command[i + 1] in "'\" \\\n":
+        elif c == "\\" and i + 1 < n and command[i + 1] in "'\" \\\n<>;|&(){}":  # `\<` is the text "<"
             if command[i + 1] != "\n":
                 buf.append(command[i + 1])
                 has_word = True
@@ -131,7 +131,7 @@ def tokenize(command: str) -> list:
             tokens.append(_Redir(m.group(0)))
             i += len(m.group(0))
             continue
-        elif c == "}" and has_word and braces and (i + 1 >= n or command[i + 1] in " \t\r\n;|&)"):
+        elif c == "}" and has_word and braces and (i + 1 >= n or command[i + 1] in " \t\r\n;|&)<>"):
             # `{gh pr merge}`: zsh closes the group at a word's end
             flush()
             tokens.append(_Op("}"))
