@@ -216,6 +216,17 @@ class TerminalGate(GitRepoCase):
         self.assertEqual(d["action"], "approve")
         self.assertIn("more than one branch", d["message"])
 
+    def test_a_push_options_value_is_not_a_branch(self):
+        self.assertIsNone(terminal("git push origin main", self.root))
+        for command in ("git push -o ci.skip origin main", "git push -oci.skip origin main",
+                        "git push -uo ci.skip origin main", "git push --push-option ci.skip origin main",
+                        "git push --push-option=ci.skip origin main", "git push --receive-pack git-receive-pack origin main",
+                        "git push origin main -o merge_request.create"):
+            self.assertIsNone(terminal(command, self.root), command)
+        d = terminal("git push -o ci.skip origin main other", self.root)  # two refspecs are still two
+        self.assertEqual(d["action"], "approve")
+        self.assertIn("more than one branch", d["message"])
+
     def test_a_push_foreman_cannot_resolve_asks_a_person(self):
         # Found in the final review: each of these published a rigged branch while the clean current one was read.
         for command in ("git push origin 'refs/heads/*:refs/heads/*'", "git push origin 'refs/heads/rig*:refs/heads/main*'"):

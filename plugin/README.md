@@ -564,6 +564,8 @@ same-model warning compares with the main model in your config, not one you swit
   tests run (`testPathIgnorePatterns`, `testMatch`, `roots` and the like) counts as a change to the check, as its
   `scripts` already did; before, `"jest": {"testPathIgnorePatterns": ["tests/"]}` took the tests out unseen. A
   `jest.config.json` is read like `jest.config.js`.
+- **A push option is not a branch.** `git push -o ci.skip origin main` (and `--push-option`, `--receive-pack`,
+  `--exec`) was read as several branches and went to a person; the option's value is now skipped.
 - **A merge through `gh api` is refused like `gh pr merge`.** The agent's `gh api` call to GitHub's merge endpoints,
   or a GraphQL mutation that merges or arms an automatic merge, was let through. gh's `{owner}`/`{repo}`
   placeholders no longer split a command in two.

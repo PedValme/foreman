@@ -1032,8 +1032,31 @@ def _merge_conclusion(repo: Repo, report, scan: Callable):
     return report
 
 
+# `git push` options whose value is the next word (a push option, the remote's programs): never a remote or a ref.
+_PUSH_VALUE_OPTS = {"--push-option", "--receive-pack", "--exec"}
+
+
+def _push_positional(args: list) -> list:
+    """The remote and refspecs of ``git push`` arguments: the words that are not options nor an option's value
+    (``-o ci.skip``, ``-oci.skip``, ``-uo ci.skip``, ``--push-option ci.skip``); everything after ``--``."""
+    out, i = [], 0
+    while i < len(args):
+        a = args[i]
+        i += 1
+        if a == "--":
+            return out + list(args[i:])
+        if a in _PUSH_VALUE_OPTS:
+            i += 1
+        elif a.startswith("-") and not a.startswith("--") and "o" in a[1:]:
+            if a.endswith("o"):  # `-o value`, `-uo value`; `-ovalue` carries it
+                i += 1
+        elif not a.startswith("-"):
+            out.append(a)
+    return out
+
+
 def _push_report(repo: Repo, act: Action, out: Outcome):
-    positional = [a for a in act.args if not a.startswith("-")]
+    positional = _push_positional(act.args)
     if any(a in ("--all", "--mirror", "--branches") for a in act.args) or len(positional) > 2:
         out.notes.append("`git push %s` publishes more than one branch; Foreman inspects only the current one. Push "
                          "each branch on its own, or approve if you have checked them." % " ".join(act.args))
