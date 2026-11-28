@@ -176,7 +176,8 @@ Limits in Codex:
   (`examples/foreman-check.yml`). Codex's own documentation calls hooks "a useful guardrail, not a complete
   enforcement boundary".
 - Foreman's hooks and state are files. The adapter refuses what names them (its installation, `~/.foreman`, Codex's
-  `config.toml`, `hooks.json` or `requirements.toml` rewritten to switch hooks off or drop Foreman's,
+  `config.toml`, `hooks.json` or `requirements.toml` rewritten to switch hooks off or drop Foreman's (also in a
+  home moved with `CODEX_HOME`),
   `codex features disable hooks`, its entry point run by hand), which stops the plain attempt, not a disguised one.
 - When the hook cannot run at all (no `python3` on the PATH, a Python older than 3.9, a damaged installation), it
   fails as any hook error does: Codex reports it and goes on without the gate (`|| exit 1` keeps it from being read

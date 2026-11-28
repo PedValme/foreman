@@ -171,6 +171,23 @@ class PreToolUse(CodexCase):
                         "rm -rf ~/.codex/plugins/cache/local/foreman"):
             self.assertEqual(self.decision(self.tool("Bash", command=command))[0], "deny", command)
 
+    def test_settings_in_a_moved_home_are_guarded_too(self):
+        home = os.path.join(self.tmp, "codex-home")
+        os.makedirs(home)
+        env = {"CODEX_HOME": home}
+
+        def tool(name, **tool_input):
+            return codex.answer(self.payload("PreToolUse", tool_name=name, tool_use_id="c", tool_input=tool_input), env)
+        config = os.path.join(home, "config.toml")
+        add = "*** Begin Patch\n*** Add File: %s\n+[features]\n+hooks = false\n*** End Patch\n" % config
+        self.assertEqual(self.decision(tool("apply_patch", command=add))[0], "deny")
+        for command in ("printf '[features]\\nhooks = false\\n' >> %s" % config,
+                        "sed -i '/hook.py/d' $CODEX_HOME/hooks.json", "rm -rf ${CODEX_HOME}/plugins/cache/local/foreman"):
+            self.assertEqual(self.decision(tool("Bash", command=command))[0], "deny", command)
+        self.assertIsNone(tool("Bash", command="cat $CODEX_HOME/config.toml"))
+        self.assertIsNone(codex.answer(self.payload("PreToolUse", tool_name="apply_patch", tool_use_id="c",
+                                                    tool_input={"command": add}), {}))  # no variable: ordinary
+
     def test_reading_codex_settings_is_ordinary_work(self):
         for command in ("codex features list", "cat ~/.codex/config.toml", "grep hooks ~/.codex/hooks.json",
                         "jq . .codex/hooks.json", "codex --version",

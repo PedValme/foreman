@@ -302,6 +302,43 @@ def only_reads(prog: str, words: list) -> bool:
     return not writes and not any(w.startswith("-i") or w == "--in-place" for w in words[1:])
 
 
+class MovedHome:
+    """A harness's home moved by an environment variable (``CLAUDE_CONFIG_DIR``, ``CODEX_HOME``): its settings files
+    and plugins folder there, which the guards that know only ``~/.claude`` and ``~/.codex`` would not see. Empty
+    (nothing matches) when the variable is unset."""
+
+    def __init__(self, env, var: str, files: tuple):
+        home = (env or {}).get(var) or ""
+        self.files = ()
+        self.text = None
+        if not home.strip():
+            return
+        home = os.path.expanduser(home)
+        absolute = os.path.abspath(home)
+        self.files = tuple(os.path.normcase(os.path.realpath(os.path.join(absolute, f))) for f in files)
+        spellings = {absolute.replace("\\", "/"), home.replace("\\", "/")}
+        user = os.path.expanduser("~").replace("\\", "/")
+        if user and absolute.replace("\\", "/").startswith(user + "/"):
+            spellings.add("~" + absolute.replace("\\", "/")[len(user):])
+        refs = [re.escape(s.rstrip("/")).replace("/", r"[/\\]+") for s in spellings if s.strip("/")]
+        refs += [r"\$\{?%s\}?" % var, r"%%%s%%" % var, r"\$env:%s" % var]
+        names = "|".join(re.escape(f) for f in files) + r"|plugins\b"
+        self.text = re.compile(r"(?i)(?:%s)[/\\]+(?:%s)" % ("|".join(refs), names))
+
+    def is_file(self, path: str) -> bool:
+        """``path`` is one of the moved home's settings files."""
+        if not self.files or not path:
+            return False
+        try:
+            return os.path.normcase(os.path.realpath(os.path.abspath(os.path.expanduser(path)))) in self.files
+        except (OSError, ValueError):
+            return False
+
+    def named_in(self, text: str) -> bool:
+        """``text`` (one simple command) names one of those files or the plugins folder."""
+        return bool(self.text and self.text.search(text or ""))
+
+
 def _person_only(host: Host, command: str, words=_ALLOW_WORDS) -> bool:
     """The agent starting its own harness to type the person's command (`claude -p "/foreman:allow 3f2a"`, or the
     words piped into it; with ``_WRITE_WORDS``, `pi "/foreman merge 7"`). The harness must be a program that runs
