@@ -77,7 +77,7 @@ export function ask(request: Request, hook = HOOK, python = "python3", limit = T
 // The gate's own quick filter (`gate._quick` in plugin/foreman/gate.py, `core.looks_gated`): the one check this
 // plugin repeats, for when the Python side cannot answer. Keep the two in step.
 const QUICK_TOOL = /\b(?:git|gh)(?:\.exe)?\b/i
-const QUICK_VERB = /\b(?:commit|push|pr|config)\b/i
+const QUICK_VERB = /\b(?:commit|push|pr|config|api)\b/i
 
 export function looksGated(command: unknown): boolean {
   return typeof command === "string" && QUICK_TOOL.test(command) && QUICK_VERB.test(command)

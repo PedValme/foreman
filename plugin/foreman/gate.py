@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextvars
 import hashlib
+import json
 import logging
 import os
 import posixpath
@@ -18,6 +19,7 @@ import time
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Callable, Iterable, Optional
+from urllib.parse import urlsplit
 
 from . import detector, grants
 from .detector import MARKER, Finding, GitError, Repo
@@ -36,8 +38,9 @@ _MAX_READ_BYTES = 2 * 1024 * 1024
 # independent linear searches: one regex spanning both words with ``[\s\S]*`` between them is quadratic on a long
 # command that names git many times without a verb (a 260 KB heredoc took 98 s, past Hermes's hook timeout).
 _QUICK_TOOL = re.compile(r"\b(?:git|gh)(?:\.exe)?\b", re.I)
-_QUICK_VERB = re.compile(r"\b(?:commit|push|pr|config)\b", re.I)
+_QUICK_VERB = re.compile(r"\b(?:commit|push|pr|config|api)\b", re.I)
 _REDIR = re.compile(r">>?(?:&(?:\d+|-))?")
+_REDIR_IN = re.compile(r"<(?:<<?|&(?:\d+|-)|>)?")  # `< file`, `<<EOF`, `<<< text`, `<&3`, `<> file`
 
 
 def _quick(command: str) -> bool:
@@ -93,6 +96,7 @@ def tokenize(command: str) -> list:
     except before a quote, a space or another backslash, so Windows paths survive."""
     tokens, buf, quote, has_word, i = [], [], None, False, 0
     n = len(command)
+    braces = 0  # command groups opened with `{` and not yet closed
 
     def flush():
         nonlocal buf, has_word
@@ -114,20 +118,30 @@ def tokenize(command: str) -> list:
             continue
         if c in "'\"":
             quote, has_word = c, True
-        elif c == "\\" and i + 1 < n and command[i + 1] in "'\" \\\n":
+        elif c == "\\" and i + 1 < n and command[i + 1] in "'\" \\\n<>;|&(){}":  # `\<` is the text "<"
             if command[i + 1] != "\n":
                 buf.append(command[i + 1])
                 has_word = True
             i += 1
         elif c in " \t\r":
             flush()
-        elif c == ">":
+        elif c in "<>":
             flush()
-            m = _REDIR.match(command, i)  # never command[i:]: a copy per ">" is quadratic
+            m = (_REDIR if c == ">" else _REDIR_IN).match(command, i)  # never command[i:]: quadratic
             tokens.append(_Redir(m.group(0)))
             i += len(m.group(0))
             continue
-        elif c == "\n" or c in ";|&(){}":
+        elif c == "}" and has_word and braces and (i + 1 >= n or command[i + 1] in " \t\r\n;|&)<>"):
+            # `{gh pr merge}`: zsh closes the group at a word's end
+            flush()
+            tokens.append(_Op("}"))
+            braces -= 1
+            i += 1
+            continue
+        elif c == "\n" or c in ";|&()" or (c in "{}" and not has_word):
+            # a brace at a word's start may group commands (`{ git commit; }`; zsh runs `{git commit}`); inside a
+            # word it is text (`repos/{owner}/{repo}`, gh's placeholders)
+            braces = braces + 1 if c == "{" else max(0, braces - 1) if c == "}" else braces
             flush()
             op = command[i:i + 2] if command[i:i + 2] in ("&&", "||") else c
             tokens.append(_Op(op))
@@ -211,10 +225,11 @@ def parse_actions(command: str, cwd: str, located: bool = False, _depth: int = 0
             if prog == "pushd":
                 stack.append(cwd)
             cwd = _resolve(cwd, target) if target else os.path.expanduser("~")
-            located = True
+            located, state["moved"] = True, True
             continue
         if prog == "popd":
             cwd = stack.pop() if stack else cwd
+            state["moved"] = True
             continue
         if prog in _SAFE_PROGS:
             if writes_file:  # echo x > tests/test_a.py rewrites a file
@@ -253,7 +268,7 @@ def parse_actions(command: str, cwd: str, located: bool = False, _depth: int = 0
                     unsafe(original)
                 continue
         elif prog == "gh":
-            act, sub = _parse_gh(words[1:], cwd, located)
+            act, sub = _parse_gh(words[1:], cwd, located, state.get("moved", False))
             if act is None:
                 if sub not in _SAFE_GH or writes_file:
                     unsafe(original)
@@ -327,9 +342,9 @@ def _strip_redirs(words: list) -> tuple:
     while i < len(words):
         w = words[i]
         if isinstance(w, _Redir):
-            if "&" not in w:  # >&2 duplicates a descriptor; > file writes one
+            if "&" not in w:  # >&2 duplicates a descriptor; > file writes one; < file reads one
                 target = words[i + 1] if i + 1 < len(words) else ""
-                writes = writes or target.lower() not in _HARMLESS_TARGETS
+                writes = writes or (w.startswith(">") or w == "<>") and target.lower() not in _HARMLESS_TARGETS
                 i += 1
             i += 1
             continue
@@ -509,19 +524,167 @@ def _commit_no_verify(args: list) -> str:
     return ""
 
 
-def _parse_gh(words: list, cwd: str, located: bool):
+def _parse_gh(words: list, cwd: str, located: bool, moved: bool = False):
     def skip_flags(i):
         while i < len(words) and words[i].startswith("-"):
             i += 2 if words[i] in ("-R", "--repo") else 1
         return i
 
     i = skip_flags(0)
+    if i < len(words) and words[i] == "api":
+        # a relative query file is read only where the command surely runs: not after a `cd` of the same line,
+        # which may not have run (`false && cd x; gh api …`), nor before the directory is known
+        known = not moved and (located or cwd != os.sep)
+        target = _api_merge(words[i + 1:], cwd if known else None)
+        if target is not None:
+            return Action("pr-merge", cwd, [target] if target else [], located=located), "api"
+        return None, "api"
     if i < len(words) and words[i] == "pr":
         j = skip_flags(i + 1)  # gh pr -R owner/repo merge 5: the persistent flag may come after "pr"
         if j < len(words) and words[j] in ("create", "merge"):
             return Action("pr-" + words[j], cwd, words[j + 1:], located=located), words[j]
         return None, words[j] if j < len(words) else ""
     return None, words[i + 1] if i + 1 < len(words) else ""
+
+
+# `gh api` options that take a value (the endpoint is the first word that is neither an option nor its value).
+_API_VALUE_LONG = {"--method", "--raw-field", "--field", "--header", "--input", "--jq", "--template", "--hostname",
+                   "--preview", "--cache"}
+_API_VALUE_SHORT = set("XfFHqtp")  # gh's one-letter options that take a value; the rest (-i…) are switches
+# REST endpoints that merge: a pull request (`PUT …/pulls/7/merge`, `…/merge-async`, which merges or queues it) and
+# a branch into another (`POST …/merges`).
+_API_PR_MERGE = re.compile(r"(?:^|/)repos/[^/]+/[^/]+/pulls/([^/?#]+)/merge(?:-async)?/?(?:[?#].*)?$")
+_API_BRANCH_MERGE = re.compile(r"(?:^|/)repos/[^/]+/[^/]+/merges/?(?:[?#].*)?$")
+# GraphQL mutations that merge, or arm a merge for later.
+_API_GRAPHQL_MERGE = re.compile(r"\b(?:mergePullRequest|enablePullRequestAutoMerge|mergeBranch|"
+                                r"enqueuePullRequest)\b")
+_API_READ_LIMIT = 1 << 20
+
+
+def _api_options(args: list):
+    """(option, value) for each option of ``gh api`` (None for a switch) and ("", word) for each other word, read
+    as gh's flag parser reads them: ``--method=PUT``, ``--method PUT``, ``-XPUT``, ``-X=PUT``, ``-X PUT`` and
+    switches combined with one (``-iX PUT``)."""
+    i = 0
+    while i < len(args):
+        a = args[i]
+        i += 1
+        if a == "--":
+            for rest in args[i:]:
+                yield "", rest
+            return
+        if a.startswith("--"):
+            name, eq, inline = a.partition("=")
+            if name in _API_VALUE_LONG:
+                if not eq:
+                    inline, i = (args[i] if i < len(args) else ""), i + 1
+                yield name, inline
+            else:
+                yield name, None
+            continue
+        if a.startswith("-") and len(a) > 1:
+            for k, ch in enumerate(a[1:], 1):
+                if ch in _API_VALUE_SHORT:
+                    rest = a[k + 1:]
+                    if rest:
+                        yield "-" + ch, rest[1:] if rest.startswith("=") else rest
+                    else:
+                        yield "-" + ch, args[i] if i < len(args) else ""
+                        i += 1
+                    break
+                if a[k + 1:k + 2] == "=":  # `-i=false`: the switch takes the rest as its value
+                    yield "-" + ch, None
+                    break
+                yield "-" + ch, None
+            continue
+        yield "", a
+
+
+def _api_read(cwd: Optional[str], source: str) -> Optional[str]:
+    """The text of a file ``gh`` would read, or None when Foreman cannot read all of it here (no working
+    directory yet, not a regular file, too long, unreadable)."""
+    path = os.path.expanduser(source)
+    if not os.path.isabs(path):
+        if not cwd:
+            return None
+        path = os.path.join(cwd, path)
+    try:
+        if not os.path.isfile(path) or os.path.getsize(path) > _API_READ_LIMIT:
+            return None  # a FIFO would hold the hook; a longer file is not read whole
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            return fh.read()
+    except OSError:
+        return None
+
+
+def _api_texts(text: str) -> Optional[list]:
+    """A request body's text as written and, as JSON, its strings decoded (``\\u0050`` written for ``P``); None
+    when it looks like JSON and cannot be decoded (too deep): unseen."""
+    out = [text]
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None if text.lstrip()[:1] in ("{", "[") else out
+    except RecursionError:
+        return None
+    stack = [data]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, str):
+            out.append(item)
+        elif isinstance(item, dict):
+            stack.extend(item.values())
+            stack.extend(k for k in item if isinstance(k, str))
+        elif isinstance(item, list):
+            stack.extend(item)
+    return out
+
+
+def _api_merge(args: list, cwd: Optional[str]) -> Optional[str]:
+    """For ``gh api <args>``: the pull request it merges (its number, or "" when it names none), or None when the
+    call does not merge. A call that reaches GitHub's merge endpoints, or a GraphQL mutation that merges, is a
+    merge like ``gh pr merge`` (rule 18). A GraphQL query Foreman cannot read whole (stdin, a missing or special
+    file, one past 1 MiB, a relative file before the working directory is known) counts as one: it cannot tell, and
+    the call is refused rather than let through."""
+    endpoint, method, raw, files, body = None, None, [], [], None
+    for name, value in _api_options(args):
+        if name == "" and endpoint is None:
+            endpoint = value
+        elif name in ("-X", "--method"):
+            method = (value or "").upper()
+        elif name in ("-f", "--raw-field"):  # a literal value, "@" included
+            raw.append((value or "").partition("=")[2])
+        elif name in ("-F", "--field"):  # "@file" is read from the file ("@-": stdin)
+            v = (value or "").partition("=")[2]
+            (files if v.startswith("@") else raw).append(v[1:] if v.startswith("@") else v)
+        elif name == "--input":
+            body = value or ""  # gh reads the last one
+    if not endpoint:
+        return None
+    endpoint = endpoint.replace("\\", "")  # the shell drops one outside quotes (`…/pulls/42/\\merge`); no endpoint has one
+    method = method or ("POST" if raw or files or body is not None else "GET")
+    path = urlsplit(endpoint).path if "://" in endpoint else endpoint  # any case of scheme, as Go reads it
+    path = re.sub(r"^api/v3/", "", path.lstrip("/"))
+    m = _API_PR_MERGE.search(path)
+    if m and method != "GET":
+        return m.group(1) if m.group(1).isdigit() else ""
+    if _API_BRANCH_MERGE.search(path) and method != "GET":
+        return ""
+    if re.split(r"[?#]", path)[0].rstrip("/") not in ("graphql", "api/graphql"):
+        return None
+    texts = list(raw)
+    for source in files:  # `-F query=@file`: the field's text as it is
+        text = None if source in ("", "-") else _api_read(cwd, source)
+        if text is None:
+            return ""  # a query Foreman cannot see
+        texts.append(text)
+    if body is not None:  # `--input file`: the request's JSON body
+        text = None if body in ("", "-") else _api_read(cwd, body)
+        decoded = _api_texts(text) if text is not None else None
+        if decoded is None:
+            return ""
+        texts += decoded
+    return "" if any(_API_GRAPHQL_MERGE.search(t) for t in texts) else None
 
 
 def _option_values(args: list, short: str, long: str) -> list:
@@ -1285,7 +1448,24 @@ def gate_command(command: str, workdir: Optional[str] = None, task_id: str = "")
     first = parse_actions(command, os.sep)
     if not first:  # nothing gated: skip resolving the session directory
         return None
+    cwd = None
+
+    def where():
+        nonlocal cwd
+        if cwd is None:
+            if workdir and os.path.isabs(os.path.expanduser(workdir)):
+                cwd = os.path.normpath(os.path.expanduser(workdir))  # explicit: never replaced by another candidate
+            else:
+                base = session_cwd(task_id, deadline=deadline) or _UNKNOWN_DIR
+                cwd = _resolve(base, workdir) if workdir else base
+        return cwd
+
     merge = next((a for a in first if a.kind == "pr-merge"), None)
+    # `gh api graphql -F query=@q.graphql`: read where the command runs. Not after a subshell, whose `cd` this
+    # parser would carry past it: the file stays unseen.
+    if merge is not None and not merge.args and "(" not in command:
+        merge = next((a for a in parse_actions(command, where(), located=bool(workdir)) if a.kind == "pr-merge"),
+                     None)
     if merge is not None:  # never `approve`: "always", a session answer or YOLO would let later merges through
         return {"action": "block", "message": "Merging is the user's decision. Ask them to run `/foreman merge %s`."
                 % _merge_target(merge.args)}
@@ -1293,12 +1473,7 @@ def gate_command(command: str, workdir: Optional[str] = None, task_id: str = "")
         return {"action": "block", "message": "Foreman blocked `git config core.hooksPath`: it switches the "
                 "repository's git hooks off or elsewhere. Leave the hooks in place; if a hook fails, fix what it "
                 "reports. If the repository's setup needs it, ask the user to run it."}
-    if workdir and os.path.isabs(os.path.expanduser(workdir)):
-        cwd = os.path.normpath(os.path.expanduser(workdir))  # explicit: never replaced by another candidate
-    else:
-        base = session_cwd(task_id, deadline=deadline) or _UNKNOWN_DIR
-        cwd = _resolve(base, workdir) if workdir else base
-    actions = parse_actions(command, cwd, located=bool(workdir))
+    actions = parse_actions(command, where(), located=bool(workdir))
     if not actions:
         return None
     unknown = [a for a in actions if _inside(a.cwd, _canon(_UNKNOWN_DIR))]

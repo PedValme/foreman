@@ -381,6 +381,69 @@ class TerminalGate(GitRepoCase):
                                                                "`/foreman merge %s`." % n}, command)
         self.assertNotIn("rule_key", terminal("gh pr merge 42"))  # no workdir, no repository: still refused
 
+    def test_braces_group_at_a_words_start_and_are_text_inside_one(self):
+        for command in ("{ git commit -m x; }", "{git commit -m x}", "x && {git commit -m x;}"):
+            self.assertEqual([a.kind for a in gate.parse_actions(command, self.root)], ["commit"], command)
+        self.assertEqual(gate.segments("gh api repos/{owner}/{repo}/pulls/7 a{b}c ${HOME}"),
+                         [["gh", "api", "repos/{owner}/{repo}/pulls/7", "a{b}c", "${HOME}"]])
+
+    def test_a_merge_through_gh_api_is_refused_like_gh_pr_merge(self):
+        with open(os.path.join(self.root, "q.graphql"), "w", encoding="utf-8") as fh:
+            fh.write("mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }")
+        with open(os.path.join(self.root, "read.graphql"), "w", encoding="utf-8") as fh:
+            fh.write("query { viewer { login } }")
+        with open(os.path.join(self.root, "body.json"), "w", encoding="utf-8") as fh:
+            fh.write('{"query": "mutation { merge\\u0050ullRequest(input: {}) { x } }"}')
+        with open(os.path.join(self.root, "deep.json"), "w", encoding="utf-8") as fh:
+            fh.write("[" * 100000 + "]" * 100000)
+        with open(os.path.join(self.root, "read.json"), "w", encoding="utf-8") as fh:
+            fh.write('{"query": "query { viewer { login } }"}')
+        with open(os.path.join(self.root, "big.graphql"), "w", encoding="utf-8") as fh:
+            fh.write("#" * (1 << 20) + "\nmutation { mergePullRequest(input: {}) { x } }")
+        for command, n in (("gh api -X PUT repos/acme/w/pulls/42/merge", "42"),
+                           ("gh api --method PUT /repos/acme/w/pulls/42/merge -f merge_method=squash", "42"),
+                           ("gh api -XPUT repos/{owner}/{repo}/pulls/42/merge", "42"),
+                           ("gh api --method=put https://api.github.com/repos/acme/w/pulls/42/merge", "42"),
+                           ("gh api repos/acme/w/pulls/42/merge -f commit_title=x", "42"),  # a field makes it POST
+                           ("gh api -X POST repos/acme/w/merges -f base=main -f head=feature", "<n>"),
+                           ("gh api graphql -f query='mutation { mergePullRequest(input: {}) { x } }'", "<n>"),
+                           ("gh api graphql -F query=@q.graphql", "<n>"),
+                           ("gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {}) { x } }'",
+                            "<n>"),
+                           ("gh api graphql --input -", "<n>"),  # a query Foreman cannot see
+                           ("gh api graphql -F query=@missing.graphql", "<n>"),
+                           ("bash -c 'gh api -X PUT repos/a/b/pulls/7/merge'", "7"),
+                           ("gh api -X PUT https://h.example/repos/o/r/pulls/42/merge-async", "42"),  # or queued
+                           ("gh api -iX PUT https://h.example/repos/o/r/pulls/42/merge", "42"),  # switches combined
+                           ("gh api -X=PUT repos/o/r/pulls/42/merge", "42"),
+                           ("gh api graphql --input body.json", "<n>"),  # the mutation's name escaped in JSON
+                           ("gh api https://h.example/api/graphql --input body.json", "<n>"),  # GHES's path
+                           ("gh api graphql -F query=@big.graphql", "<n>"),  # past what Foreman reads
+                           ("cd / && gh api graphql -F query=@q.graphql", "<n>"),  # not there: unseen
+                           ("gh api -i=f -X PUT https://h.example/repos/o/r/pulls/42/merge", "42"),  # a switch's value
+                           ("{gh api -X PUT https://h.example/repos/o/r/pulls/42/merge}", "42"),  # zsh drops the }
+                           ("(cd plugin); gh api graphql -F query=@q.graphql", "<n>"),  # after a subshell: unseen
+                           ("gh api HTTPS://h.example/graphql --input -", "<n>"),
+                           ("gh api graphql --input deep.json", "<n>"),  # too deep to decode: unseen
+                           ("LABEL=\\< gh pr merge 42", "42"), ("{gh pr merge 42}>/dev/null", "42"),
+                           ("{gh pr merge 42}</dev/null", "42"),
+                           ("{gh pr merge 42}", "42"), ("{gh api -X PUT repos/o/r/pulls/42/merge}", "42"),  # zsh
+                           ("gh api </dev/null -X PUT https://h.example/repos/o/r/pulls/42/merge", "42"),
+                           ("false && cd plugin; gh api graphql -F query=@q.graphql", "<n>"),  # a cd that may not run
+                           ("gh api -X PUT https://h.example/repos/o/r/pulls/42/\\merge", "42"),
+                           ("gh -R acme/w api -X PUT repos/acme/w/pulls/42/merge", "42")):
+            d = terminal(command, self.root)
+            self.assertEqual(d, {"action": "block", "message": "Merging is the user's decision. Ask them to run "
+                                                               "`/foreman merge %s`." % n}, command)
+        for command in ("gh api repos/acme/w/pulls/42/merge",  # GET: is it merged?
+                        "gh api repos/acme/w/pulls/42", "gh api -X PATCH repos/acme/w/pulls/42 -f title=x",
+                        "gh api graphql -f query='query { viewer { login } }'", "gh api graphql -F query=@read.graphql",
+                        "gh api repos/acme/w/merges",
+                        "gh api graphql -f query=@q.graphql",  # -f is literal: the text "@q.graphql", no file
+                        "gh api graphql --input missing.json --input read.json"):  # gh reads the last one
+            d = terminal(command, self.root)
+            self.assertNotEqual((d or {}).get("message", "")[:30], "Merging is the user's decision", command)
+
     def test_push_of_several_branches_is_approved_only_for_those_commits(self):
         d = terminal("git push --all origin", self.root)
         self.assertEqual(d["action"], "approve")

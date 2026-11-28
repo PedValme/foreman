@@ -88,7 +88,7 @@ export function ask(request: Request, cwd?: string, timeoutMs: number = TIMEOUT_
 /** The gate's own quick filter (`gate._quick`, copied exactly): a git or gh word and a commit, push, pr or config
  * word, anywhere. Used only when Python could not answer: never a decision on its own. */
 export function looksGated(command: string): boolean {
-	return /\b(?:git|gh)(?:\.exe)?\b/i.test(command) && /\b(?:commit|push|pr|config)\b/i.test(command);
+	return /\b(?:git|gh)(?:\.exe)?\b/i.test(command) && /\b(?:commit|push|pr|config|api)\b/i.test(command);
 }
 
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
