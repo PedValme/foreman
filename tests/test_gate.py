@@ -394,6 +394,10 @@ class TerminalGate(GitRepoCase):
             fh.write("query { viewer { login } }")
         with open(os.path.join(self.root, "body.json"), "w", encoding="utf-8") as fh:
             fh.write('{"query": "mutation { merge\\u0050ullRequest(input: {}) { x } }"}')
+        with open(os.path.join(self.root, "deep.json"), "w", encoding="utf-8") as fh:
+            fh.write("[" * 100000 + "]" * 100000)
+        with open(os.path.join(self.root, "read.json"), "w", encoding="utf-8") as fh:
+            fh.write('{"query": "query { viewer { login } }"}')
         with open(os.path.join(self.root, "big.graphql"), "w", encoding="utf-8") as fh:
             fh.write("#" * (1 << 20) + "\nmutation { mergePullRequest(input: {}) { x } }")
         for command, n in (("gh api -X PUT repos/acme/w/pulls/42/merge", "42"),
@@ -416,6 +420,11 @@ class TerminalGate(GitRepoCase):
                            ("gh api https://h.example/api/graphql --input body.json", "<n>"),  # GHES's path
                            ("gh api graphql -F query=@big.graphql", "<n>"),  # past what Foreman reads
                            ("cd / && gh api graphql -F query=@q.graphql", "<n>"),  # not there: unseen
+                           ("gh api -i=f -X PUT https://h.example/repos/o/r/pulls/42/merge", "42"),  # a switch's value
+                           ("{gh api -X PUT https://h.example/repos/o/r/pulls/42/merge}", "42"),  # zsh drops the }
+                           ("(cd plugin); gh api graphql -F query=@q.graphql", "<n>"),  # after a subshell: unseen
+                           ("gh api HTTPS://h.example/graphql --input -", "<n>"),
+                           ("gh api graphql --input deep.json", "<n>"),  # too deep to decode: unseen
                            ("gh -R acme/w api -X PUT repos/acme/w/pulls/42/merge", "42")):
             d = terminal(command, self.root)
             self.assertEqual(d, {"action": "block", "message": "Merging is the user's decision. Ask them to run "
@@ -424,7 +433,8 @@ class TerminalGate(GitRepoCase):
                         "gh api repos/acme/w/pulls/42", "gh api -X PATCH repos/acme/w/pulls/42 -f title=x",
                         "gh api graphql -f query='query { viewer { login } }'", "gh api graphql -F query=@read.graphql",
                         "gh api repos/acme/w/merges",
-                        "gh api graphql -f query=@q.graphql"):  # -f is literal: the text "@q.graphql", no file
+                        "gh api graphql -f query=@q.graphql",  # -f is literal: the text "@q.graphql", no file
+                        "gh api graphql --input missing.json --input read.json"):  # gh reads the last one
             d = terminal(command, self.root)
             self.assertNotEqual((d or {}).get("message", "")[:30], "Merging is the user's decision", command)
 

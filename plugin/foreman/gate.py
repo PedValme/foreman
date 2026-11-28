@@ -19,6 +19,7 @@ import time
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Callable, Iterable, Optional
+from urllib.parse import urlsplit
 
 from . import detector, grants
 from .detector import MARKER, Finding, GitError, Repo
@@ -577,6 +578,9 @@ def _api_options(args: list):
                         yield "-" + ch, args[i] if i < len(args) else ""
                         i += 1
                     break
+                if a[k + 1:k + 2] == "=":  # `-i=false`: the switch takes the rest as its value
+                    yield "-" + ch, None
+                    break
                 yield "-" + ch, None
             continue
         yield "", a
@@ -599,13 +603,16 @@ def _api_read(cwd: Optional[str], source: str) -> Optional[str]:
         return None
 
 
-def _api_texts(text: str) -> list:
-    """A query's text as written and, for a JSON body, its strings decoded (``\\u0050`` written for ``P``)."""
+def _api_texts(text: str) -> Optional[list]:
+    """A request body's text as written and, as JSON, its strings decoded (``\\u0050`` written for ``P``); None
+    when it looks like JSON and cannot be decoded (too deep): unseen."""
     out = [text]
     try:
         data = json.loads(text)
     except ValueError:
-        return out
+        return None if text.lstrip()[:1] in ("{", "[") else out
+    except RecursionError:
+        return None
     stack = [data]
     while stack:
         item = stack.pop()
@@ -625,7 +632,7 @@ def _api_merge(args: list, cwd: Optional[str]) -> Optional[str]:
     merge like ``gh pr merge`` (rule 18). A GraphQL query Foreman cannot read whole (stdin, a missing or special
     file, one past 1 MiB, a relative file before the working directory is known) counts as one: it cannot tell, and
     the call is refused rather than let through."""
-    endpoint, method, raw, files = None, None, [], []
+    endpoint, method, raw, files, body = None, None, [], [], None
     for name, value in _api_options(args):
         if name == "" and endpoint is None:
             endpoint = value
@@ -637,12 +644,14 @@ def _api_merge(args: list, cwd: Optional[str]) -> Optional[str]:
             v = (value or "").partition("=")[2]
             (files if v.startswith("@") else raw).append(v[1:] if v.startswith("@") else v)
         elif name == "--input":
-            files.append(value or "")
+            body = value or ""  # gh reads the last one
     if not endpoint:
         return None
-    method = method or ("POST" if raw or files else "GET")
-    path = re.sub(r"^https?://[^/]+/", "", endpoint).lstrip("/")
-    path = re.sub(r"^api/v3/", "", path)
+    if endpoint.count("}") > endpoint.count("{"):  # `{gh api … merge}`: zsh drops the group's closing brace
+        endpoint = endpoint.rstrip("}")
+    method = method or ("POST" if raw or files or body is not None else "GET")
+    path = urlsplit(endpoint).path if "://" in endpoint else endpoint  # any case of scheme, as Go reads it
+    path = re.sub(r"^api/v3/", "", path.lstrip("/"))
     m = _API_PR_MERGE.search(path)
     if m and method != "GET":
         return m.group(1) if m.group(1).isdigit() else ""
@@ -651,11 +660,17 @@ def _api_merge(args: list, cwd: Optional[str]) -> Optional[str]:
     if re.split(r"[?#]", path)[0].rstrip("/") not in ("graphql", "api/graphql"):
         return None
     texts = list(raw)
-    for source in files:
+    for source in files:  # `-F query=@file`: the field's text as it is
         text = None if source in ("", "-") else _api_read(cwd, source)
         if text is None:
             return ""  # a query Foreman cannot see
-        texts += _api_texts(text)
+        texts.append(text)
+    if body is not None:  # `--input file`: the request's JSON body
+        text = None if body in ("", "-") else _api_read(cwd, body)
+        decoded = _api_texts(text) if text is not None else None
+        if decoded is None:
+            return ""
+        texts += decoded
     return "" if any(_API_GRAPHQL_MERGE.search(t) for t in texts) else None
 
 
@@ -1433,7 +1448,9 @@ def gate_command(command: str, workdir: Optional[str] = None, task_id: str = "")
         return cwd
 
     merge = next((a for a in first if a.kind == "pr-merge"), None)
-    if merge is not None and not merge.args:  # `gh api graphql -F query=@q.graphql`: read where the command runs
+    # `gh api graphql -F query=@q.graphql`: read where the command runs. Not after a subshell, whose `cd` this
+    # parser would carry past it: the file stays unseen.
+    if merge is not None and not merge.args and "(" not in command:
         merge = next((a for a in parse_actions(command, where(), located=bool(workdir)) if a.kind == "pr-merge"),
                      None)
     if merge is not None:  # never `approve`: "always", a session answer or YOLO would let later merges through
