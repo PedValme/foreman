@@ -55,7 +55,7 @@ def _is_settings(text: str, env) -> bool:
 
 
 def _switches_off(env):
-    def check(command: str) -> bool:
+    def check(command: str, cwd: str = "") -> bool:
         """`pi remove <foreman>`, `pi config`, or a command that rewrites pi's settings where it lists its
         extensions or packages. Each simple command on its own; one that only reads (`cat`, `jq .x`) is not one."""
         for prog, words in core.programs(command):

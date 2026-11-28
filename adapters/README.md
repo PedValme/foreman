@@ -228,7 +228,8 @@ Limits to know:
 - The gate runs on the agent's own machine. The independent control is still the required check in CI
   (`examples/foreman-check.yml`).
 - Foreman's hooks and state are files. The adapter denies what names them (its installation, `~/.foreman`,
-  `claude plugin disable foreman`, a settings write that disables hooks, its entry point run by hand), which stops
+  `claude plugin disable foreman`, a settings write that disables hooks, also in a home moved with
+  `CLAUDE_CONFIG_DIR` given as an absolute path, its entry point run by hand), which stops
   the plain attempt, not a disguised one. "A person is at the session" tells an interactive session from `-p` and no
   more: it is that guard, not the session being interactive, that keeps the agent's shell from `allow`.
 - When the hook cannot run at all (no `python3` on the PATH, a Python older than 3.9, a damaged installation), it

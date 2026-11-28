@@ -30,7 +30,7 @@ class HostCase(GitRepoCase):
         self.host = core.Host(
             name="test-host", label="Test Host", person=lambda sub: "/foreman:" + sub,
             program_dirs=(os.path.join(self.program, "adapters"),), cli=("claude", "claude-code"),
-            switches_off=lambda command: "TURN-FOREMAN-OFF" in command,
+            switches_off=lambda command, cwd="": "TURN-FOREMAN-OFF" in command,
             is_config=lambda path: path.endswith("settings.json"),
             config_off=lambda before, after: "HOOKS-OFF" in after and "HOOKS-OFF" not in before,
             attended=lambda: self.present)

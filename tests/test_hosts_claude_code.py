@@ -116,6 +116,23 @@ class PreToolUse(ClaudeCase):
                         "git commit --allow-empty -m 'chore: track foreman in .claude/settings.json'"):
             self.assertIsNone(self.tool("Bash", command=command), command)
 
+    def test_settings_in_a_moved_home_are_guarded_too(self):
+        home = os.path.join(self.tmp, "claude-home")
+        os.makedirs(home)
+        env = dict(ATTENDED, CLAUDE_CONFIG_DIR=home)
+        settings = os.path.join(home, "settings.json")
+        self.assertEqual(self.decision(self.tool("Write", env=env, file_path=settings,
+                                                 content='{"disableAllHooks": true}'))[0], "deny")
+        self.assertIsNone(self.tool("Write", env=env, file_path=settings, content='{"model": "sonnet"}'))
+        for command in ("jq '.disableAllHooks = true' %s > /tmp/s && mv /tmp/s %s" % (settings, settings),
+                        "sed -i 's/foreman@foreman-gate\": true/foreman@foreman-gate\": false/' "
+                        "$CLAUDE_CONFIG_DIR/settings.json",
+                        "rm -rf ${CLAUDE_CONFIG_DIR}/plugins/cache/foreman-gate"):
+            self.assertEqual(self.decision(self.tool("Bash", env=env, command=command))[0], "deny", command)
+        self.assertIsNone(self.tool("Bash", env=env, command="cat $CLAUDE_CONFIG_DIR/settings.json"))
+        # without the variable the same folder is an ordinary one
+        self.assertIsNone(self.tool("Write", file_path=settings, content='{"disableAllHooks": true}'))
+
     def test_one_more_place_switched_off_counts_even_when_another_already_was(self):
         before = '{"foreman-notes@x": false, "foreman@m": true}'
         self.assertTrue(claude_code._config_off(before, before.replace('"foreman@m": true', '"foreman@m": false')))

@@ -138,7 +138,7 @@ def _written(prog: str, words: list) -> list:
     return [w for w in out if isinstance(w, str)]
 
 
-def _switches_off(command: str) -> bool:
+def _switches_off(command: str, cwd: str = "") -> bool:
     """`opencode plugin remove foreman`, an OpenCode started with its configuration replaced or the project's
     skipped, a command that touches OpenCode's configuration naming Foreman or touches Foreman's own plugin file, one
     that deletes, moves or empties (a glob) a folder where OpenCode finds plugins (the project's `.opencode` and its

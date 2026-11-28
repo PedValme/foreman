@@ -171,6 +171,40 @@ class PreToolUse(CodexCase):
                         "rm -rf ~/.codex/plugins/cache/local/foreman"):
             self.assertEqual(self.decision(self.tool("Bash", command=command))[0], "deny", command)
 
+    def test_settings_in_a_moved_home_are_guarded_too(self):
+        home = os.path.join(self.tmp, "codex-home")
+        os.makedirs(home)
+        env = {"CODEX_HOME": home}
+
+        def tool(name, **tool_input):
+            return codex.answer(self.payload("PreToolUse", tool_name=name, tool_use_id="c", tool_input=tool_input), env)
+        config = os.path.join(home, "config.toml")
+        add = "*** Begin Patch\n*** Add File: %s\n+[features]\n+hooks = false\n*** End Patch\n" % config
+        self.assertEqual(self.decision(tool("apply_patch", command=add))[0], "deny")
+        for command in ("printf '[features]\\nhooks = false\\n' >> %s" % config,
+                        "sed -i '/hook.py/d' $CODEX_HOME/hooks.json", "rm -rf ${CODEX_HOME}/plugins/cache/local/foreman"):
+            self.assertEqual(self.decision(tool("Bash", command=command))[0], "deny", command)
+        self.assertIsNone(tool("Bash", command="cat $CODEX_HOME/config.toml"))
+        for command in ('cd "$CODEX_HOME" && sed -i.bak "s/hooks = true/hooks = false/" config.toml',
+                        "cd ~/.codex && printf '[features]\\nhooks = false\\n' >> config.toml"):  # the default home too
+            self.assertEqual(self.decision(tool("Bash", command=command))[0], "deny", command)
+        for command in ('cd "$CODEX_HOME" && sed -i.bak "s/hooks = true/hooks = false/" ./config.toml',
+                        "cd \"$HOME/.codex\" && printf 'hooks = false' >> config.toml"):
+            self.assertEqual(self.decision(tool("Bash", command=command))[0], "deny", command)
+        self.assertEqual(self.decision(tool("Bash", command='cd "$CODEX_HOME/plugins" && '
+                                                            'rm -rf cache/foreman-gate/foreman/0.1'))[0], "deny")
+        # already in the home (a workdir, or a cd made by an earlier call): a bare name is its file
+        inside = codex.answer(self.payload("PreToolUse", tool_name="Bash", tool_use_id="c", cwd=home, tool_input={
+            "command": "sed -i.bak 's/hooks = true/hooks = false/' config.toml"}), env)
+        self.assertEqual(self.decision(inside)[0], "deny")
+        # the home's path inside another one is not the home
+        self.assertIsNone(tool("Bash", command="sed -i 's/hooks/timeout/' /repo%s/config.toml.example" % home))
+        relative = {"CODEX_HOME": "state"}  # Codex resolves it from where it started: unknown here, not guessed
+        self.assertIsNone(codex.answer(self.payload("PreToolUse", tool_name="Bash", tool_use_id="c", tool_input={
+            "command": "printf 'hooks = false' >> state/config.toml"}), relative))
+        self.assertIsNone(codex.answer(self.payload("PreToolUse", tool_name="apply_patch", tool_use_id="c",
+                                                    tool_input={"command": add}), {}))  # no variable: ordinary
+
     def test_reading_codex_settings_is_ordinary_work(self):
         for command in ("codex features list", "cat ~/.codex/config.toml", "grep hooks ~/.codex/hooks.json",
                         "jq . .codex/hooks.json", "codex --version",
