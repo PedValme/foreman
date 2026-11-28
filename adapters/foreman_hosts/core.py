@@ -70,7 +70,7 @@ class Host:
     person: Callable[[str], str]                 # how the person types a Foreman subcommand here: "/foreman:allow"
     program_dirs: tuple = ()                     # where Foreman is installed: not the agent's to run or edit
     cli: tuple = ()                              # the harness's own command names ("claude"): see _person_only
-    switches_off: Callable[[str], bool] = _never        # a shell command that turns Foreman off in this harness
+    switches_off: Callable[..., bool] = _never          # (command, cwd): a shell command that turns Foreman off
     is_config: Callable[[str], bool] = _never           # a path that is one of the harness's settings files
     config_off: Callable[[str, str], bool] = _never     # (its text before, after): the write turns Foreman off
     # An interactive session, as opposed to an unattended one. It tells the two apart and no more: the agent's own
@@ -314,15 +314,21 @@ class MovedHome:
         home = path or (env or {}).get(var or "") or ""
         self.files = ()
         self.text = self.home = self.bare = None
+        self.root = ""
         home = os.path.expanduser(home.strip())
         if not home or not os.path.isabs(home):
             return
         self.files = tuple(os.path.normcase(os.path.realpath(os.path.join(home, f))) for f in files)
+        self.root = os.path.normcase(os.path.realpath(home))
         spellings = {home.replace("\\", "/")}
         user = os.path.expanduser("~").replace("\\", "/")
-        if user and home.replace("\\", "/").startswith(user + "/"):
+        under = user and home.replace("\\", "/").startswith(user + "/")
+        if under:
             spellings.add("~" + home.replace("\\", "/")[len(user):])
         refs = [re.escape(s.rstrip("/")).replace("/", r"[/\\]+") for s in spellings if s.strip("/")]
+        if under:  # `$HOME/.codex`, `%USERPROFILE%\.codex`, `$env:USERPROFILE/.codex`
+            tail = re.escape(home.replace("\\", "/")[len(user):].rstrip("/")).replace("/", r"[/\\]+")
+            refs += [r"(?:\$\{?HOME\}?|%USERPROFILE%|\$env:USERPROFILE)" + tail]
         if var:
             refs += [r"\$\{?%s\}?" % var, r"%%%s%%" % var, r"\$env:%s" % var]
         names = "|".join(re.escape(f) for f in files) + "|plugins"
@@ -330,7 +336,7 @@ class MovedHome:
         # the home as a path of its own, not inside another (`/repo/opt/moved/…` is not `/opt/moved`)
         self.text = re.compile(r"(?i)(?<![\w.\-])(?:%s)[/\\]+(?:%s)%s" % (refs, names, edge))
         self.home = re.compile(r"(?i)^[\"']?(?:%s)[/\\]*[\"']?$" % refs)
-        self.bare = re.compile(r"(?i)(?<![\w.\-/\\])(?:%s)%s" % (names, edge))
+        self.bare = re.compile(r"(?i)(?<![\w.\-/\\])(?:\.[/\\]+)?(?:%s)%s" % (names, edge))  # also `./config.toml`
 
     def is_file(self, path: str) -> bool:
         """``path`` is one of the moved home's settings files."""
@@ -351,6 +357,16 @@ class MovedHome:
             return False
         return any(prog in self._CD and any(self.home.match(w) for w in words[1:])
                    for prog, words in programs(command or ""))
+
+    def contains(self, cwd: str) -> bool:
+        """``cwd`` (where the shell command runs) is the home or inside it."""
+        if not self.root or not cwd:
+            return False
+        try:
+            here = os.path.normcase(os.path.realpath(os.path.expanduser(cwd)))
+        except (OSError, ValueError):
+            return False
+        return here == self.root or here.startswith(self.root.rstrip(os.sep) + os.sep)
 
     def names_bare(self, text: str) -> bool:
         """``text`` names one of the settings files or the plugins folder by its name alone (`sed … config.toml`)."""
@@ -408,13 +424,13 @@ def _runs_entry(command: str) -> bool:
 _SETS_REVIEWER = re.compile(r"\b%s\s*=" % REVIEWER_ENV)
 
 
-def _guard_command(host: Host, command: str) -> Optional[dict]:
+def _guard_command(host: Host, command: str, cwd: str = "") -> Optional[dict]:
     if _names_own(host, command) or _runs_entry(command):
         return {"action": BLOCK, "message": _OWN}
     if _SETS_REVIEWER.search(command or ""):  # a harness started as "the reviewer" runs without the gate
         return {"action": BLOCK, "message": _OFF}
     try:
-        if host.switches_off(command):
+        if host.switches_off(command, cwd):
             return {"action": BLOCK, "message": _OFF}
     except Exception:
         logger.warning("foreman: the host's switch-off check failed", exc_info=True)
@@ -433,7 +449,7 @@ def pre_shell(host: Host, command, cwd: str = "", session: str = "", turn: str =
     """Before the agent runs ``command`` in ``cwd``: the gate's decision, or None to let it run."""
     if not isinstance(command, str) or not command.strip():
         return None
-    guard = _guard_command(host, command)
+    guard = _guard_command(host, command, cwd)
     if guard:
         return guard
     _note_shell(host, cwd, session, turn)

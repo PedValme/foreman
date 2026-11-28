@@ -38,11 +38,11 @@ _HOOKS_OFF = re.compile(r"(?i)[\"']disableAllHooks[\"']\s*:\s*true")
 _PLUGIN_FALSE = re.compile(r"(?i)foreman[^\"'\n]*[\"']\s*:\s*false")
 
 
-def _switches_off(command: str, homes: tuple = ()) -> bool:
+def _switches_off(command: str, homes: tuple = (), cwd: str = "") -> bool:
     """`claude plugin disable foreman`, or a command that rewrites Claude Code's settings or its plugins folder to
     switch hooks or this plugin off. Each simple command on its own; one that only reads (`cat`, `grep`) is not
     one."""
-    entered = [h for h in homes if h.entered(command)]  # `cd ~/.claude && sed … settings.json`
+    entered = [h for h in homes if h.entered(command) or h.contains(cwd)]  # `cd ~/.claude && sed … settings.json`
     for prog, words in core.programs(command):
         text = " ".join(words)
         if prog in CLI and _PLUGIN_OFF.search(text) and _FOREMAN.search(text):
@@ -155,7 +155,7 @@ def host(env=None, data=None) -> core.Host:
 
     h = core.Host(
         name=NAME, label="Claude Code", person=lambda sub: "/foreman:" + sub, program_dirs=_program_dirs(roots),
-        cli=CLI, switches_off=lambda command: _switches_off(command, homes),
+        cli=CLI, switches_off=lambda command, cwd="": _switches_off(command, homes, cwd),
         is_config=lambda path: _is_config(path) or homes[0].is_file(path), config_off=_config_off,
         # Claude Code sets it for its hooks: "1" in an interactive session, "0" with -p or the SDK.
         attended=lambda: env.get("CLAUDE_CODE_SESSION_ATTENDED") == "1",

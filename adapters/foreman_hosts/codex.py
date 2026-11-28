@@ -56,11 +56,11 @@ _FEATURE_OFF = re.compile(r"(?i)(?:\bfeatures\s+disable\s+(?:codex_)?hooks\b|--d
 _PLUGIN_REMOVE = re.compile(r"(?i)\bplugins?\s+(?:remove|uninstall|rm|disable)\b")
 
 
-def _switches_off(command: str, homes: tuple = ()) -> bool:
+def _switches_off(command: str, homes: tuple = (), cwd: str = "") -> bool:
     """A command that turns Foreman off in Codex: Codex's hooks feature switched off (`codex features disable
     hooks`, a `codex --disable hooks` session), Foreman's plugin removed, or Codex's settings rewritten to drop or
     disable its hooks. Each simple command on its own; one that only reads (`cat`, `grep`) is not one."""
-    entered = [h for h in homes if h.entered(command)]  # `cd ~/.codex && sed … config.toml`
+    entered = [h for h in homes if h.entered(command) or h.contains(cwd)]  # `cd ~/.codex && sed … config.toml`
     for prog, words in core.programs(command):
         text = " ".join(words)
         if prog in CLI and (_FEATURE_OFF.search(text) or (_PLUGIN_REMOVE.search(text) and _FOREMAN.search(text))):
@@ -231,7 +231,7 @@ def host(env=None, data=None) -> core.Host:
     # Never attended (the module's docstring says why): allowing a finding is answered before core is asked.
     return core.Host(
         name=NAME, label="Codex", person=lambda sub: "foreman " + sub, program_dirs=_program_dirs(roots),
-        cli=CLI, switches_off=lambda command: _switches_off(command, homes),
+        cli=CLI, switches_off=lambda command, cwd="": _switches_off(command, homes, cwd),
         is_config=lambda path: _is_config(path) or homes[0].is_file(path), config_off=_config_off,
         fresh_session=_fresh_session(env), efforts=EFFORTS, session=session, reviewer_caveat=REVIEWER_CAVEAT,
         turn_review=True,  # the Stop hook waits ten minutes (adapters/codex/hooks.json)

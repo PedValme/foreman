@@ -188,6 +188,13 @@ class PreToolUse(CodexCase):
         for command in ('cd "$CODEX_HOME" && sed -i.bak "s/hooks = true/hooks = false/" config.toml',
                         "cd ~/.codex && printf '[features]\\nhooks = false\\n' >> config.toml"):  # the default home too
             self.assertEqual(self.decision(tool("Bash", command=command))[0], "deny", command)
+        for command in ('cd "$CODEX_HOME" && sed -i.bak "s/hooks = true/hooks = false/" ./config.toml',
+                        "cd \"$HOME/.codex\" && printf 'hooks = false' >> config.toml"):
+            self.assertEqual(self.decision(tool("Bash", command=command))[0], "deny", command)
+        # already in the home (a workdir, or a cd made by an earlier call): a bare name is its file
+        inside = codex.answer(self.payload("PreToolUse", tool_name="Bash", tool_use_id="c", cwd=home, tool_input={
+            "command": "sed -i.bak 's/hooks = true/hooks = false/' config.toml"}), env)
+        self.assertEqual(self.decision(inside)[0], "deny")
         # the home's path inside another one is not the home
         self.assertIsNone(tool("Bash", command="sed -i 's/hooks/timeout/' /repo%s/config.toml.example" % home))
         relative = {"CODEX_HOME": "state"}  # Codex resolves it from where it started: unknown here, not guessed
