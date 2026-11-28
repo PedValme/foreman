@@ -229,8 +229,14 @@ class TerminalGate(GitRepoCase):
         for command in ("git push --push-opt ci.skip origin main", "git push --recurse-submodules no origin main",
                         "git push --end-of-options origin main"):
             self.assertIsNone(terminal(command, self.root), command)
-        for command in ("git push --mir origin", "git push -o x --all origin"):  # git reads --mir as --mirror
+        for command in ("git push --mir origin", "git push -o x --all origin",  # git reads --mir as --mirror
+                        "git push --del --no-delete origin 'refs/heads/ma*:refs/heads/ma*'",  # --no-delete undoes it
+                        "git push origin :"):  # every branch both sides name alike
             self.assertEqual(terminal(command, self.root)["action"], "approve", command)
+        self.git("config", "remote.origin.push", "refs/heads/rig:refs/heads/rig")
+        d = terminal("git push --repo=backup --no-repo", self.root)  # back to origin, which pushes rig too
+        self.assertEqual(d["action"], "approve")
+        self.git("config", "--unset", "remote.origin.push")
 
     def test_the_branch_a_push_names_after_an_option_is_the_one_inspected(self):
         self.git("checkout", "-q", "-b", "rig")

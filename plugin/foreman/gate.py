@@ -1037,6 +1037,9 @@ _PUSH_LONG = ("verbose", "quiet", "repo", "all", "branches", "mirror", "delete",
               "force", "force-with-lease", "force-if-includes", "recurse-submodules", "thin", "receive-pack", "exec",
               "set-upstream", "progress", "prune", "no-verify", "verify", "follow-tags", "signed", "atomic",
               "push-option", "ipv4", "ipv6")
+# the short options, by their long names
+_PUSH_SHORT = {"v": "verbose", "q": "quiet", "d": "delete", "n": "dry-run", "f": "force", "u": "set-upstream",
+               "o": "push-option", "4": "ipv4", "6": "ipv6"}
 # those whose value may be the next word: never a remote or a refspec
 _PUSH_VALUE_LONG = {"repo", "recurse-submodules", "receive-pack", "exec", "push-option"}
 
@@ -1059,7 +1062,7 @@ def _push_parse(args: list) -> tuple:
     option by its full name (``--mir`` is ``mirror``), a value after ``=`` or in the next word for the options that
     take one, a short cluster whose ``o`` takes the rest of the word or the next one (``-ofoo``, ``-uo foo``),
     ``--`` and ``--end-of-options`` ending the options. ``--repo`` names the remote when no word does. Short
-    options are recorded as their letters (``d``, ``f``, ``u``…), long ones by name."""
+    options are recorded by their long names, and ``--no-X`` undoes X."""
     positional, options, repo, i = [], set(), None, 0
     while i < len(args):
         a = args[i]
@@ -1070,6 +1073,11 @@ def _push_parse(args: list) -> tuple:
         if a.startswith("--"):
             name, eq, value = a[2:].partition("=")
             name = _push_long(name)
+            if name.startswith("no-") and name[3:] in _PUSH_LONG:  # `--no-delete`, `--no-repo`: undone
+                options.discard(name[3:])
+                if name == "no-repo":
+                    repo = None
+                continue
             options.add(name)
             if name in _PUSH_VALUE_LONG and not eq:
                 value, i = (args[i] if i < len(args) else ""), i + 1
@@ -1077,7 +1085,7 @@ def _push_parse(args: list) -> tuple:
                 repo = value
         elif a.startswith("-") and len(a) > 1:
             for k, ch in enumerate(a[1:], 1):
-                options.add(ch)
+                options.add(_PUSH_SHORT.get(ch, ch))
                 if ch == "o":  # its value: the rest of this word, or the next word
                     if k == len(a) - 1:
                         i += 1
@@ -1102,8 +1110,10 @@ def _push_report(repo: Repo, act: Action, out: Outcome):
     # What Foreman cannot resolve to one branch it cannot inspect: a wildcard or unresolvable refspec, or a bare push
     # that a configured remote.<name>.push or push.default=matching widens (found in the final review: each one
     # published a rigged branch while Foreman inspected the clean current one). A person approves those.
-    deleting = bool(options & {"delete", "d"})  # `git push origin --delete gone`: nothing published
-    unresolved = [] if deleting else [r for r in positional[1:] if "*" in r or (r.lstrip("+").split(":", 1)[0] and not
+    deleting = "delete" in options  # `git push origin --delete gone`: nothing published
+    # `:` pushes every branch both sides have by the same name
+    unresolved = [] if deleting else [r for r in positional[1:] if "*" in r or r.lstrip("+") == ":" or (
+                                      r.lstrip("+").split(":", 1)[0] and not
                                       repo.try_git("rev-parse", "--verify", "-q",
                                                    r.lstrip("+").split(":", 1)[0] + "^{commit}"))]
     configured = [c for c in act.inline_config if not _PUSH_DEFAULT_ONE_BRANCH.match(c)]
