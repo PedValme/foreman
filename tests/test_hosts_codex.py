@@ -185,6 +185,14 @@ class PreToolUse(CodexCase):
                         "sed -i '/hook.py/d' $CODEX_HOME/hooks.json", "rm -rf ${CODEX_HOME}/plugins/cache/local/foreman"):
             self.assertEqual(self.decision(tool("Bash", command=command))[0], "deny", command)
         self.assertIsNone(tool("Bash", command="cat $CODEX_HOME/config.toml"))
+        for command in ('cd "$CODEX_HOME" && sed -i.bak "s/hooks = true/hooks = false/" config.toml',
+                        "cd ~/.codex && printf '[features]\\nhooks = false\\n' >> config.toml"):  # the default home too
+            self.assertEqual(self.decision(tool("Bash", command=command))[0], "deny", command)
+        # the home's path inside another one is not the home
+        self.assertIsNone(tool("Bash", command="sed -i 's/hooks/timeout/' /repo%s/config.toml.example" % home))
+        relative = {"CODEX_HOME": "state"}  # Codex resolves it from where it started: unknown here, not guessed
+        self.assertIsNone(codex.answer(self.payload("PreToolUse", tool_name="Bash", tool_use_id="c", tool_input={
+            "command": "printf 'hooks = false' >> state/config.toml"}), relative))
         self.assertIsNone(codex.answer(self.payload("PreToolUse", tool_name="apply_patch", tool_use_id="c",
                                                     tool_input={"command": add}), {}))  # no variable: ordinary
 

@@ -305,25 +305,32 @@ def only_reads(prog: str, words: list) -> bool:
 class MovedHome:
     """A harness's home moved by an environment variable (``CLAUDE_CONFIG_DIR``, ``CODEX_HOME``): its settings files
     and plugins folder there, which the guards that know only ``~/.claude`` and ``~/.codex`` would not see. Empty
-    (nothing matches) when the variable is unset."""
+    (nothing matches) when the variable is unset, or relative: the harness resolves that from where it started,
+    which a hook cannot know, and guarding the wrong folder would refuse a project's own files."""
 
-    def __init__(self, env, var: str, files: tuple):
-        home = (env or {}).get(var) or ""
+    _CD = ("cd", "pushd", "chdir", "set-location", "sl")
+
+    def __init__(self, env, var: Optional[str], files: tuple, path: str = ""):
+        home = path or (env or {}).get(var or "") or ""
         self.files = ()
-        self.text = None
-        if not home.strip():
+        self.text = self.home = self.bare = None
+        home = os.path.expanduser(home.strip())
+        if not home or not os.path.isabs(home):
             return
-        home = os.path.expanduser(home)
-        absolute = os.path.abspath(home)
-        self.files = tuple(os.path.normcase(os.path.realpath(os.path.join(absolute, f))) for f in files)
-        spellings = {absolute.replace("\\", "/"), home.replace("\\", "/")}
+        self.files = tuple(os.path.normcase(os.path.realpath(os.path.join(home, f))) for f in files)
+        spellings = {home.replace("\\", "/")}
         user = os.path.expanduser("~").replace("\\", "/")
-        if user and absolute.replace("\\", "/").startswith(user + "/"):
-            spellings.add("~" + absolute.replace("\\", "/")[len(user):])
+        if user and home.replace("\\", "/").startswith(user + "/"):
+            spellings.add("~" + home.replace("\\", "/")[len(user):])
         refs = [re.escape(s.rstrip("/")).replace("/", r"[/\\]+") for s in spellings if s.strip("/")]
-        refs += [r"\$\{?%s\}?" % var, r"%%%s%%" % var, r"\$env:%s" % var]
-        names = "|".join(re.escape(f) for f in files) + r"|plugins\b"
-        self.text = re.compile(r"(?i)(?:%s)[/\\]+(?:%s)" % ("|".join(refs), names))
+        if var:
+            refs += [r"\$\{?%s\}?" % var, r"%%%s%%" % var, r"\$env:%s" % var]
+        names = "|".join(re.escape(f) for f in files) + "|plugins"
+        refs, edge = "|".join(refs), r"(?![\w.\-])"
+        # the home as a path of its own, not inside another (`/repo/opt/moved/…` is not `/opt/moved`)
+        self.text = re.compile(r"(?i)(?<![\w.\-])(?:%s)[/\\]+(?:%s)%s" % (refs, names, edge))
+        self.home = re.compile(r"(?i)^[\"']?(?:%s)[/\\]*[\"']?$" % refs)
+        self.bare = re.compile(r"(?i)(?<![\w.\-/\\])(?:%s)%s" % (names, edge))
 
     def is_file(self, path: str) -> bool:
         """``path`` is one of the moved home's settings files."""
@@ -337,6 +344,17 @@ class MovedHome:
     def named_in(self, text: str) -> bool:
         """``text`` (one simple command) names one of those files or the plugins folder."""
         return bool(self.text and self.text.search(text or ""))
+
+    def entered(self, command: str) -> bool:
+        """``command`` moves into the home (`cd "$CODEX_HOME" && …`), after which a bare file name is one of its."""
+        if not self.home:
+            return False
+        return any(prog in self._CD and any(self.home.match(w) for w in words[1:])
+                   for prog, words in programs(command or ""))
+
+    def names_bare(self, text: str) -> bool:
+        """``text`` names one of the settings files or the plugins folder by its name alone (`sed … config.toml`)."""
+        return bool(self.bare and self.bare.search(text or ""))
 
 
 def _person_only(host: Host, command: str, words=_ALLOW_WORDS) -> bool:

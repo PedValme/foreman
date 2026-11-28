@@ -56,10 +56,11 @@ _FEATURE_OFF = re.compile(r"(?i)(?:\bfeatures\s+disable\s+(?:codex_)?hooks\b|--d
 _PLUGIN_REMOVE = re.compile(r"(?i)\bplugins?\s+(?:remove|uninstall|rm|disable)\b")
 
 
-def _switches_off(command: str, home: Optional[core.MovedHome] = None) -> bool:
+def _switches_off(command: str, homes: tuple = ()) -> bool:
     """A command that turns Foreman off in Codex: Codex's hooks feature switched off (`codex features disable
     hooks`, a `codex --disable hooks` session), Foreman's plugin removed, or Codex's settings rewritten to drop or
     disable its hooks. Each simple command on its own; one that only reads (`cat`, `grep`) is not one."""
+    entered = [h for h in homes if h.entered(command)]  # `cd ~/.codex && sed … config.toml`
     for prog, words in core.programs(command):
         text = " ".join(words)
         if prog in CLI and (_FEATURE_OFF.search(text) or (_PLUGIN_REMOVE.search(text) and _FOREMAN.search(text))):
@@ -68,8 +69,9 @@ def _switches_off(command: str, home: Optional[core.MovedHome] = None) -> bool:
             continue
         if _SETTINGS.search(text) and (_HOOKS_WORD.search(text) or _FOREMAN.search(text)):
             return True
-        if home is not None and home.named_in(text) and (_HOOKS_WORD.search(text) or _FOREMAN.search(text)):
-            return True  # the same files in the home CODEX_HOME moved
+        if (any(h.named_in(text) for h in homes) or any(h.names_bare(text) for h in entered)) and (
+                _HOOKS_WORD.search(text) or _FOREMAN.search(text)):
+            return True  # in a home CODEX_HOME moved, or a bare file name after a `cd` into a home
         if _PLUGINS_DIR.search(text) and _FOREMAN.search(text):
             return True
     return False
@@ -217,7 +219,8 @@ def _model(data: dict) -> str:
 def host(env=None, data=None) -> core.Host:
     env = os.environ if env is None else env
     data = data if isinstance(data, dict) else {}
-    home = core.MovedHome(env, "CODEX_HOME", ("config.toml", "hooks.json", "requirements.toml"))
+    files = ("config.toml", "hooks.json", "requirements.toml")
+    homes = (core.MovedHome(env, "CODEX_HOME", files), core.MovedHome(None, None, files, path="~/.codex"))
     roots = dict.fromkeys(r for r in (ROOT, env.get("PLUGIN_ROOT")) if r)
 
     def session() -> core.Session:
@@ -228,8 +231,8 @@ def host(env=None, data=None) -> core.Host:
     # Never attended (the module's docstring says why): allowing a finding is answered before core is asked.
     return core.Host(
         name=NAME, label="Codex", person=lambda sub: "foreman " + sub, program_dirs=_program_dirs(roots),
-        cli=CLI, switches_off=lambda command: _switches_off(command, home),
-        is_config=lambda path: _is_config(path) or home.is_file(path), config_off=_config_off,
+        cli=CLI, switches_off=lambda command: _switches_off(command, homes),
+        is_config=lambda path: _is_config(path) or homes[0].is_file(path), config_off=_config_off,
         fresh_session=_fresh_session(env), efforts=EFFORTS, session=session, reviewer_caveat=REVIEWER_CAVEAT,
         turn_review=True,  # the Stop hook waits ten minutes (adapters/codex/hooks.json)
     )

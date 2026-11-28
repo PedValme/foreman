@@ -38,10 +38,11 @@ _HOOKS_OFF = re.compile(r"(?i)[\"']disableAllHooks[\"']\s*:\s*true")
 _PLUGIN_FALSE = re.compile(r"(?i)foreman[^\"'\n]*[\"']\s*:\s*false")
 
 
-def _switches_off(command: str, home: Optional[core.MovedHome] = None) -> bool:
+def _switches_off(command: str, homes: tuple = ()) -> bool:
     """`claude plugin disable foreman`, or a command that rewrites Claude Code's settings or its plugins folder to
     switch hooks or this plugin off. Each simple command on its own; one that only reads (`cat`, `grep`) is not
     one."""
+    entered = [h for h in homes if h.entered(command)]  # `cd ~/.claude && sed … settings.json`
     for prog, words in core.programs(command):
         text = " ".join(words)
         if prog in CLI and _PLUGIN_OFF.search(text) and _FOREMAN.search(text):
@@ -50,8 +51,9 @@ def _switches_off(command: str, home: Optional[core.MovedHome] = None) -> bool:
             continue
         if _SETTINGS.search(text) and (_HOOKS_WORD.search(text) or _FOREMAN.search(text)):
             return True
-        if home is not None and home.named_in(text) and (_HOOKS_WORD.search(text) or _FOREMAN.search(text)):
-            return True  # the same files in the home CLAUDE_CONFIG_DIR moved
+        if (any(h.named_in(text) for h in homes) or any(h.names_bare(text) for h in entered)) and (
+                _HOOKS_WORD.search(text) or _FOREMAN.search(text)):
+            return True  # in a home CLAUDE_CONFIG_DIR moved, or a bare file name after a `cd` into a home
         if _PLUGINS_DIR.search(text) and _FOREMAN.search(text):
             return True
     return False
@@ -142,7 +144,8 @@ def _fresh_session(env):
 def host(env=None, data=None) -> core.Host:
     env = os.environ if env is None else env
     data = data if isinstance(data, dict) else {}
-    home = core.MovedHome(env, "CLAUDE_CONFIG_DIR", ("settings.json", "settings.local.json"))
+    files = ("settings.json", "settings.local.json")
+    homes = (core.MovedHome(env, "CLAUDE_CONFIG_DIR", files), core.MovedHome(None, None, files, path="~/.claude"))
     roots = dict.fromkeys(r for r in (ROOT, env.get("CLAUDE_PLUGIN_ROOT")) if r)
 
     def session() -> core.Session:
@@ -152,8 +155,8 @@ def host(env=None, data=None) -> core.Host:
 
     h = core.Host(
         name=NAME, label="Claude Code", person=lambda sub: "/foreman:" + sub, program_dirs=_program_dirs(roots),
-        cli=CLI, switches_off=lambda command: _switches_off(command, home),
-        is_config=lambda path: _is_config(path) or home.is_file(path), config_off=_config_off,
+        cli=CLI, switches_off=lambda command: _switches_off(command, homes),
+        is_config=lambda path: _is_config(path) or homes[0].is_file(path), config_off=_config_off,
         # Claude Code sets it for its hooks: "1" in an interactive session, "0" with -p or the SDK.
         attended=lambda: env.get("CLAUDE_CODE_SESSION_ATTENDED") == "1",
         fresh_session=_fresh_session(env), efforts=EFFORTS, session=session,
