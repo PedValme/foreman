@@ -216,6 +216,38 @@ class TerminalGate(GitRepoCase):
         self.assertEqual(d["action"], "approve")
         self.assertIn("more than one branch", d["message"])
 
+    def test_a_push_options_value_is_not_a_branch(self):
+        self.assertIsNone(terminal("git push origin main", self.root))
+        for command in ("git push -o ci.skip origin main", "git push -oci.skip origin main",
+                        "git push -uo ci.skip origin main", "git push --push-option ci.skip origin main",
+                        "git push --push-option=ci.skip origin main", "git push --receive-pack git-receive-pack origin main",
+                        "git push origin main -o merge_request.create"):
+            self.assertIsNone(terminal(command, self.root), command)
+        d = terminal("git push -o ci.skip origin main other", self.root)  # two refspecs are still two
+        self.assertEqual(d["action"], "approve")
+        self.assertIn("more than one branch", d["message"])
+        for command in ("git push --push-opt ci.skip origin main", "git push --recurse-submodules no origin main",
+                        "git push --end-of-options origin main"):
+            self.assertIsNone(terminal(command, self.root), command)
+        for command in ("git push --mir origin", "git push -o x --all origin",  # git reads --mir as --mirror
+                        "git push --del --no-delete origin 'refs/heads/ma*:refs/heads/ma*'",  # --no-delete undoes it
+                        "git push origin :"):  # every branch both sides name alike
+            self.assertEqual(terminal(command, self.root)["action"], "approve", command)
+        self.git("config", "remote.origin.push", "refs/heads/rig:refs/heads/rig")
+        d = terminal("git push --repo=backup --no-repo", self.root)  # back to origin, which pushes rig too
+        self.assertEqual(d["action"], "approve")
+        self.git("config", "--unset", "remote.origin.push")
+
+    def test_the_branch_a_push_names_after_an_option_is_the_one_inspected(self):
+        self.git("checkout", "-q", "-b", "rig")
+        os.remove(os.path.join(self.root, "tests", "test_app.py"))
+        self.commit("drop a test")
+        self.git("checkout", "-q", "main")
+        for command in ("git push origin -ofoo rig", "git push origin -uofoo rig", "git push -o foo origin rig"):
+            d = terminal(command, self.root)
+            self.assertEqual(d["action"], "block", command)  # `rig` is read, not the clean current branch
+            self.assertIn("test-deleted", d["message"], command)
+
     def test_a_push_foreman_cannot_resolve_asks_a_person(self):
         # Found in the final review: each of these published a rigged branch while the clean current one was read.
         for command in ("git push origin 'refs/heads/*:refs/heads/*'", "git push origin 'refs/heads/rig*:refs/heads/main*'"):

@@ -1032,21 +1032,88 @@ def _merge_conclusion(repo: Repo, report, scan: Callable):
     return report
 
 
+# `git push`'s long options (git's builtin/push.c), so an abbreviation git accepts (`--mir`) reads as git reads it.
+_PUSH_LONG = ("verbose", "quiet", "repo", "all", "branches", "mirror", "delete", "tags", "dry-run", "porcelain",
+              "force", "force-with-lease", "force-if-includes", "recurse-submodules", "thin", "receive-pack", "exec",
+              "set-upstream", "progress", "prune", "no-verify", "verify", "follow-tags", "signed", "atomic",
+              "push-option", "ipv4", "ipv6")
+# the short options, by their long names
+_PUSH_SHORT = {"v": "verbose", "q": "quiet", "d": "delete", "n": "dry-run", "f": "force", "u": "set-upstream",
+               "o": "push-option", "4": "ipv4", "6": "ipv6"}
+# those whose value may be the next word: never a remote or a refspec
+_PUSH_VALUE_LONG = {"repo", "recurse-submodules", "receive-pack", "exec", "push-option"}
+
+
+def _push_long(name: str) -> str:
+    """A long option's full name (without ``--``), as git resolves a unique abbreviation; the name itself when it
+    is not one of ``git push``'s or is ambiguous."""
+    negated = name.startswith("no-") and name not in _PUSH_LONG
+    bare = name[3:] if negated else name
+    if bare in _PUSH_LONG:
+        return name
+    matches = [o for o in _PUSH_LONG if o.startswith(bare)]
+    if len(matches) == 1:
+        return ("no-" if negated else "") + matches[0]
+    return name
+
+
+def _push_parse(args: list) -> tuple:
+    """(remote and refspecs, options) of ``git push`` arguments, read as git's option parser reads them: a long
+    option by its full name (``--mir`` is ``mirror``), a value after ``=`` or in the next word for the options that
+    take one, a short cluster whose ``o`` takes the rest of the word or the next one (``-ofoo``, ``-uo foo``),
+    ``--`` and ``--end-of-options`` ending the options. ``--repo`` names the remote when no word does. Short
+    options are recorded by their long names, and ``--no-X`` undoes X."""
+    positional, options, repo, i = [], set(), None, 0
+    while i < len(args):
+        a = args[i]
+        i += 1
+        if a in ("--", "--end-of-options"):
+            positional += list(args[i:])
+            break
+        if a.startswith("--"):
+            name, eq, value = a[2:].partition("=")
+            name = _push_long(name)
+            if name.startswith("no-") and name[3:] in _PUSH_LONG:  # `--no-delete`, `--no-repo`: undone
+                options.discard(name[3:])
+                if name == "no-repo":
+                    repo = None
+                continue
+            options.add(name)
+            if name in _PUSH_VALUE_LONG and not eq:
+                value, i = (args[i] if i < len(args) else ""), i + 1
+            if name == "repo":
+                repo = value
+        elif a.startswith("-") and len(a) > 1:
+            for k, ch in enumerate(a[1:], 1):
+                options.add(_PUSH_SHORT.get(ch, ch))
+                if ch == "o":  # its value: the rest of this word, or the next word
+                    if k == len(a) - 1:
+                        i += 1
+                    break
+        else:
+            positional.append(a)
+    if repo and not positional:
+        positional = [repo]
+    return positional, options
+
+
 def _push_report(repo: Repo, act: Action, out: Outcome):
-    positional = [a for a in act.args if not a.startswith("-")]
-    if any(a in ("--all", "--mirror", "--branches") for a in act.args) or len(positional) > 2:
+    positional, options = _push_parse(act.args)
+    if options & {"all", "mirror", "branches"} or len(positional) > 2:
         out.notes.append("`git push %s` publishes more than one branch; Foreman inspects only the current one. Push "
                          "each branch on its own, or approve if you have checked them." % " ".join(act.args))
         # An "always" answer must cover only what was there when the person approved: every commit it would push.
-        refs = "refs/" if "--mirror" in act.args else "refs/heads/"
+        refs = "refs/" if "mirror" in options else "refs/heads/"
         out.state.append(repo.try_git("for-each-ref", "--format=%(refname) %(objectname)", refs) or "")
         out.state += ["%s %s" % (r, repo.try_git("rev-parse", "--verify", "-q", r.lstrip("+").split(":", 1)[0]
                                                  + "^{commit}") or "?") for r in positional[1:]]
     # What Foreman cannot resolve to one branch it cannot inspect: a wildcard or unresolvable refspec, or a bare push
     # that a configured remote.<name>.push or push.default=matching widens (found in the final review: each one
     # published a rigged branch while Foreman inspected the clean current one). A person approves those.
-    deleting = any(a in ("--delete", "-d") for a in act.args)  # `git push origin --delete gone`: nothing published
-    unresolved = [] if deleting else [r for r in positional[1:] if "*" in r or (r.lstrip("+").split(":", 1)[0] and not
+    deleting = "delete" in options  # `git push origin --delete gone`: nothing published
+    # `:` pushes every branch both sides have by the same name
+    unresolved = [] if deleting else [r for r in positional[1:] if "*" in r or r.lstrip("+") == ":" or (
+                                      r.lstrip("+").split(":", 1)[0] and not
                                       repo.try_git("rev-parse", "--verify", "-q",
                                                    r.lstrip("+").split(":", 1)[0] + "^{commit}"))]
     configured = [c for c in act.inline_config if not _PUSH_DEFAULT_ONE_BRANCH.match(c)]
