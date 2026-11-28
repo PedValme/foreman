@@ -425,6 +425,10 @@ class TerminalGate(GitRepoCase):
                            ("(cd plugin); gh api graphql -F query=@q.graphql", "<n>"),  # after a subshell: unseen
                            ("gh api HTTPS://h.example/graphql --input -", "<n>"),
                            ("gh api graphql --input deep.json", "<n>"),  # too deep to decode: unseen
+                           ("{gh pr merge 42}", "42"), ("{gh api -X PUT repos/o/r/pulls/42/merge}", "42"),  # zsh
+                           ("gh api </dev/null -X PUT https://h.example/repos/o/r/pulls/42/merge", "42"),
+                           ("false && cd plugin; gh api graphql -F query=@q.graphql", "<n>"),  # a cd that may not run
+                           ("gh api -X PUT https://h.example/repos/o/r/pulls/42/\\merge", "42"),
                            ("gh -R acme/w api -X PUT repos/acme/w/pulls/42/merge", "42")):
             d = terminal(command, self.root)
             self.assertEqual(d, {"action": "block", "message": "Merging is the user's decision. Ask them to run "

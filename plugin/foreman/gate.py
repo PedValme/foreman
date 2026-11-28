@@ -40,6 +40,7 @@ _MAX_READ_BYTES = 2 * 1024 * 1024
 _QUICK_TOOL = re.compile(r"\b(?:git|gh)(?:\.exe)?\b", re.I)
 _QUICK_VERB = re.compile(r"\b(?:commit|push|pr|config|api)\b", re.I)
 _REDIR = re.compile(r">>?(?:&(?:\d+|-))?")
+_REDIR_IN = re.compile(r"<(?:<<?|&(?:\d+|-)|>)?")  # `< file`, `<<EOF`, `<<< text`, `<&3`, `<> file`
 
 
 def _quick(command: str) -> bool:
@@ -95,6 +96,7 @@ def tokenize(command: str) -> list:
     except before a quote, a space or another backslash, so Windows paths survive."""
     tokens, buf, quote, has_word, i = [], [], None, False, 0
     n = len(command)
+    braces = 0  # command groups opened with `{` and not yet closed
 
     def flush():
         nonlocal buf, has_word
@@ -123,15 +125,23 @@ def tokenize(command: str) -> list:
             i += 1
         elif c in " \t\r":
             flush()
-        elif c == ">":
+        elif c in "<>":
             flush()
-            m = _REDIR.match(command, i)  # never command[i:]: a copy per ">" is quadratic
+            m = (_REDIR if c == ">" else _REDIR_IN).match(command, i)  # never command[i:]: quadratic
             tokens.append(_Redir(m.group(0)))
             i += len(m.group(0))
+            continue
+        elif c == "}" and has_word and braces and (i + 1 >= n or command[i + 1] in " \t\r\n;|&)"):
+            # `{gh pr merge}`: zsh closes the group at a word's end
+            flush()
+            tokens.append(_Op("}"))
+            braces -= 1
+            i += 1
             continue
         elif c == "\n" or c in ";|&()" or (c in "{}" and not has_word):
             # a brace at a word's start may group commands (`{ git commit; }`; zsh runs `{git commit}`); inside a
             # word it is text (`repos/{owner}/{repo}`, gh's placeholders)
+            braces = braces + 1 if c == "{" else max(0, braces - 1) if c == "}" else braces
             flush()
             op = command[i:i + 2] if command[i:i + 2] in ("&&", "||") else c
             tokens.append(_Op(op))
@@ -215,10 +225,11 @@ def parse_actions(command: str, cwd: str, located: bool = False, _depth: int = 0
             if prog == "pushd":
                 stack.append(cwd)
             cwd = _resolve(cwd, target) if target else os.path.expanduser("~")
-            located = True
+            located, state["moved"] = True, True
             continue
         if prog == "popd":
             cwd = stack.pop() if stack else cwd
+            state["moved"] = True
             continue
         if prog in _SAFE_PROGS:
             if writes_file:  # echo x > tests/test_a.py rewrites a file
@@ -257,7 +268,7 @@ def parse_actions(command: str, cwd: str, located: bool = False, _depth: int = 0
                     unsafe(original)
                 continue
         elif prog == "gh":
-            act, sub = _parse_gh(words[1:], cwd, located)
+            act, sub = _parse_gh(words[1:], cwd, located, state.get("moved", False))
             if act is None:
                 if sub not in _SAFE_GH or writes_file:
                     unsafe(original)
@@ -331,9 +342,9 @@ def _strip_redirs(words: list) -> tuple:
     while i < len(words):
         w = words[i]
         if isinstance(w, _Redir):
-            if "&" not in w:  # >&2 duplicates a descriptor; > file writes one
+            if "&" not in w:  # >&2 duplicates a descriptor; > file writes one; < file reads one
                 target = words[i + 1] if i + 1 < len(words) else ""
-                writes = writes or target.lower() not in _HARMLESS_TARGETS
+                writes = writes or (w.startswith(">") or w == "<>") and target.lower() not in _HARMLESS_TARGETS
                 i += 1
             i += 1
             continue
@@ -513,7 +524,7 @@ def _commit_no_verify(args: list) -> str:
     return ""
 
 
-def _parse_gh(words: list, cwd: str, located: bool):
+def _parse_gh(words: list, cwd: str, located: bool, moved: bool = False):
     def skip_flags(i):
         while i < len(words) and words[i].startswith("-"):
             i += 2 if words[i] in ("-R", "--repo") else 1
@@ -521,7 +532,10 @@ def _parse_gh(words: list, cwd: str, located: bool):
 
     i = skip_flags(0)
     if i < len(words) and words[i] == "api":
-        target = _api_merge(words[i + 1:], cwd if located or cwd != os.sep else None)
+        # a relative query file is read only where the command surely runs: not after a `cd` of the same line,
+        # which may not have run (`false && cd x; gh api …`), nor before the directory is known
+        known = not moved and (located or cwd != os.sep)
+        target = _api_merge(words[i + 1:], cwd if known else None)
         if target is not None:
             return Action("pr-merge", cwd, [target] if target else [], located=located), "api"
         return None, "api"
@@ -647,8 +661,7 @@ def _api_merge(args: list, cwd: Optional[str]) -> Optional[str]:
             body = value or ""  # gh reads the last one
     if not endpoint:
         return None
-    if endpoint.count("}") > endpoint.count("{"):  # `{gh api … merge}`: zsh drops the group's closing brace
-        endpoint = endpoint.rstrip("}")
+    endpoint = endpoint.replace("\\", "")  # the shell drops one outside quotes (`…/pulls/42/\\merge`); no endpoint has one
     method = method or ("POST" if raw or files or body is not None else "GET")
     path = urlsplit(endpoint).path if "://" in endpoint else endpoint  # any case of scheme, as Go reads it
     path = re.sub(r"^api/v3/", "", path.lstrip("/"))
