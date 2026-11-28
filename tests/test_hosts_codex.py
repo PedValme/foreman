@@ -191,6 +191,8 @@ class PreToolUse(CodexCase):
         for command in ('cd "$CODEX_HOME" && sed -i.bak "s/hooks = true/hooks = false/" ./config.toml',
                         "cd \"$HOME/.codex\" && printf 'hooks = false' >> config.toml"):
             self.assertEqual(self.decision(tool("Bash", command=command))[0], "deny", command)
+        self.assertEqual(self.decision(tool("Bash", command='cd "$CODEX_HOME/plugins" && '
+                                                            'rm -rf cache/foreman-gate/foreman/0.1'))[0], "deny")
         # already in the home (a workdir, or a cd made by an earlier call): a bare name is its file
         inside = codex.answer(self.payload("PreToolUse", tool_name="Bash", tool_use_id="c", cwd=home, tool_input={
             "command": "sed -i.bak 's/hooks = true/hooks = false/' config.toml"}), env)

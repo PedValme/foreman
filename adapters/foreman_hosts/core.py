@@ -335,7 +335,7 @@ class MovedHome:
         refs, edge = "|".join(refs), r"(?![\w.\-])"
         # the home as a path of its own, not inside another (`/repo/opt/moved/…` is not `/opt/moved`)
         self.text = re.compile(r"(?i)(?<![\w.\-])(?:%s)[/\\]+(?:%s)%s" % (refs, names, edge))
-        self.home = re.compile(r"(?i)^[\"']?(?:%s)[/\\]*[\"']?$" % refs)
+        self.home = re.compile(r"(?i)^[\"']?(?:%s)(?:[/\\][^\"']*)?[\"']?$" % refs)  # the home or below it
         self.bare = re.compile(r"(?i)(?<![\w.\-/\\])(?:\.[/\\]+)?(?:%s)%s" % (names, edge))  # also `./config.toml`
 
     def is_file(self, path: str) -> bool:
@@ -352,7 +352,8 @@ class MovedHome:
         return bool(self.text and self.text.search(text or ""))
 
     def entered(self, command: str) -> bool:
-        """``command`` moves into the home (`cd "$CODEX_HOME" && …`), after which a bare file name is one of its."""
+        """``command`` moves into the home or below it (`cd "$CODEX_HOME/plugins" && …`), after which a bare name
+        is one of its."""
         if not self.home:
             return False
         return any(prog in self._CD and any(self.home.match(w) for w in words[1:])

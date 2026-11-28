@@ -51,6 +51,8 @@ def _switches_off(command: str, homes: tuple = (), cwd: str = "") -> bool:
             continue
         if _SETTINGS.search(text) and (_HOOKS_WORD.search(text) or _FOREMAN.search(text)):
             return True
+        if entered and _FOREMAN.search(text):  # inside the home: `rm -rf cache/foreman-gate/…`
+            return True
         if (any(h.named_in(text) for h in homes) or any(h.names_bare(text) for h in entered)) and (
                 _HOOKS_WORD.search(text) or _FOREMAN.search(text)):
             return True  # in a home CLAUDE_CONFIG_DIR moved, or a bare file name after a `cd` into a home
